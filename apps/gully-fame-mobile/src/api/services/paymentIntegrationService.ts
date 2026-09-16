@@ -1,9 +1,4 @@
-/**
- * Payment Integration Service
- * KIRO: Complete payment flow with Razorpay
- * Handles: Coin purchase → Payment → Verification → Wallet update
- * PRODUCTION READY: All endpoints use centralized API_ENDPOINTS configuration
- */
+
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
@@ -52,10 +47,9 @@ export interface SupportPaymentRequest {
   message?: string;
 }
 
-/**
- * Get available coin packages
- * KIRO: Fetch coin purchase packages
- */
+
+
+
 export async function getCoinPackages(): Promise<ApiResponse<CoinPackage[]>> {
   try {
     console.log("[paymentIntegrationService] Fetching coin packages");

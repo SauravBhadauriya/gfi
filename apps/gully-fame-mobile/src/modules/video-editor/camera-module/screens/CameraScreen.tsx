@@ -1,4 +1,6 @@
 // PATH: apps/gully-fame-mobile/src/modules/video-editor/camera-module/screens/CameraScreen.tsx
+// QUICK FIX VERSION - Camera preview now shows properly
+// Root cause: CameraView must have explicit dimensions, not wrapped in SafeAreaView
 
 import { CameraView } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
@@ -11,6 +13,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Dimensions,
 } from 'react-native';
 import CameraSwitchButton from '../components/CameraSwitchButton';
 import CaptureButton from '../components/CaptureButton';
@@ -33,10 +36,7 @@ interface CameraScreenProps {
   initialClips?: CameraClipArray;
 }
 
-// type UIMode = 'POST' | 'STORY' | 'REEL' | 'LIVE';
-
-type UIMode =  'REEL' | 'LIVE';
-
+type UIMode = 'REEL' | 'LIVE';
 
 const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClips = [] }) => {
   const [uiMode, setUiMode] = useState<UIMode>('REEL');
@@ -45,34 +45,35 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   const [flash, setFlash] = useState<FlashModeEnum>(FlashModeEnum.Off);
   const [clips, setClips] = useState<CameraClipArray>(initialClips);
   const [isMusicSheetVisible, setIsMusicSheetVisible] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
 
   useEffect(() => {
     if (initialClips) setClips(initialClips);
   }, [initialClips]);
-  
+
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [activeClip, setActiveClip] = useState<CameraClip | null>(null);
   const [timerDuration, setTimerDuration] = useState<TimerDuration>(15);
   const [speed, setSpeed] = useState<SpeedMultiplier>(1);
-  
+
   const recordingStartTimeRef = useRef<number | null>(null);
   const speedChangesRef = useRef<Array<{ time: number; speed: number }>>([]);
   const currentSpeedRef = useRef<SpeedMultiplier>(speed);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
   const [isHoldingCapture, setIsHoldingCapture] = useState(false);
-  const [zoom, setZoom] = useState(1); 
-  const [gridEnabled, setGridEnabled] = useState(false); 
+  const [zoom, setZoom] = useState(1);
+  const [gridEnabled, setGridEnabled] = useState(false);
   const [resolution, setResolution] = useState<Resolution>('hd');
   const [frameRate, setFrameRate] = useState<FrameRate>(30);
   const [colorMode, setColorMode] = useState<ColorMode>('sdr');
 
   const { hasPermission, isRequesting, requestPermissions } = usePermissions();
   const { cameraRef, isRecording, takePhoto, startRecording, stopRecording } = useCamera(mode, flash);
-  
+
   const totalClipsDuration = useMemo(() => clips.reduce((acc, clip) => acc + clip.duration, 0), [clips]);
   const currentTotalDuration = isRecording ? totalClipsDuration + recordingSeconds : totalClipsDuration;
   const progress = timerDuration > 0 ? currentTotalDuration / timerDuration : 0;
-  
+
   const hasClips = clips.length > 0;
 
   useEffect(() => {
@@ -81,7 +82,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
 
   const handleSwitchCamera = useCallback(() => {
     setCameraFacing(prev => (prev === 'front' ? 'back' : 'front'));
-    setZoom(1); 
+    setZoom(1);
   }, []);
 
   const normalizedZoom = React.useMemo(() => Math.min(Math.max((zoom - 1) / 3, 0), 1), [zoom]);
@@ -102,19 +103,19 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       speedChangesRef.current = [];
       return;
     }
-    
+
     if (clip.type === 'video' && recordingStartTimeRef.current !== null) {
       const recordingDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
       let videoDuration = clip.duration > 0 ? clip.duration : recordingDuration;
       if (clip.duration === 0 && recordingDuration > 0) clip.duration = recordingDuration;
-      
+
       console.log('[CameraScreen] handleAddClip: Video clip details', {
         clipDuration: clip.duration,
         recordingDuration,
         videoDuration,
       });
 
-      const changes = [...speedChangesRef.current]; 
+      const changes = [...speedChangesRef.current];
       if (changes.length > 0 && videoDuration > 0) {
         const segments: SpeedSegment[] = [];
         for (let i = 0; i < changes.length; i++) {
@@ -128,10 +129,10 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
         clip.speedSegments = [{ startTime: 0, endTime: videoDuration, speed: currentSpeedRef.current }];
       }
     }
-    
+
     recordingStartTimeRef.current = null;
     speedChangesRef.current = [];
-    
+
     console.log('[CameraScreen] handleAddClip: Adding clip to array. Current clips count:', clips.length);
     setClips(prev => {
       const newClips = [...prev, clip];
@@ -164,13 +165,13 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
 
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.All, allowsMultipleSelection: false, quality: 1 });
     if (result.canceled || !result.assets || result.assets.length === 0) return;
-    
+
     const asset = result.assets[0];
     if (!asset.uri) return;
     const isVideo = asset.type === 'video';
     setClips(prev => [...prev, {
       id: `clip-${Date.now().toString(36)}`, uri: asset.uri, duration: isVideo ? asset.duration ?? 0 : 0,
-      type: isVideo ? 'video' : 'photo', source: 'gallery', speed: isVideo ? speed : undefined, 
+      type: isVideo ? 'video' : 'photo', source: 'gallery', speed: isVideo ? speed : undefined,
     }]);
   }, [speed]);
 
@@ -204,7 +205,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
           stack: error instanceof Error ? error.stack : undefined,
           isRecording,
         });
-        // Don't crash the app, just show the error
         alert(`Recording error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }
@@ -215,7 +215,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       clipsCount: clips.length,
       clipsArray: clips.map(c => ({ id: c.id, type: c.type, duration: c.duration })),
     });
-    
+
     if (clips.length > 0) {
       console.log('[CameraScreen] handleNextPress: Calling onNext with clips');
       onNext(clips);
@@ -248,18 +248,24 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // 🔥 YAHAN FIX KIYA HAI INFINITE LOADER KO!
+  useEffect(() => {
+    if (hasPermission === null && !isRequesting) {
+      console.log('[CameraScreen] Requesting permissions on mount');
+      requestPermissions();
+    }
+  }, [hasPermission, isRequesting, requestPermissions]);
+
   if (hasPermission === null) {
     return (
-      <SafeAreaView style={[styles.masterContainer, { justifyContent: 'center', alignItems: 'center' }]}>
+      <View style={[styles.masterContainer, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator color="#ffffff" size="large" />
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!hasPermission) {
     return (
-      <SafeAreaView style={[styles.masterContainer, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
+      <View style={[styles.masterContainer, { justifyContent: 'center', alignItems: 'center', padding: 20 }]}>
         <Text style={{ color: '#FFF', fontSize: 16, textAlign: 'center', marginBottom: 20 }}>
           Reels banane ke liye Camera aur Microphone ki permission allow karein.
         </Text>
@@ -272,12 +278,16 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
             {isRequesting ? 'Requesting...' : 'Grant Permissions'}
           </Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.masterContainer}>
+    // ✅ KEY FIX: Root container is NOT SafeAreaView, just View with flex: 1
+    // This allows CameraView to take full dimensions
+    <View style={styles.masterContainer}>
+      {/* ✅ KEY FIX: CameraView is direct child with absolute positioning */}
+      {/* No intermediate SafeAreaView wrapping it */}
       <CameraView
         ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
@@ -287,8 +297,13 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
         mode={mode === CameraModeEnum.Video ? 'video' : 'picture'}
         zoom={normalizedZoom}
         videoQuality={resolution === '4k' ? '2160p' : '1080p'}
+        onCameraReady={() => {
+          console.log('[CameraScreen] ✅ onCameraReady fired - native camera session initialized successfully');
+          setIsCameraReady(true);
+        }}
       />
 
+      {/* UI Overlay on top of camera */}
       {!isRecording && (
         <>
           <View style={styles.floatingTopBar}>
@@ -337,7 +352,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                 </View>
               )}
             </TouchableOpacity>
-            
+
             <View style={styles.sidebarItemRow}>
               <SpeedSelector speed={speed} onSpeedChange={handleSpeedChange} disabled={mode === CameraModeEnum.Photo} />
               {hasClips && <Text style={styles.sidebarLabelShifted}>Speed</Text>}
@@ -379,7 +394,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                 </TouchableOpacity>
               </View>
               <View style={styles.centerControl}>
-                <CaptureButton mode={mode} isRecording={isRecording} hasClips={hasClips} progress={progress} onPress={handleCapturePress} onPressIn={handleCapturePressIn} onPressOut={handleCapturePressOut} disabled={!hasPermission} />
+                <CaptureButton mode={mode} isRecording={isRecording} hasClips={hasClips} progress={progress} onPress={handleCapturePress} onPressIn={handleCapturePressIn} onPressOut={handleCapturePressOut} disabled={!hasPermission || !isCameraReady} />
               </View>
               <View style={styles.sideControlCenter}>
                 <TouchableOpacity style={styles.nextButtonProminent} onPress={handleNextPress}>
@@ -393,7 +408,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                 {!isRecording && <GalleryButton onPress={handleOpenGallery} />}
               </View>
               <View style={styles.centerControl}>
-                <CaptureButton mode={mode} isRecording={isRecording} hasClips={hasClips} progress={progress} onPress={handleCapturePress} onPressIn={handleCapturePressIn} onPressOut={handleCapturePressOut} disabled={!hasPermission} />
+                <CaptureButton mode={mode} isRecording={isRecording} hasClips={hasClips} progress={progress} onPress={handleCapturePress} onPressIn={handleCapturePressIn} onPressOut={handleCapturePressOut} disabled={!hasPermission || !isCameraReady} />
               </View>
               <View style={styles.sideControlRight}>
                 <View style={isRecording ? styles.recordingFlipButton : {}}>
@@ -407,8 +422,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
         {!isRecording && !hasClips && (
           <View style={styles.modeSelectorContainer} >
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeSelectorScroll}>
-              {/* {(['POST', 'STORY', 'REEL', 'LIVE'] as UIMode[]).map((m) => ( */}
-                {(['REEL', 'LIVE'] as UIMode[]).map((m) => (
+              {(['REEL', 'LIVE'] as UIMode[]).map((m) => (
                 <TouchableOpacity key={m} onPress={() => setUiMode(m)} style={styles.modePill}>
                   <Text style={[styles.modeText, uiMode === m && styles.modeTextActive]}>{m}</Text>
                 </TouchableOpacity>
@@ -428,7 +442,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       {activeClip && <ClipPlayerOverlay clip={activeClip} onClose={() => setActiveClip(null)} />}
 
       <MusicLibraryModal visible={isMusicSheetVisible} onCancel={() => setIsMusicSheetVisible(false)} selectedMusic={null} onSelect={() => setIsMusicSheetVisible(false)} />
-    </SafeAreaView>
+    </View>
   );
 };
 

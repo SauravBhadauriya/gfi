@@ -7,6 +7,7 @@
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
 import * as FileSystem from "expo-file-system";
+import { File } from "expo-file-system";
 
 export interface KYCDocument {
   type: "aadhar" | "pan" | "driving_license" | "passport";
@@ -49,10 +50,21 @@ export async function uploadKYCDocument(
   try {
     console.log("[kycVerificationService] Uploading KYC document:", documentType);
 
-    // Get file info
-    const fileInfo = await FileSystem.getInfoAsync(imageUri);
-    if (!fileInfo.exists) {
-      throw new Error("Document image not found");
+    // Get file info using new API
+    const imageFile = new File(imageUri);
+    let fileExists = true;
+    try {
+      await imageFile.getInfo();
+    } catch (error) {
+      console.warn("[kycVerificationService] File info failed, trying legacy:", error);
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(imageUri);
+        if (!fileInfo.exists) {
+          throw new Error("Document image not found");
+        }
+      } catch (legacyError) {
+        throw new Error("Document image not found");
+      }
     }
 
     // KIRO: Create FormData for multipart upload

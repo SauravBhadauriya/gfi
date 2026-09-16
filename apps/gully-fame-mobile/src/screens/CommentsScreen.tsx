@@ -296,7 +296,7 @@ export default function CommentsScreen({ route, navigation }: CommentsScreenProp
         <FlatList
           data={comments}
           renderItem={({ item }) => renderCommentItem(item)}
-          keyExtractor={(item) => item?._id || Math.random().toString()}
+          keyExtractor={(item, index) => item?._id || `comment-${index}`}
           onRefresh={handleRefresh}
           refreshing={refreshing}
           onEndReached={handleLoadMore}

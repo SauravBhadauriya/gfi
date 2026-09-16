@@ -18,7 +18,7 @@ import Svg, { Path, Circle } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
-import { getUserSession } from "../../../src/utils/userSession";
+import { getUserSession } from "@utils/userSession";
 
 const { width } = Dimensions.get("window");
 

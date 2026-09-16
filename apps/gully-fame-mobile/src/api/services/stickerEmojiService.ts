@@ -1,8 +1,3 @@
-/**
- * Sticker & Emoji Library Service
- * Manages stickers, emojis, and decorative elements for video editor
- * KIRO: Real-time backend integration for production
- */
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";

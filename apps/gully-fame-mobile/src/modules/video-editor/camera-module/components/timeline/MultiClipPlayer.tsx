@@ -1,4 +1,4 @@
-import { Video, ResizeMode } from 'expo-video';
+import { Video } from 'expo-video';
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { CameraClip } from '../../types/camera.types';
@@ -265,7 +265,7 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
           source={{ uri: clip.uri }}
           style={[styles.media, { width: '100%', height: '100%' }] as any}
           filter={filter as any}
-          resizeMode={ResizeMode.CONTAIN}
+          resizeMode="contain"
           shouldPlay={false}
           isLooping={false}
           rate={currentSpeed}

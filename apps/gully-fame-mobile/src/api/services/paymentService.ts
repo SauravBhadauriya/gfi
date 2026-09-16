@@ -4,8 +4,11 @@ import { ApiResponse } from '../types';
 
 let RazorpayCheckout: any = null;
 
+// Load Razorpay key from environment - production requires valid key
+const RAZORPAY_KEY_ID = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '';
+
 const isRazorpayAvailable = () => {
-  return false;
+  return !!RAZORPAY_KEY_ID;
 };
 
 export interface PaymentOrderData {
@@ -56,14 +59,26 @@ export interface PaymentError {
   };
 }
 
-// Load from environment variable - never hardcode payment keys
-const RAZORPAY_KEY_ID = process.env.EXPO_PUBLIC_RAZORPAY_KEY_ID || '';
-
-const getMockUserData = () => ({
-  email: 'user@example.com',
-  contact: '9999999999',
-  name: 'Test User',
-});
+// Fetch actual user data from auth service - don't use hardcoded mock
+async function getUserPaymentData() {
+  try {
+    // Import auth service to get actual user data
+    const { getCurrentUser } = await import('./authService');
+    const user = await getCurrentUser();
+    return {
+      email: user?.email || '',
+      contact: user?.phone || '',
+      name: user?.name || user?.username || '',
+    };
+  } catch (error) {
+    console.error('[paymentService] Failed to fetch user data:', error);
+    return {
+      email: '',
+      contact: '',
+      name: '',
+    };
+  }
+}
 
 export async function createPaymentOrder(data: PaymentOrderData): Promise<ApiResponse<{ orderId: string; amount: number; currency: string }>> {
   const endpoint = 'payments/create-order';
@@ -170,11 +185,96 @@ export interface PaymentResult {
 export const initiateRazorpayPayment = async (
   params: InitiatePaymentParams
 ): Promise<PaymentResult> => {
-  return {
-    success: false,
-    error: 'Payment feature is temporarily disabled. Will be enabled when payment APIs are ready.',
-    errorCode: 'FEATURE_DISABLED',
-  };
+  if (!isRazorpayAvailable()) {
+    return {
+      success: false,
+      error: 'Razorpay key not configured. Contact support if issue persists.',
+      errorCode: 'SDK_NOT_INITIALIZED',
+    };
+  }
+
+  // Check if Razorpay SDK is available
+  if (Platform.OS === 'android' && !RazorpayCheckout) {
+    try {
+      // Try to load Razorpay SDK - requires native module
+      const RazorpayCheckoutModule = require('react-native-razorpay');
+      RazorpayCheckout = RazorpayCheckoutModule.default || RazorpayCheckoutModule;
+    } catch (error) {
+      console.error('[paymentService] Razorpay SDK not available:', error);
+      return {
+        success: false,
+        error: 'Payment SDK not available. Please rebuild the app with native modules enabled.',
+        errorCode: 'SDK_NOT_AVAILABLE',
+      };
+    }
+  }
+
+  if (Platform.OS === 'ios') {
+    // iOS requires different handling - typically via web or native SDK
+    console.warn('[paymentService] iOS Razorpay not yet implemented');
+    return {
+      success: false,
+      error: 'Payment unavailable on iOS. Use web version or contact support.',
+      errorCode: 'SDK_NOT_AVAILABLE',
+    };
+  }
+
+  try {
+    const options: RazorpayOptions = {
+      description: params.description || 'Gully Fame Purchase',
+      image: params.image || '',
+      currency: params.currency || 'INR',
+      key: RAZORPAY_KEY_ID,
+      amount: params.amount.toString(), // Amount in paise
+      name: 'Gully Fame',
+      prefill: {
+        email: params.email,
+        contact: params.contact,
+        name: params.name,
+      },
+      theme: {
+        color: '#3399cc',
+      },
+      order_id: params.orderId,
+    };
+
+    return new Promise((resolve) => {
+      RazorpayCheckout.open(
+        options,
+        (result: PaymentResponse) => {
+          // Success - user completed payment
+          resolve({
+            success: true,
+            paymentId: result.razorpay_payment_id,
+            orderId: result.razorpay_order_id,
+          });
+        },
+        (error: PaymentError) => {
+          // Error - payment failed or cancelled
+          if (error.code === 'BAD_REQUEST_ERROR' && error.description?.includes('cancelled')) {
+            resolve({
+              success: false,
+              error: 'Payment cancelled by user',
+              errorCode: 'USER_CANCELLED',
+            });
+          } else {
+            resolve({
+              success: false,
+              error: error.description || 'Payment failed',
+              errorCode: error.code || 'PAYMENT_FAILED',
+            });
+          }
+        }
+      );
+    });
+  } catch (error: any) {
+    console.error('[paymentService] initiateRazorpayPayment error:', error);
+    return {
+      success: false,
+      error: error.message || 'Payment processing failed',
+      errorCode: 'NETWORK_ERROR',
+    };
+  }
 };
 
 export const handlePaymentError = (result: PaymentResult) => {

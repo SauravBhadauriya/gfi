@@ -19,7 +19,7 @@ import {
   Keyboard,
   ActivityIndicator,
 } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
 import { ChatMessageAPIData, chatService } from "@api/services/chatService";
@@ -246,6 +246,43 @@ export default function ChatDetailScreen() {
       socketChatService.disconnect();
     };
   }, [chatUserId, currentUserId]);
+
+  // Auto-reconnect socket if disconnected when screen comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      if (chatUserId && chatUserId !== "new" && currentUserId) {
+        // Check if socket is disconnected and reconnect if needed
+        if (!socketChatService.isConnected()) {
+          console.log("[ChatDetailScreen] Socket disconnected on focus, reconnecting...");
+          socketChatService.connect(chatUserId, {
+            onMessageReceived: (newMessage: ChatMessageAPIData) => {
+              console.log("[ChatDetailScreen] Real-time message received:", newMessage._id);
+              setMessages((prev) => {
+                if (prev.find((m) => m._id === newMessage._id)) {
+                  return prev;
+                }
+                return [...prev, newMessage];
+              });
+            },
+            onConnected: () => {
+              console.log("[ChatDetailScreen] Socket reconnected");
+              setSocketConnected(true);
+              setSocketError(null);
+              socketChatService.markConversationRead(chatUserId);
+            },
+            onDisconnected: () => {
+              console.log("[ChatDetailScreen] Socket disconnected");
+              setSocketConnected(false);
+            },
+            onError: (error: string) => {
+              console.error("[ChatDetailScreen] Socket error:", error);
+              setSocketError(error);
+            },
+          }).catch(err => console.error("[ChatDetailScreen] Reconnect error:", err));
+        }
+      }
+    }, [chatUserId, currentUserId])
+  );
   useEffect(() => {
     if (scrollViewRef.current && messages.length > 0) {
       setTimeout(() => {
@@ -322,7 +359,10 @@ export default function ChatDetailScreen() {
   };
 
   const handleMicPress = () => {
-    Alert.alert("Voice Recording", "Voice recording feature coming soon!");
+    // Voice recording feature not implemented in managed Expo workflow
+    // Would require native audio module (expo-av supports playback but not voice memo recording)
+    // TODO: Implement voice message recording when available
+    console.warn("[ChatDetailScreen] Voice recording not implemented");
   };
 
   
@@ -698,12 +738,12 @@ export default function ChatDetailScreen() {
                     Delete
                   </Text>
                 </TouchableOpacity>
-                {}
+                {/* React button - currently no emoji picker implementation */}
                 <TouchableOpacity
                   style={styles.actionBarButton}
-                  onPress={() => {}}
+                  disabled={true}
                 >
-                  <Text style={styles.actionBarButtonText}>React</Text>
+                  <Text style={[styles.actionBarButtonText, { opacity: 0.5 }]}>React</Text>
                 </TouchableOpacity>
                 {}
                 <TouchableOpacity

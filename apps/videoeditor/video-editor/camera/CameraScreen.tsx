@@ -3,6 +3,7 @@
 import React, { useState, useCallback } from 'react';
 import { ActivityIndicator, SafeAreaView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera'; 
+import { useIsFocused } from '@react-navigation/native'; // 🚀 1. NEW IMPORT
 import HDSelector from '@/camera-module/components/HDSelector';
 
 /**
@@ -12,6 +13,9 @@ import HDSelector from '@/camera-module/components/HDSelector';
  * - Renders a stable CameraView component from expo-camera
  */
 const CameraScreen: React.FC = () => {
+  // 🚀 2. ADDED FOCUS HOOK
+  const isFocused = useIsFocused();
+
   // Use Expo's native hooks to prevent Android deadlocks
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -61,13 +65,17 @@ const CameraScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       {/* 1. Preview Area */}
       <View style={styles.previewArea}>
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          flash="off"
-          // We map resolution string properly for Expo Camera
-          videoQuality={config.resolution === '4k' ? '2160p' : '1080p'} 
-        />
+        {/* 🚀 3. ADDED CONDITION AND mode="video" */}
+        {isFocused && (
+          <CameraView
+            style={styles.camera}
+            facing="back"
+            flash="off"
+            mode="video" // <--- YEH BAHUT ZAROORI THA!
+            // We map resolution string properly for Expo Camera
+            videoQuality={config.resolution === '4k' ? '2160p' : '1080p'} 
+          />
+        )}
       </View>
 
       {/* 2. Controls Area */}

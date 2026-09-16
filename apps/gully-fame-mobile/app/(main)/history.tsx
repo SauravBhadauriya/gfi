@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -9,61 +9,113 @@ import {
   TouchableOpacity,
   StatusBar,
   Platform,
+  ActivityIndicator,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
 
-
-const transactionData = [
-  {
-    id: "1",
-    title: "Referral Bonus",
-    description: "Invited Rahul to Gully Fame",
-    amount: 50,
-    type: "credit",
-    date: "03 Jul 2026",
-    time: "02:30 PM",
-    icon: "gift-outline",
-  },
-  {
-    id: "2",
-    title: "Won Rap Battle",
-    description: "1st Prize in Weekly Competition",
-    amount: 250,
-    type: "credit",
-    date: "01 Jul 2026",
-    time: "10:15 AM",
-    icon: "trophy-outline",
-  },
-  {
-    id: "3",
-    title: "Bank Withdrawal",
-    description: "Transferred to UPI: ****890",
-    amount: 200,
-    type: "debit",
-    date: "28 Jun 2026",
-    time: "06:45 PM",
-    icon: "wallet-outline",
-  },
-  {
-    id: "4",
-    title: "Daily Check-in",
-    description: "Day 3 Streak Bonus",
-    amount: 10,
-    type: "credit",
-    date: "28 Jun 2026",
-    time: "09:00 AM",
-    icon: "calendar-outline",
-  },
-];
+interface Transaction {
+  id: string;
+  title: string;
+  description: string;
+  amount: number;
+  type: "credit" | "debit";
+  date: string;
+  time: string;
+  icon: string;
+  status?: string;
+}
 
 export default function HistoryScreen() {
   const [filter, setFilter] = useState<"all" | "credit" | "debit">("all");
+  const [transactionData, setTransactionData] = useState<Transaction[]>([]);
+  const [totalBalance, setTotalBalance] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  
-  const totalBalance = 1500;
+  // Fetch real wallet data and transaction history from backend
+  const fetchWalletData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { userService } = await import("@/api/services/userService");
+      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
 
-  
+      // Fetch wallet balance
+      const walletResult = await userService.getWalletBalance();
+      if (walletResult.success && walletResult.data) {
+        setTotalBalance(walletResult.data.balance || 0);
+      }
+
+      // Fetch payment/transaction history
+      const historyResult = await paymentIntegrationService.getPaymentHistory(10, 0);
+      
+      if (historyResult.success && Array.isArray(historyResult.data)) {
+        const mappedTransactions = historyResult.data.map((tx: any, index: number) => {
+          const txDate = new Date(tx.timestamp || new Date());
+          return {
+            id: tx.transactionId || tx.id || `tx_${index}`,
+            title: tx.description || getTransactionTitle(tx.type),
+            description: tx.notes || tx.remark || getTransactionDescription(tx),
+            amount: Math.abs(tx.amount || 0),
+            type: tx.type === "debit" || tx.amount < 0 ? "debit" : "credit",
+            date: txDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+            time: txDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+            icon: getTransactionIcon(tx.type, tx.description),
+            status: tx.status,
+          };
+        });
+        setTransactionData(mappedTransactions);
+      } else {
+        // If no transaction history, show empty state
+        setTransactionData([]);
+      }
+    } catch (error) {
+      console.error("[history] Error fetching wallet data:", error);
+      setTransactionData([]);
+      setTotalBalance(0);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Refetch when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchWalletData();
+    }, [fetchWalletData])
+  );
+
+  // Helper function to get transaction title
+  const getTransactionTitle = (type: string): string => {
+    switch (type) {
+      case "credit":
+        return "Coins Earned";
+      case "debit":
+        return "Coins Spent";
+      case "withdrawal":
+        return "Withdrawal";
+      default:
+        return "Transaction";
+    }
+  };
+
+  // Helper function to get transaction description
+  const getTransactionDescription = (tx: any): string => {
+    if (tx.competitionName) return `Won in ${tx.competitionName}`;
+    if (tx.reelId) return `Support on reel`;
+    if (tx.referralCode) return `Referral bonus`;
+    if (tx.withdrawalMethod) return `Withdrawn to ${tx.withdrawalMethod}`;
+    return "Transaction";
+  };
+
+  // Helper function to get transaction icon
+  const getTransactionIcon = (type: string, description: string): string => {
+    if (description?.includes("competition") || description?.includes("prize")) return "trophy-outline";
+    if (description?.includes("reel") || description?.includes("support")) return "heart-outline";
+    if (description?.includes("referral") || description?.includes("invite")) return "gift-outline";
+    if (type === "debit") return "wallet-outline";
+    return "checkmark-circle-outline";
+  };
+
   const filteredTransactions = transactionData.filter((item) => {
     if (filter === "all") return true;
     return item.type === filter;
@@ -73,7 +125,7 @@ export default function HistoryScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3C2610" />
 
-      {}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
@@ -82,30 +134,44 @@ export default function HistoryScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color="#EC9A15" />
+          <Text style={{ color: "#999", marginTop: 12 }}>Loading wallet data...</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {}
+        {/* Wallet Card */}
         <View style={styles.walletCard}>
           <Text style={styles.walletLabel}>Total Available Balance</Text>
           <View style={styles.balanceRow}>
             <FontAwesome5 name="coins" size={28} color="#EC9A15" style={styles.coinIcon} />
-            <Text style={styles.balanceAmount}>{totalBalance}</Text>
+            <Text style={styles.balanceAmount}>{totalBalance.toLocaleString()}</Text>
           </View>
           
           <View style={styles.walletActions}>
-            <TouchableOpacity style={styles.withdrawButton} activeOpacity={0.8}>
+            <TouchableOpacity 
+              style={styles.withdrawButton} 
+              activeOpacity={0.8}
+              onPress={() => router.push("/(main)/coins" as any)}
+            >
               <MaterialIcons name="account-balance" size={20} color="#fff" />
               <Text style={styles.withdrawButtonText}>Withdraw</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.earnMoreButton} onPress={() => router.push("/(main)/invite-friend" as any)} activeOpacity={0.8}>
+            <TouchableOpacity 
+              style={styles.earnMoreButton} 
+              onPress={() => router.push("/(main)/invite-friend" as any)} 
+              activeOpacity={0.8}
+            >
               <Ionicons name="gift" size={20} color="#EC9A15" />
               <Text style={styles.earnMoreText}>Earn More</Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {}
+        {/* Filter Tabs */}
         <View style={styles.filterContainer}>
           <TouchableOpacity 
             style={[styles.filterTab, filter === "all" && styles.activeFilterTab]} 
@@ -129,7 +195,6 @@ export default function HistoryScreen() {
           </TouchableOpacity>
         </View>
 
-        {}
         <View style={styles.transactionsContainer}>
           <Text style={styles.sectionTitle}>Recent Transactions</Text>
           
@@ -148,7 +213,7 @@ export default function HistoryScreen() {
                 
                 <View style={styles.txAmountContainer}>
                   <Text style={[styles.txAmount, { color: tx.type === 'credit' ? '#25D366' : '#FF4444' }]}>
-                    {tx.type === 'credit' ? '+' : '-'}{tx.amount}
+                    {tx.type === 'credit' ? '+' : '-'}{tx.amount.toLocaleString()}
                   </Text>
                   <Text style={styles.txCoinText}>Coins</Text>
                 </View>
@@ -157,12 +222,17 @@ export default function HistoryScreen() {
           ) : (
             <View style={styles.emptyState}>
               <Ionicons name="receipt-outline" size={50} color="#666" />
-              <Text style={styles.emptyStateText}>No transactions found</Text>
+              <Text style={styles.emptyStateText}>
+                {filter === "all" 
+                  ? "No transactions yet" 
+                  : `No ${filter === "credit" ? "earned" : "withdrawn"} transactions`}
+              </Text>
             </View>
           )}
         </View>
 
       </ScrollView>
+      )}
     </View>
   );
 }

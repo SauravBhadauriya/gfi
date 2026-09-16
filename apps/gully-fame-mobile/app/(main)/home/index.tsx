@@ -9,20 +9,21 @@ import {
   View,
   Platform,
   Animated,
-  Alert,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { homeScreenStyles as styles } from "@/styles/homeScreenStyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import BottomNav from "../../../src/components/layout/BottomNav";
-import DrawerMenu from "../../../src/components/layout/DrawerMenu";
-import { ReelViewer } from "../../../src/components/reel/ReelViewer";
-import { hp } from "../../../src/utils/responsive";
+import BottomNav from "@components/layout/BottomNav";
+import DrawerMenu from "@components/layout/DrawerMenu";
+import { ReelViewer } from "@components/reel/ReelViewer";
+import { hp } from "@utils/responsive";
 import RoleBasedBanner from "@/components/home/RoleBasedBanner/RoleBasedBanner";
 import Svg, { Rect, Defs, RadialGradient, Stop } from "react-native-svg";
+import { getUnreadNotificationCount } from "@/api/services/notificationIntegrationService";
 import {
   NotificationIcon,
   ChatIcon,
@@ -44,12 +45,6 @@ import HeroBannerCarousel from "@/components/home/HeroBannerCarousel/HeroBannerC
 import CategoriesCarousel from "@/components/home/CategoriesCarousel/CategoriesCarousel";
 import { apiClient } from "@/api";
 import { feedService } from "@/api/services/feedService";
-import {
-  fallbackCategories,
-  upcomingCompetitionsMock,
-  pastCompetitionsMock,
-  heroSlides,
-} from "@/data/home/mockData";
 import { BASE_URL } from "@/api/axios";
 import { convertToFormattedString } from "@/utils/convertToFormattedString";
 import { convertToFormattedPrize } from "@/utils/convertToFormattedPrize";
@@ -57,107 +52,162 @@ import { convertDateToDaysLeft } from "@/utils/convertDateToDaysLeft";
 
 const getDimensions = () => Dimensions.get("window");
 
+// API timeout wrapper - outside component to avoid JSX generic syntax issues
+const withTimeout = <T extends any>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`API call timed out after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ]);
+};
+
 export default function GullyFameHome() {
   const [activeTab, setActiveTab] = useState("Home");
+  const [unreadCount, setUnreadCount] = useState(0);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [dimensions, setDimensions] = useState(getDimensions());
   const insets = useSafeAreaInsets();
 
-  
   const [feedTab, setFeedTab] = useState<"trending" | "for-you" | "popular" | "saved">("trending");
   const [feedLoading, setFeedLoading] = useState(false);
 
-  
   const [banners, setBanners] = useState<homePageHeroSlidesAPIData[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [trendingData, setTrendingData] = useState<any[]>([]);
   const [forYouData, setForYouData] = useState<any[]>([]);
   const [popularData, setPopularData] = useState<any[]>([]);
   const [savedData, setSavedData] = useState<any[]>([]);
-  const [liveCompetitions, setLiveCompetitions] = useState<any[]>(upcomingCompetitionsMock);
-  const [pastCompetitions, setPastCompetitions] = useState<any[]>(pastCompetitionsMock);
-  const [upcomingCompetitions, setUpcomingCompeitions] = useState<any[]>(upcomingCompetitionsMock);
+  const [liveCompetitions, setLiveCompetitions] = useState<any[]>([]);
+  const [pastCompetitions, setPastCompetitions] = useState<any[]>([]);
+  const [upcomingCompetitions, setUpcomingCompeitions] = useState<any[]>([]);
   const [topCompetitors, setTopCompetitors] = useState<any[]>([]);
 
-  
   const [showReelViewer, setShowReelViewer] = useState(false);
   const [selectedReelIndex, setSelectedReelIndex] = useState(0);
 
-  
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const liveDotBlink = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [scrollY, setScrollY] = useState(0);
 
+  useFocusEffect(
+    React.useCallback(() => {
+      let isMounted = true;
+
+      async function fetchHomePage() {
+        try {
+          const resp = await withTimeout(apiClient.get(`/user/homeScreen`));
+          if (!isMounted) return;
+          
+          if (resp.status !== 200) throw new Error("Error trying to receive home screen api");
+
+          const data = resp.data.data;
+          if (data.banners) setBanners(data.banners);
+          if (data.trending) setTrendingData(data.trending);
+          if (data.liveCompetitions) setLiveCompetitions(data.liveCompetitions);
+          if (data.pastCompetitions) setPastCompetitions(data.pastCompetitions);
+          if (data.upcomingCompetitions) setUpcomingCompeitions(data.upcomingCompetitions);
+          if (data.topCompetitors) setTopCompetitors(data.topCompetitors);
+        } catch (err) {
+          if (!isMounted) return;
+          console.error("[HomeScreen] Error fetching home page data:", err);
+        }
+      }
+
+      async function loadFeedData() {
+        setFeedLoading(true);
+        try {
+          const categoriesResult = await withTimeout(feedService.getCategories());
+          if (!isMounted) return;
+          
+          if (categoriesResult.success && categoriesResult.data) {
+            setCategories(categoriesResult.data as any[]);
+          }
+
+          const trendingResult = await withTimeout(feedService.getTrendingReels(1, 10));
+          if (!isMounted) return;
+          
+          if (trendingResult.success && trendingResult.data) {
+            setTrendingData(trendingResult.data.reels as any[]);
+          }
+
+          const forYouResult = await withTimeout(feedService.getForYouReels(1, 10));
+          if (!isMounted) return;
+          
+          if (forYouResult.success && forYouResult.data) {
+            setForYouData(forYouResult.data.reels as any[]);
+          }
+
+          const popularResult = await withTimeout(feedService.getPopularReels(1, 10));
+          if (!isMounted) return;
+          
+          if (popularResult.success && popularResult.data) {
+            setPopularData(popularResult.data.reels as any[]);
+          }
+
+          const savedResult = await withTimeout(feedService.getSavedReels(1, 10));
+          if (!isMounted) return;
+          
+          if (savedResult.success && savedResult.data) {
+            setSavedData(savedResult.data.reels as any[]);
+          }
+        } catch (err) {
+          if (!isMounted) return;
+          console.error("Error loading feed data:", err);
+        } finally {
+          if (isMounted) {
+            setFeedLoading(false);
+          }
+        }
+      }
+
+      fetchHomePage();
+      loadFeedData();
+
+      return () => {
+        isMounted = false;
+      };
+    }, [])
+  );
+
   useEffect(() => {
-    async function fetchHomePage() {
+    const fetchUnreadCount = async () => {
       try {
-        const resp = await apiClient.get(`/user/homeScreen`);
-        if (resp.status !== 200) throw new Error("Error trying to receive home screen api");
-
-        const data = resp.data.data;
-        if (data.banners) setBanners(data.banners);
-
-        if (data.trending) setTrendingData(data.trending);
-        if (data.liveCompetitions) setLiveCompetitions(data.liveCompetitions);
-        if (data.pastCompetitions) setPastCompetitions(data.pastCompetitions);
-        if (data.upcomingCompetitions) setUpcomingCompeitions(data.upcomingCompetitions);
-        if (data.topCompetitors) setTopCompetitors(data.topCompetitors);
+        const result = await withTimeout(getUnreadNotificationCount());
+        setUnreadCount(result.success && result.data ? result.data.count || 0 : 0);
       } catch (err) {
-        setBanners(heroSlides);
-        console.error("Error fetching home page data:", err);
+        console.error("[HomeScreen] Error fetching unread count:", err);
+        setUnreadCount(0); // Fallback to 0 on error
       }
-    }
+    };
 
-    
-    async function loadFeedData() {
-      try {
-        
-        const categoriesResult = await feedService.getCategories();
-        if (categoriesResult.success && categoriesResult.data) {
-          setCategories(categoriesResult.data as any[]);
-          console.log(`[HomeScreen] Loaded ${categoriesResult.data.length} categories (${categoriesResult.message})`);
-        }
-
-        
-        const trendingResult = await feedService.getTrendingReels(1, 10);
-        if (trendingResult.success && trendingResult.data) {
-          setTrendingData(trendingResult.data.reels as any[]);
-          console.log(`[HomeScreen] Loaded ${trendingResult.data.reels.length} trending reels (${trendingResult.message})`);
-        }
-
-        
-        const forYouResult = await feedService.getForYouReels(1, 10);
-        if (forYouResult.success && forYouResult.data) {
-          setForYouData(forYouResult.data.reels as any[]);
-        }
-
-        
-        const popularResult = await feedService.getPopularReels(1, 10);
-        if (popularResult.success && popularResult.data) {
-          setPopularData(popularResult.data.reels as any[]);
-        }
-
-        
-        const savedResult = await feedService.getSavedReels(1, 10);
-        if (savedResult.success && savedResult.data) {
-          setSavedData(savedResult.data.reels as any[]);
-        }
-      } catch (err) {
-        console.error("Error loading feed data:", err);
-      }
-    }
-
-    fetchHomePage();
-    loadFeedData();
+    fetchUnreadCount();
+    const pollInterval = setInterval(fetchUnreadCount, 30000);
+    return () => clearInterval(pollInterval);
   }, []);
 
-  
+  useFocusEffect(
+    React.useCallback(() => {
+      const refreshUnreadCount = async () => {
+        try {
+          const result = await getUnreadNotificationCount();
+          if (result.success && result.data) {
+            setUnreadCount(result.data.count || 0);
+          }
+        } catch (err) {
+          console.error("[HomeScreen] Error refreshing unread count:", err);
+        }
+      };
+
+      refreshUnreadCount();
+    }, [])
+  );
+
   const liveCompetitionsFull = useMemo(
     () =>
       liveCompetitions.map((comp) => ({
         defaultThumbnailImage: require("@assets/images/trending_reel2.png"),
-        
         people: convertToFormattedString(Number(comp.participants ?? 0)),
         endDate: comp.endDate ? String(comp.endDate) : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
         prize: convertToFormattedPrize(comp.prize),
@@ -211,7 +261,6 @@ export default function GullyFameHome() {
     };
   }, []);
 
-  
   useEffect(() => {
     fadeAnim.setValue(1);
     const blinkAnimation = Animated.loop(
@@ -283,9 +332,9 @@ export default function GullyFameHome() {
     }
   };
 
+  // Removed 'user_progress' section since it contained hardcoded gamification dummy data
   const homeSections = [
     { id: "hero" },
-    { id: "user_progress" },
     { id: "categories" },
     { id: "trending" },
     { id: "live" },
@@ -325,7 +374,7 @@ export default function GullyFameHome() {
               >
                 <NotificationIcon />
                 <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>3</Text>
+                  <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
                 </View>
               </TouchableOpacity>
               <TouchableOpacity
@@ -339,42 +388,10 @@ export default function GullyFameHome() {
           </View>
         );
 
-      case "user_progress":
-        return (
-          <View style={styles.gamificationCardWrapper}>
-            <LinearGradient colors={["#2A1A0A", "#1E1111"]} style={styles.gamificationCard}>
-              <View style={styles.gamificationHeader}>
-                <View>
-                  <Text style={styles.gamificationLevelTitle}>Street Hustler</Text>
-                  <Text style={styles.gamificationLevelSub}>Level 12</Text>
-                </View>
-                <View style={styles.streakBadge}>
-                  <Text style={styles.streakText}>🔥 5 Day Streak</Text>
-                </View>
-              </View>
-              <View style={styles.progressBarBackground}>
-                <LinearGradient
-                  colors={["#EC9A15", "#FF3B30"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.progressBarFill, { width: "65%" }]}
-                />
-              </View>
-              <View style={styles.gamificationFooter}>
-                <Text style={styles.gamificationSubtext}>350 XP to Level 13</Text>
-                <TouchableOpacity onPress={() => router.push("/(main)/quests" as any)}>
-                  <Text style={styles.gamificationActionText}>Earn XP ▸</Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </View>
-        );
-
       case "categories":
         return <CategoriesCarousel categories={categories}></CategoriesCarousel>;
 
       case "trending":
-        
         const currentFeedData = 
           feedTab === "trending" ? trendingData :
           feedTab === "for-you" ? forYouData :
@@ -389,7 +406,6 @@ export default function GullyFameHome() {
               </View>
             </View>
 
-            {}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -430,7 +446,7 @@ export default function GullyFameHome() {
             {feedLoading ? (
               <View style={{ paddingVertical: 40, justifyContent: "center", alignItems: "center" }}>
                 <ActivityIndicator size="large" color="#EC9A15" />
-                <Text style={{ color: "#999", marginTop: 12 }}>Loading {feedTab} feed...</Text>
+                <Text style={{ color: "#999", marginTop: 12 }}>Loading feed...</Text>
               </View>
             ) : currentFeedData && currentFeedData.length > 0 ? (
               <ScrollView
@@ -489,7 +505,7 @@ export default function GullyFameHome() {
               </ScrollView>
             ) : (
               <View style={{ paddingVertical: 40, justifyContent: "center", alignItems: "center" }}>
-                <Text style={{ color: "#999", fontSize: 14 }}>No reels in {feedTab} feed</Text>
+                <Text style={{ color: "#999", fontSize: 14 }}>No reels available</Text>
               </View>
             )}
           </View>
@@ -615,7 +631,6 @@ export default function GullyFameHome() {
                       <View style={styles.compInfoRow}>
                         <View style={styles.compInfoItem}>
                           <LimitedTimeEventClockIcon />
-                          {}
                           <Text style={styles.upcomingCompDeadline}>
                             {convertDateToDaysLeft(comp.endDate ? String(comp.endDate) : "")} Days Left
                           </Text>
@@ -701,7 +716,6 @@ export default function GullyFameHome() {
                       <View style={styles.compInfoRow}>
                         <View style={styles.compInfoItem}>
                           <LimitedTimeEventClockIcon></LimitedTimeEventClockIcon>
-                          {}
                           <Text style={styles.upcomingCompDeadline}>
                             {convertDateToDaysLeft(comp.endDate ? String(comp.endDate) : "")} Days Left
                           </Text>
@@ -792,7 +806,6 @@ export default function GullyFameHome() {
                       </View>
                       <View style={styles.viewsRow}>
                         <ViewsEyeIcon size={15}></ViewsEyeIcon>
-                        {}
                         <Text style={styles.pastCompViews}>
                           {convertToFormattedString(Number(comp.views ?? 0))} Views
                         </Text>
@@ -818,21 +831,6 @@ export default function GullyFameHome() {
             <Text style={styles.hallOfFameSubtitle}>
               Overall point leaders across all GullyFame events.
             </Text>
-
-            <View style={styles.personalRankBar}>
-              <Text style={styles.personalRankText}>
-                You are currently Rank{" "}
-                <Text
-                  style={{
-                    color: "#EAB04B",
-                    fontWeight: "bold",
-                  }}
-                >
-                  #4,892
-                </Text>
-              </Text>
-              <Text style={styles.personalRankSubtext}>Top 18% of all players</Text>
-            </View>
 
             <ScrollView
               horizontal
@@ -868,7 +866,6 @@ export default function GullyFameHome() {
                   <Text style={styles.hallOfFameName} numberOfLines={1}>
                     {competitor.name}
                   </Text>
-                  {}
                   <Text style={styles.hallOfFamePoints}>
                     {convertToFormattedString(Number(competitor.points ?? 0))} pts
                   </Text>
@@ -890,7 +887,7 @@ export default function GullyFameHome() {
     }
   };
 
-  if (typeof BottomNav !== "function" || typeof DrawerMenu !== "function") return null;
+  //if (typeof BottomNav !== "function" || typeof DrawerMenu !== "function") return null;
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
@@ -911,7 +908,7 @@ export default function GullyFameHome() {
             >
               <NotificationIcon />
               <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>3</Text>
+                <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity
@@ -952,4 +949,3 @@ export default function GullyFameHome() {
     </View>
   );
 }
-

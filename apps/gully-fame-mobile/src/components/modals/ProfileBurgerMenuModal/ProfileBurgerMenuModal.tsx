@@ -9,9 +9,12 @@ import {
   Text,
   Image,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { Svg, Path, Circle, Polyline, Line } from "react-native-svg";
 import { ProfileData } from "@/hooks/profileHooks";
+import { useEffect, useState } from "react";
+import { userService } from "@/api/services/userService";
 
 interface ProfileBurgerMenuModalProps {
   isVisible: boolean;
@@ -19,12 +22,80 @@ interface ProfileBurgerMenuModalProps {
   profileData: ProfileData;
 }
 
+interface UserStats {
+  competitionCount: number;
+  coinsEarned: number;
+  kycStatus: "pending" | "approved" | "rejected" | "completed";
+  walletBalance: number;
+  totalEarnings: number;
+  totalTips: number;
+}
+
 function ProfileBurgerMenuModal({
   isVisible,
   onClose = () => {},
   profileData,
 }: ProfileBurgerMenuModalProps) {
-  
+  const [userStats, setUserStats] = useState<UserStats>({
+    competitionCount: 0,
+    coinsEarned: 0,
+    kycStatus: "pending",
+    walletBalance: 0,
+    totalEarnings: 0,
+    totalTips: 0,
+  });
+  const [loading, setLoading] = useState(false);
+
+  // ✅ Fetch real-time user statistics from backend
+  const fetchUserStats = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch KYC status
+      const kycResponse = await userService.getUserKycStatus();
+      const kycStatus = kycResponse.data?.status || "pending";
+
+      // Fetch wallet/earnings data
+      const walletResponse = await userService.getWalletBalance();
+      const wallet = walletResponse.data || {
+        balance: 0,
+        totalEarnings: 0,
+        totalTips: 0,
+      };
+
+      // Fetch earnings to get total coins
+      const earningsResponse = await userService.getUserEarnings();
+      const totalCoins = earningsResponse.data?.reduce(
+        (sum, earning) => sum + (earning.amount || 0),
+        0
+      ) || 0;
+
+      // Get competitions count from profile or API
+      const competitionCount = profileData.competitionCount || 0;
+
+      setUserStats({
+        competitionCount,
+        coinsEarned: totalCoins,
+        kycStatus,
+        walletBalance: wallet.balance || 0,
+        totalEarnings: wallet.totalEarnings || 0,
+        totalTips: wallet.totalTips || 0,
+      });
+    } catch (error) {
+      console.error("Error fetching user stats:", error);
+      // Fallback to default values on error
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Fetch stats when modal becomes visible
+  useEffect(() => {
+    if (isVisible) {
+      fetchUserStats();
+    }
+  }, [isVisible]);
+
   // ✅ FIXED: Pass metadata query state parameter to capture deep-back history intent
   const handleNavigation = (path: string) => {
     onClose();
@@ -104,7 +175,14 @@ function ProfileBurgerMenuModal({
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
                 <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
               </Svg>
-              <Text style={styles.menuItemText}>Leaderboard Rank</Text>
+              <View style={styles.menuItemWithBadge}>
+                <Text style={styles.menuItemText}>Leaderboard Rank</Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#EC9A15" />
+                ) : (
+                  <Text style={styles.rankBadgeText}>{userStats.competitionCount > 0 ? `${userStats.competitionCount} comps` : "--"}</Text>
+                )}
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/history")}>
@@ -112,7 +190,16 @@ function ProfileBurgerMenuModal({
                 <Circle cx="12" cy="12" r="10" stroke="#EC9A15" strokeWidth={2} />
                 <Path d="M12 6v6l4 2" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" />
               </Svg>
-              <Text style={styles.menuItemText}>Coins Earned</Text>
+              <View style={styles.menuItemWithBadge}>
+                <Text style={styles.menuItemText}>Coins Earned</Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#EC9A15" />
+                ) : (
+                  <Text style={styles.rankBadgeText}>
+                    {userStats.coinsEarned > 0 ? `₹${userStats.coinsEarned.toFixed(2)}` : "₹0"}
+                  </Text>
+                )}
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/saved")}>
@@ -153,12 +240,30 @@ function ProfileBurgerMenuModal({
               <Text style={styles.menuItemText}>Help & Support</Text>
             </TouchableOpacity>
 
+            <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/faq")}>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Circle cx="12" cy="12" r="10" stroke="#EC9A15" strokeWidth={2} />
+                <Text x="12" y="16" textAnchor="middle" stroke="#EC9A15" fill="#EC9A15" fontSize="12" fontWeight="bold">?</Text>
+                <Path d="M12 16v-4M12 8h.01" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" />
+              </Svg>
+              <Text style={styles.menuItemText}>FAQs</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/privacy-policy")}>
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
                 <Path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
               </Svg>
-              <Text style={styles.menuItemText}>Privacy</Text>
+              <Text style={styles.menuItemText}>Privacy Policy</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/terms-of-service")}>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                <Path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+              </Svg>
+              <Text style={styles.menuItemText}>Terms of Service</Text>
+            </TouchableOpacity>
+            
 
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/settings/kyc-status")}>
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
@@ -166,7 +271,16 @@ function ProfileBurgerMenuModal({
                 <Path d="M21 12c-1 0-3-1-3-3s2-3 3-3 3 1 3 3-2 3-3 3" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
                 <Path d="M3 12c1 0 3-1 3-3s-2-3-3-3-3 1-3 3 2 3 3 3" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
               </Svg>
-              <Text style={styles.menuItemText}>KYC Status</Text>
+              <View style={styles.menuItemWithBadge}>
+                <Text style={styles.menuItemText}>KYC Status</Text>
+                {loading ? (
+                  <ActivityIndicator size="small" color="#EC9A15" />
+                ) : (
+                  <Text style={[styles.rankBadgeText, { color: userStats.kycStatus === "approved" ? "#22c55e" : "#EC9A15" }]}>
+                    {userStats.kycStatus.charAt(0).toUpperCase() + userStats.kycStatus.slice(1)}
+                  </Text>
+                )}
+              </View>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/settings/about")}>

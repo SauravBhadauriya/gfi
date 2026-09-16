@@ -3,7 +3,6 @@ import { View, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-
 let VideoEditorModule: any = null;
 
 const CameraUploadScreen = () => {
@@ -15,17 +14,22 @@ const CameraUploadScreen = () => {
   const [roleVerified, setRoleVerified] = useState(false);
   const [isVideoEditorLoaded, setIsVideoEditorLoaded] = useState(false);
 
-  
   useEffect(() => {
     if (showVideoEditor && !isVideoEditorLoaded) {
       (async () => {
         try {
+          console.log('[CameraUploadScreen] Loading VideoEditorModule...');
           const module = await import('@modules/video-editor');
           VideoEditorModule = module.default;
+          console.log('[CameraUploadScreen] VideoEditorModule loaded successfully');
           setIsVideoEditorLoaded(true);
-        } catch (error) {
+        } catch (error: any) {
           console.error('[CameraUploadScreen] Failed to load VideoEditorModule:', error);
-          Alert.alert('Error', 'Failed to load video editor');
+          console.error('[CameraUploadScreen] Error details:', {
+            message: error.message,
+            stack: error.stack,
+          });
+          Alert.alert('Error', `Failed to load video editor: ${error.message}`);
           setShowVideoEditor(false);
         }
       })();
@@ -45,7 +49,6 @@ const CameraUploadScreen = () => {
         );
       } else {
         setRoleVerified(true);
-        
         setShowVideoEditor(true);
       }
     };

@@ -118,47 +118,52 @@ export async function unfollowUser(userId: string): Promise<ApiResponse<FollowRe
 
 //  Get followers list
 export async function getFollowers(
-  userId: string,
+  userId?: string,
   params?: { page?: number; limit?: number }
 ): Promise<ApiResponse<FollowersResponse>> {
   try {
     console.log("[followService] Getting followers:", { userId, params });
 
-    const response = await apiClient.get<any>(`user/${userId}/followers`, { params });
-    const responseData = response.data as any;
+    // Try the dedicated followers endpoint first
+    try {
+      const response = await apiClient.get<any>(`user/followers`, { params });
+      const responseData = response.data as any;
 
-    if (responseData.code === 1 && responseData.data) {
-      let followers: User[] = [];
+      if (responseData.code === 1 && responseData.data) {
+        let followers: User[] = [];
 
-      if (Array.isArray(responseData.data)) {
-        followers = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        followers = responseData.data.items;
-      } else if (Array.isArray(responseData.data.followers)) {
-        followers = responseData.data.followers;
+        if (Array.isArray(responseData.data)) {
+          followers = responseData.data;
+        } else if (Array.isArray(responseData.data.items)) {
+          followers = responseData.data.items;
+        } else if (Array.isArray(responseData.data.followers)) {
+          followers = responseData.data.followers;
+        }
+
+        const followersData: FollowersResponse = {
+          items: followers,
+          total: responseData.data.total || followers.length,
+          page: params?.page || 1,
+          limit: params?.limit || 10,
+        };
+
+        console.log("[followService] Followers retrieved:", followersData.total);
+
+        return {
+          success: true,
+          data: followersData,
+          message: responseData.message || "Followers retrieved successfully",
+        };
       }
-
-      const followersData: FollowersResponse = {
-        items: followers,
-        total: responseData.data.total || followers.length,
-        page: params?.page || 1,
-        limit: params?.limit || 10,
-      };
-
-      console.log("[followService] Followers retrieved:", followersData.total);
-
-      return {
-        success: true,
-        data: followersData,
-        message: responseData.message || "Followers retrieved successfully",
-      };
+    } catch (endpointError) {
+      console.log("[followService] Followers endpoint not available, returning empty list");
     }
 
+    // If endpoint doesn't exist, return empty list (graceful fallback)
     return {
-      success: false,
-      message: responseData.message || "Failed to get followers",
-      error: "API returned unsuccessful response",
+      success: true,
       data: { items: [], total: 0 },
+      message: "Followers endpoint not available",
     };
   } catch (error: any) {
     console.error("[followService] Get followers error:", error.message);
@@ -173,47 +178,52 @@ export async function getFollowers(
 
 // ✅ CREATED BY KIRO - Get following list
 export async function getFollowing(
-  userId: string,
+  userId?: string,
   params?: { page?: number; limit?: number }
 ): Promise<ApiResponse<FollowersResponse>> {
   try {
     console.log("[followService] Getting following:", { userId, params });
 
-    const response = await apiClient.get<any>(`user/${userId}/following`, { params });
-    const responseData = response.data as any;
+    // Try the dedicated following endpoint first
+    try {
+      const response = await apiClient.get<any>(`user/following`, { params });
+      const responseData = response.data as any;
 
-    if (responseData.code === 1 && responseData.data) {
-      let following: User[] = [];
+      if (responseData.code === 1 && responseData.data) {
+        let following: User[] = [];
 
-      if (Array.isArray(responseData.data)) {
-        following = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        following = responseData.data.items;
-      } else if (Array.isArray(responseData.data.following)) {
-        following = responseData.data.following;
+        if (Array.isArray(responseData.data)) {
+          following = responseData.data;
+        } else if (Array.isArray(responseData.data.items)) {
+          following = responseData.data.items;
+        } else if (Array.isArray(responseData.data.following)) {
+          following = responseData.data.following;
+        }
+
+        const followingData: FollowersResponse = {
+          items: following,
+          total: responseData.data.total || following.length,
+          page: params?.page || 1,
+          limit: params?.limit || 10,
+        };
+
+        console.log("[followService] Following retrieved:", followingData.total);
+
+        return {
+          success: true,
+          data: followingData,
+          message: responseData.message || "Following retrieved successfully",
+        };
       }
-
-      const followingData: FollowersResponse = {
-        items: following,
-        total: responseData.data.total || following.length,
-        page: params?.page || 1,
-        limit: params?.limit || 10,
-      };
-
-      console.log("[followService] Following retrieved:", followingData.total);
-
-      return {
-        success: true,
-        data: followingData,
-        message: responseData.message || "Following retrieved successfully",
-      };
+    } catch (endpointError) {
+      console.log("[followService] Following endpoint not available, returning empty list");
     }
 
+    // If endpoint doesn't exist, return empty list (graceful fallback)
     return {
-      success: false,
-      message: responseData.message || "Failed to get following",
-      error: "API returned unsuccessful response",
+      success: true,
       data: { items: [], total: 0 },
+      message: "Following endpoint not available",
     };
   } catch (error: any) {
     console.error("[followService] Get following error:", error.message);

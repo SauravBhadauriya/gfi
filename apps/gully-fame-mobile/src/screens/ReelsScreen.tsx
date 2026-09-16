@@ -9,23 +9,14 @@ import {
   TouchableOpacity,
   StatusBar,
 } from 'react-native';
-import { getReelsFeed } from '../api/services/reelsService';
+import { getReels } from '../api/services/reelsService';
 import type { Reel } from '../types/reels';
-import { Video, ResizeMode } from 'expo-video';
+import { Video } from 'expo-video';
 // Importing the newly updated Support Popup
 import { TipPopup } from '../components/tip/TipComponents';
 
 const { height, width } = Dimensions.get('window');
 
-
-const DUMMY_VIDEOS = [
-  'https://www.w3schools.com/html/mov_bbb.mp4',
-  'https://download.samplelib.com/mp4/sample-5s.mp4',
-  'https://download.samplelib.com/mp4/sample-10s.mp4',
-  'https://download.samplelib.com/mp4/sample-15s.mp4',
-  'https://download.samplelib.com/mp4/sample-20s.mp4',
-  'https://download.samplelib.com/mp4/sample-30s.mp4',
-];
 
 const ReelsScreen = () => {
   const [loading, setLoading] = useState(true);
@@ -56,30 +47,11 @@ const ReelsScreen = () => {
     try {
       setLoading(true);
       setError('');
-      const response = await getReelsFeed({ page: 1, limit: 10 });
-      let fetchedReels = (response.data?.items as any) || [];
-
-      // Inject dummy reels if none are found from the API
-      if (fetchedReels.length === 0) {
-        fetchedReels = DUMMY_VIDEOS.map((url, index) => ({
-          id: `dummy-${index}`,
-          videoUrl: url,
-          caption: `This is dummy reel #${index + 1}! 🕺🔥`,
-          user: { username: `creator_${index + 1}` },
-        }));
-      }
-
+      const response = await getReels(10);
+      const fetchedReels = (response.data?.reels as any) || [];
       setReels(fetchedReels);
     } catch (err: any) {
-      // Fallback to dummy data on error
-      const fallbackReels = DUMMY_VIDEOS.map((url, index) => ({
-        id: `dummy-${index}`,
-        videoUrl: url,
-        caption: `Offline dummy reel #${index + 1}! 💃✨`,
-        user: { username: `dancer_${index + 1}` },
-      }));
-      setReels(fallbackReels as any);
-      // setError(err?.message || 'Failed to load reels');
+      setError(err?.message || 'Failed to load reels');
     } finally {
       setLoading(false);
     }
@@ -98,18 +70,15 @@ const ReelsScreen = () => {
   const renderItem = ({ item, index }: { item: Reel, index: number }) => {
     const isActive = activeReelIndex === index;
     const isNearby = Math.abs(activeReelIndex - index) <= 1;
-    const videoSource = (item as any).videoUrl || DUMMY_VIDEOS[index % DUMMY_VIDEOS.length];
-    console.log(`Reel ${index} videoSource:`, videoSource);
-console.log('REEL DEBUG:', JSON.stringify(item));
+    const videoSource = (item as any).videoUrl;
 
     return (
       <View style={styles.reelItem}>
-        {/* Real-time Dummy Video */}
-        {isNearby ? (
+        {isNearby && videoSource ? (
           <Video
             source={{ uri: videoSource }}
             style={StyleSheet.absoluteFillObject}
-            resizeMode={ResizeMode.COVER}
+            resizeMode="cover"
             shouldPlay={isActive}
             isLooping
             isMuted={false}

@@ -18,8 +18,8 @@ import {
   Platform,
 } from "react-native";
 import { useFocusEffect } from "expo-router/react-navigation";
-import { followService, User } from "../../../src/api/services/followService";
-import { followUpdateEmitter } from "../../../src/utils/followEmitter";
+import { followService, User } from "@api/services/followService";
+import { followUpdateEmitter } from "@utils/followEmitter";
 
 interface FollowersScreenProps {
   route?: any;
@@ -273,7 +273,7 @@ const FollowersScreen: React.FC<FollowersScreenProps> = ({ route, navigation }) 
         <FlatList
           data={displayList}
           renderItem={({ item }) => renderUserItem(item)}
-          keyExtractor={(item) => item?._id || Math.random().toString()}
+          keyExtractor={(item, index) => item?._id || `user-${index}`}
           onRefresh={handleRefresh}
           refreshing={refreshing}
           scrollEnabled={true}

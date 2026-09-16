@@ -23,7 +23,7 @@ class MockDataManager {
   private config: MockDataConfig = {
     useMockData: __DEV__, // Use mock data in development
     enableLogging: __DEV__,
-    fallbackToMock: true, // Always fall back to mock if API fails
+    fallbackToMock: __DEV__, // Only fallback to mock in development
   };
 
   /**

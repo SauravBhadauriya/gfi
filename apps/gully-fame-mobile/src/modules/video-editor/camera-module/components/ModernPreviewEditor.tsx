@@ -1,4 +1,4 @@
-import { Video, ResizeMode } from "expo-video";
+import { Video } from "expo-video";
 import React, { useCallback, useRef, useState } from "react";
 import {
   Dimensions,
@@ -560,7 +560,7 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
             videoRef={videoRef}
             source={{ uri: clip.uri }}
             style={styles.mediaFullScreen}
-            resizeMode={ResizeMode.COVER} 
+            resizeMode="cover" 
             shouldPlay={false}
             isLooping={false}
             rate={speedSegments ? currentPlaybackRateRef.current : selectedSpeed}

@@ -1,4 +1,4 @@
-import { Video, ResizeMode } from 'expo-video';
+import { Video } from 'expo-video';
 import React from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import type { FilterConfig } from '../types/filters';
@@ -7,7 +7,7 @@ import { getFilterOverlayFromProperties } from '../utils/filterOverlays';
 interface FilteredVideoProps {
   source: { uri: string };
   style?: ViewStyle;
-  resizeMode?: ResizeMode;
+  resizeMode?: 'contain' | 'cover' | 'fill';
   shouldPlay?: boolean;
   isLooping?: boolean;
   rate?: number;
@@ -29,7 +29,7 @@ interface FilteredVideoProps {
 const FilteredVideo: React.FC<FilteredVideoProps> = ({
   source,
   style,
-  resizeMode = ResizeMode.CONTAIN,
+  resizeMode = 'contain',
   shouldPlay = false,
   isLooping = false,
   rate = 1,

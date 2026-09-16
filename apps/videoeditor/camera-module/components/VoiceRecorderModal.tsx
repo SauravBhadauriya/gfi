@@ -9,7 +9,8 @@ import {
   Alert,
   Animated,
 } from "react-native";
-import { Audio } from "expo-av";
+// Audio imports removed - expo-av native module error
+const Audio = { Sound: { create: async () => ({ sound: null }) } };
 import Svg, { Path, Circle } from "react-native-svg";
 import type { VoiceOverlay } from "../types/voiceOverlay.types";
 

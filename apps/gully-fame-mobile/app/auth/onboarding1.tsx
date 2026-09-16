@@ -23,7 +23,8 @@ const DEFAULT_ONBOARDING1 = require("@assets/images/onboarding1.png");
 export default function Onboarding1() {
   const { splashImages } = useBranding();
   
-  const backgroundImage = splashImages[0] ? { uri: splashImages[0] } : DEFAULT_ONBOARDING1;
+  const backgroundImage = splashImages && splashImages.length > 0 && splashImages[0] ? { uri: splashImages[0] } : DEFAULT_ONBOARDING1;
+  // const backgroundImage = splashImages[0] ? { uri: splashImages[0] } : DEFAULT_ONBOARDING1;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
 

@@ -20,7 +20,17 @@ import MultiClipPlayer from '../components/timeline/MultiClipPlayer';
 
 // 🔥 NEW IMPORTS: Text Editor aur Voiceover Studio
 import TextEditorModal from '../components/TextEditorModal';
-import VoiceoverStudioModal from '../components/VoiceoverStudioModal';
+let VoiceoverStudioModal: any = null;
+
+// Try to import VoiceoverStudioModal with fallback
+try {
+  const voiceoverModule = require('../components/VoiceoverStudioModal');
+  VoiceoverStudioModal = voiceoverModule.default;
+} catch (error) {
+  console.warn('[PreviewScreen] Failed to load VoiceoverStudioModal, using mock:', error);
+  // Fallback: render a dummy component
+  VoiceoverStudioModal = ({ visible, onClose }: any) => null;
+}
 
 import { useUndoRedo } from '../hooks/useUndoRedo';
 import { cameraStyles } from '../styles/cameraStyles';

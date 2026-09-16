@@ -15,6 +15,7 @@ import {
 import Svg, { Path, Circle, G, Rect } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, scaleVertical, getFontSize, wp, hp, spacing } from '../../utils/responsive';
+import { sendSupportPayment, getWalletBalance } from '../../api/services/paymentIntegrationService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -325,18 +326,20 @@ export const TipPopup = ({
   visible,
   onClose,
   reelId,
+  creatorId,
   onTipSuccess,
 }: {
   visible: boolean;
   onClose: () => void;
   reelId: number;
+  creatorId?: string; // Backend creator user ID
   onTipSuccess: (amount: number) => void;
 }) => {
   const slideAnim = useRef(new Animated.Value(height)).current;
   const [userRole, setUserRole] = useState<string>('');
   const [selectedAmount, setSelectedAmount] = useState<number>(0);
   const [customAmount, setCustomAmount] = useState<string>('');
-  const [coinBalance, setCoinBalance] = useState<number>(500); // Dummy balance
+  const [coinBalance, setCoinBalance] = useState<number>(0); // Will be fetched from backend
   const [showPaymentMethod, setShowPaymentMethod] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -363,6 +366,30 @@ export const TipPopup = ({
     };
     loadUserRole();
   }, []);
+
+  // Fetch real coin balance from backend
+  useEffect(() => {
+    const loadCoinBalance = async () => {
+      try {
+        const response = await getWalletBalance();
+        if (response.success && response.data) {
+          setCoinBalance(response.data.coins || 0);
+          console.log('[TipPopup] Coin balance loaded:', response.data.coins);
+        } else {
+          console.warn('[TipPopup] Failed to load coin balance, defaulting to 0');
+          setCoinBalance(0);
+        }
+      } catch (error) {
+        console.error('[TipPopup] Error loading coin balance:', error);
+        setCoinBalance(0);
+      }
+    };
+
+    // Only fetch if participant user or when component becomes visible
+    if (visible) {
+      loadCoinBalance();
+    }
+  }, [visible]);
 
   // Check user preference for warning modal on mount
   useEffect(() => {
@@ -428,16 +455,49 @@ export const TipPopup = ({
     }
   };
 
-  // The actual execution wrapper logic
-  const executeSupportAction = () => {
+  // The actual execution wrapper logic - NOW CALLS REAL BACKEND
+  const executeSupportAction = async () => {
     if (isParticipant) {
       setIsLoading(true);
-      setTimeout(() => {
+      try {
+        // Get current user ID
+        const userId = await AsyncStorage.getItem('userId');
+        
+        if (!userId) {
+          throw new Error('User ID not found. Please login again.');
+        }
+
+        if (!creatorId) {
+          throw new Error('Creator information not available. Please try again.');
+        }
+
+        // Call real backend to send support/tip
+        const response = await sendSupportPayment({
+          recipientId: creatorId, // Use actual creator ID from reel data
+          reelId: reelId,
+          amount: selectedAmount,
+          coins: selectedAmount,
+          message: '',
+        });
+
+        if (response.success) {
+          // ONLY show success AFTER backend confirms
+          setIsLoading(false);
+          setShowSuccess(true);
+          onTipSuccess(selectedAmount);
+          // Update local coin balance after backend confirmation
+          setCoinBalance(coinBalance - selectedAmount);
+          console.log('[TipPopup] Support sent successfully:', response.data);
+        } else {
+          setIsLoading(false);
+          Alert.alert('Support Failed', response.message || 'Failed to send support. Please try again.');
+          console.error('[TipPopup] Support failed:', response.error);
+        }
+      } catch (error: any) {
         setIsLoading(false);
-        setShowSuccess(true);
-        onTipSuccess(selectedAmount);
-        setCoinBalance(coinBalance - selectedAmount);
-      }, 1000);
+        Alert.alert('Error', error.message || 'An error occurred while sending support.');
+        console.error('[TipPopup] Support error:', error);
+      }
     } else {
       setShowPaymentMethod(true);
     }
@@ -454,14 +514,45 @@ export const TipPopup = ({
     executeSupportAction();
   };
 
-  const handlePaymentContinue = (method: string) => {
+  const handlePaymentContinue = async (method: string) => {
     setShowPaymentMethod(false);
     setIsLoading(true);
-    setTimeout(() => {
+    try {
+      // Get current user ID
+      const userId = await AsyncStorage.getItem('userId');
+      if (!userId) {
+        throw new Error('User ID not found. Please login again.');
+      }
+
+      if (!creatorId) {
+        throw new Error('Creator information not available. Please try again.');
+      }
+
+      // Call real backend to send support/tip payment
+      const response = await sendSupportPayment({
+        recipientId: creatorId, // Use actual creator ID from reel data
+        reelId: reelId,
+        amount: selectedAmount,
+        coins: 0, // Fan users pay in INR, not coins
+        message: '',
+      });
+
+      if (response.success) {
+        // ONLY show success AFTER backend confirms
+        setIsLoading(false);
+        setShowSuccess(true);
+        onTipSuccess(selectedAmount);
+        console.log('[TipPopup] Payment sent successfully:', response.data);
+      } else {
+        setIsLoading(false);
+        Alert.alert('Payment Failed', response.message || 'Failed to process payment. Please try again.');
+        console.error('[TipPopup] Payment failed:', response.error);
+      }
+    } catch (error: any) {
       setIsLoading(false);
-      setShowSuccess(true);
-      onTipSuccess(selectedAmount);
-    }, 1000);
+      Alert.alert('Error', error.message || 'An error occurred while processing payment.');
+      console.error('[TipPopup] Payment error:', error);
+    }
   };
 
   const handleSuccessClose = () => {

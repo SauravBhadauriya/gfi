@@ -16,15 +16,15 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import BottomNav from "../../../src/components/layout/BottomNav";
-import DrawerMenu from "../../../src/components/layout/DrawerMenu";
+import BottomNav from "@components/layout/BottomNav";
+import DrawerMenu from "@components/layout/DrawerMenu";
 import { HomeIconSVG, ReelIconSVG, SearchIconSVG, UserIconSVG } from "@/icons";
 import {
   scale,
   getFontSize,
   spacing,
   getResponsiveDimensions,
-} from "../../../src/utils/responsive";
+} from "@utils/responsive";
 
 import { useRouter } from "expo-router";
 
@@ -330,46 +330,126 @@ export default function SearchScreen() {
 
   
   useEffect(() => {
-    setIsLoading(true);
-
-    const fetchTimer = setTimeout(() => {
-      if (activeSearchType === "all") {
+    const performSearch = async () => {
+      // If search query is empty, show empty state
+      if (!searchQuery.trim()) {
         setSearchResults({
-          top_users: MOCK_SEARCH_DATA.users.slice(0, 3),
-          top_competitions: MOCK_SEARCH_DATA.competitions.slice(0, 3),
-          top_reels: MOCK_SEARCH_DATA.reels,
+          top_users: [],
+          top_competitions: [],
+          top_reels: [],
           results: [],
           hasMore: false,
         });
-      } else if (activeSearchType === "users") {
-        setSearchResults({
-          top_users: [],
-          top_competitions: [],
-          top_reels: [],
-          results: MOCK_SEARCH_DATA.users,
-          hasMore: false,
-        });
-      } else if (activeSearchType === "competitions") {
-        setSearchResults({
-          top_users: [],
-          top_competitions: [],
-          top_reels: [],
-          results: MOCK_SEARCH_DATA.competitions,
-          hasMore: false,
-        });
-      } else if (activeSearchType === "reels") {
-        setSearchResults({
-          top_users: [],
-          top_competitions: [],
-          top_reels: [],
-          results: MOCK_SEARCH_DATA.reels,
-          hasMore: false,
-        });
+        setIsLoading(false);
+        return;
       }
-      setIsLoading(false);
-    }, 600);
 
-    return () => clearTimeout(fetchTimer);
+      setIsLoading(true);
+      try {
+        if (activeSearchType === "all") {
+          // Perform global search
+          const { searchService } = await import("@/api/services/searchService");
+          const result = await searchService.globalSearch(searchQuery.trim());
+          
+          if (result.success && result.data) {
+            setSearchResults({
+              top_users: result.data.users?.slice(0, 3) || [],
+              top_competitions: result.data.competitions?.slice(0, 3) || [],
+              top_reels: result.data.reels || [],
+              results: [],
+              hasMore: false,
+            });
+          } else {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: [],
+              hasMore: false,
+            });
+          }
+        } else if (activeSearchType === "users") {
+          // Search users
+          const { searchService } = await import("@/api/services/searchService");
+          const result = await searchService.searchUsers(searchQuery.trim());
+          
+          if (result.success && result.data?.users) {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: result.data.users,
+              hasMore: false,
+            });
+          } else {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: [],
+              hasMore: false,
+            });
+          }
+        } else if (activeSearchType === "competitions") {
+          // Search competitions
+          const { searchService } = await import("@/api/services/searchService");
+          const result = await searchService.searchCompetitions(searchQuery.trim());
+          
+          if (result.success && result.data?.competitions) {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: result.data.competitions,
+              hasMore: false,
+            });
+          } else {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: [],
+              hasMore: false,
+            });
+          }
+        } else if (activeSearchType === "reels") {
+          // Search reels
+          const { searchService } = await import("@/api/services/searchService");
+          const result = await searchService.searchReels(searchQuery.trim());
+          
+          if (result.success && result.data?.reels) {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: result.data.reels,
+              hasMore: false,
+            });
+          } else {
+            setSearchResults({
+              top_users: [],
+              top_competitions: [],
+              top_reels: [],
+              results: [],
+              hasMore: false,
+            });
+          }
+        }
+      } catch (error) {
+        console.error("[search] Error performing search:", error);
+        setSearchResults({
+          top_users: [],
+          top_competitions: [],
+          top_reels: [],
+          results: [],
+          hasMore: false,
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    performSearch();
   }, [searchQuery, activeSearchType]);
 
   const tabs = [

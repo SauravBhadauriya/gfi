@@ -74,11 +74,13 @@ const MusicLibraryModal: React.FC<MusicPickerModalProps> = ({
           const seconds = String(t.duration % 60).padStart(2, "0");
           const durationStr = `${minutes}:${seconds}`;
           
-          // Display usage count with formatting
-          const useCount = t.usageCount || Math.floor(Math.random() * 5000);
+          // Display usage count with real data only
+          const useCount = t.usageCount || 0; // Use actual usage count, don't fake it
           const usageStr = useCount >= 1000 
             ? `${(useCount / 1000).toFixed(1)}K uses`
-            : `${useCount} uses`;
+            : useCount > 0
+            ? `${useCount} uses`
+            : "No usage data"; // Show when data is unavailable instead of faking
           
           return {
             ...t,

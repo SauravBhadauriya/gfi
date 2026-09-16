@@ -3,12 +3,21 @@
   "version": "1.0.0",
   "private": true,
   "workspaces": [
-    "apps/gully-fame-admin"
+    "apps/gully-fame-admin",
+    "apps/gully-fame-mobile",
+    "apps/videoeditor"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=apps/gully-fame-admin",
     "build": "npm run build --workspace=apps/gully-fame-admin",
     "start": "npm run start --workspace=apps/gully-fame-admin",
-    "lint": "npm run lint --workspace=apps/gully-fame-admin"
+    "lint": "npm run lint --workspace=apps/gully-fame-admin",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "expo": "~57.0.21",
+    "react": "19.2.3",
+    "react-native": "0.86.3"
   }
 }

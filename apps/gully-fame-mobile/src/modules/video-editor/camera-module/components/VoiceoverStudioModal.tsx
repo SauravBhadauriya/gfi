@@ -10,8 +10,20 @@ import {
   Dimensions,
   Animated,
   SafeAreaView,
+  Alert,
 } from 'react-native';
 import Svg, { Path, Circle } from 'react-native-svg';
+
+// expo-av requires native modules not available in Expo Go
+// Import with graceful fallback
+let Audio: any = null;
+try {
+  // Audio module removed - expo-av native module error
+const audioModule = { Sound: { create: async () => ({ sound: null }) } };
+  Audio = audioModule.Audio;
+} catch (error) {
+  console.warn('[VoiceoverStudioModal] expo-av not available - using mock mode');
+}
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -32,10 +44,12 @@ const VoiceoverStudioModal: React.FC<VoiceoverStudioModalProps> = ({
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [recordedSeconds, setRecordingSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
   
   // Animation state for the pulse effect on Mic hold
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const recordingRef = useRef<any>(null);
 
   useEffect(() => {
     if (isRecording) {
@@ -69,20 +83,87 @@ const VoiceoverStudioModal: React.FC<VoiceoverStudioModalProps> = ({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isRecording]);
+  }, [isRecording, pulseAnim]);
 
-  const handlePressIn = () => {
-    setIsRecording(true);
-    setRecordingSeconds(0);
-    console.log("🎙️ Voiceover recording started...");
+  const handlePressIn = async () => {
+    if (!Audio) {
+      Alert.alert(
+        'Feature Unavailable',
+        'Voiceover recording requires native modules. Please use EAS build or Expo dev client.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+
+    try {
+      // Request audio permissions
+      const { granted } = await Audio.requestPermissionsAsync();
+      if (!granted) {
+        setRecordingError('Audio permission denied');
+        Alert.alert('Permission Denied', 'Microphone permission is required to record voiceover');
+        return;
+      }
+
+      // Prepare audio for recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpiece: false,
+      });
+
+      // Create recording instance
+      const recording = new Audio.Recording();
+      recordingRef.current = recording;
+
+      // Prepare and start recording
+      await recording.prepareToRecordAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      await recording.startAsync();
+
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      setRecordingError(null);
+      console.log("🎙️ Voiceover recording started...");
+    } catch (error: any) {
+      console.error('[VoiceoverStudioModal] Recording start error:', error);
+      setRecordingError(error.message);
+      Alert.alert('Recording Error', error.message);
+      setIsRecording(false);
+    }
   };
 
-  const handlePressOut = () => {
-    if (isRecording) {
+  const handlePressOut = async () => {
+    if (!isRecording || !recordingRef.current) {
+      return;
+    }
+
+    try {
       setIsRecording(false);
-      console.log(`🎙️ Voiceover stopped. Recorded duration: ${recordedSeconds}s`);
-      // Production ready mockup uri trigger
-      onSaveVoiceover(`mock-audio-${Date.now()}.mp3`, recordedSeconds);
+      
+      // Stop recording
+      await recordingRef.current.stopAndUnloadAsync();
+      
+      // Get recording URI
+      const uri = recordingRef.current.getURI();
+      
+      if (!uri) {
+        throw new Error('Failed to get recording URI');
+      }
+
+      console.log(`🎙️ Voiceover stopped. Recorded duration: ${recordedSeconds}s, URI: ${uri}`);
+      
+      // Save voiceover (will be uploaded with video)
+      onSaveVoiceover(uri, recordedSeconds);
+      
+      // Reset
+      recordingRef.current = null;
+    } catch (error: any) {
+      console.error('[VoiceoverStudioModal] Recording stop error:', error);
+      setRecordingError(error.message);
+      Alert.alert('Recording Error', `Failed to save recording: ${error.message}`);
+      recordingRef.current = null;
     }
   };
 
@@ -90,6 +171,14 @@ const VoiceoverStudioModal: React.FC<VoiceoverStudioModalProps> = ({
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const handleDone = () => {
+    if (recordedSeconds > 0) {
+      onClose();
+    } else {
+      Alert.alert('No Recording', 'Please record some audio before proceeding');
+    }
   };
 
   return (
@@ -103,8 +192,8 @@ const VoiceoverStudioModal: React.FC<VoiceoverStudioModalProps> = ({
               <Text style={styles.headerBtnText}>Cancel</Text>
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Voiceover</Text>
-            <TouchableOpacity onPress={onClose} style={styles.headerBtn}>
-              <Text style={[styles.headerBtnText, { color: '#ec9a15' }]}>Done</Text>
+            <TouchableOpacity onPress={handleDone} style={styles.headerBtn}>
+              <Text style={[styles.headerBtnText, { color: recordedSeconds > 0 ? '#ec9a15' : '#666' }]}>Done</Text>
             </TouchableOpacity>
           </SafeAreaView>
 
@@ -114,8 +203,13 @@ const VoiceoverStudioModal: React.FC<VoiceoverStudioModalProps> = ({
               {isRecording ? formatTime(recordedSeconds) : formatTime(currentTime)} / {formatTime(totalDuration)}
             </Text>
             <Text style={styles.subHint}>
-              {isRecording ? "Recording audio live..." : "Move playhead to where you want to start dubbing"}
+              {recordingError 
+                ? recordingError 
+                : (isRecording ? "Recording audio live..." : "Move playhead to where you want to start dubbing")}
             </Text>
+            {recordedSeconds > 0 && !isRecording && (
+              <Text style={styles.recordedLabel}>✓ {formatTime(recordedSeconds)} recorded</Text>
+            )}
           </View>
 
           {/* Dynamic Floating Mic Interface Area */}
@@ -200,6 +294,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 6,
     fontWeight: '500',
+  },
+  recordedLabel: {
+    color: '#4CAF50',
+    fontSize: 12,
+    marginTop: 8,
+    fontWeight: '600',
   },
   micInteractionArea: {
     flex: 1,

@@ -1,5 +1,3 @@
-// Created by Kiro - Video Editor Service
-// Handles video editing operations like trimming, filtering, effects, and export
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
@@ -320,6 +318,102 @@ export async function addMusic(
     return {
       success: false,
       message: error.response?.data?.message || error.message || "Music addition failed",
+      error: error.message,
+      data: undefined,
+    };
+  }
+}
+
+// ✅ CREATED BY KIRO - Add voiceover to video
+export async function addVoiceover(
+  sessionId: string,
+  voiceover: VideoEffect
+): Promise<ApiResponse<VideoEffect>> {
+  try {
+    console.log("[videoEditorService] Adding voiceover:", { sessionId, voiceover });
+
+    const response = await apiClient.post<any>(`video-editor/${sessionId}/voiceover`, voiceover);
+    const responseData = response.data as any;
+
+    if (responseData.code === 1 && responseData.data) {
+      const addedVoiceover: VideoEffect = {
+        id: responseData.data.id,
+        name: responseData.data.name || "Voiceover",
+        type: "voiceover",
+        duration: responseData.data.duration,
+        startTime: responseData.data.startTime,
+        endTime: responseData.data.endTime,
+        data: responseData.data.data,
+      };
+
+      console.log("[videoEditorService] Voiceover added successfully");
+
+      return {
+        success: true,
+        data: addedVoiceover,
+        message: responseData.message || "Voiceover added successfully",
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || "Failed to add voiceover",
+      error: "API returned unsuccessful response",
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error("[videoEditorService] Add voiceover error:", error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || "Voiceover addition failed",
+      error: error.message,
+      data: undefined,
+    };
+  }
+}
+
+// ✅ CREATED BY KIRO - Add sound effect to video
+export async function addSoundEffect(
+  sessionId: string,
+  soundEffect: VideoEffect
+): Promise<ApiResponse<VideoEffect>> {
+  try {
+    console.log("[videoEditorService] Adding sound effect:", { sessionId, soundEffect });
+
+    const response = await apiClient.post<any>(`video-editor/${sessionId}/soundfx`, soundEffect);
+    const responseData = response.data as any;
+
+    if (responseData.code === 1 && responseData.data) {
+      const addedEffect: VideoEffect = {
+        id: responseData.data.id,
+        name: responseData.data.name,
+        type: "music",
+        duration: responseData.data.duration,
+        startTime: responseData.data.startTime,
+        endTime: responseData.data.endTime,
+        data: responseData.data.data,
+      };
+
+      console.log("[videoEditorService] Sound effect added successfully");
+
+      return {
+        success: true,
+        data: addedEffect,
+        message: responseData.message || "Sound effect added successfully",
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || "Failed to add sound effect",
+      error: "API returned unsuccessful response",
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error("[videoEditorService] Add sound effect error:", error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || "Sound effect addition failed",
       error: error.message,
       data: undefined,
     };
@@ -672,6 +766,8 @@ export const videoEditorService = {
   applyFilter,
   addTextOverlay,
   addMusic,
+  addVoiceover,
+  addSoundEffect,
   addTransition,
   exportVideo,
   getEditingSession,

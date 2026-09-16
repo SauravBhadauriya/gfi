@@ -1,330 +1,323 @@
-
-
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import API_ENDPOINTS, { replaceParams } from "../endpoints";
 
-export interface Reel {
+// ─────────────────────────────────────────────
+// Backend Response Types
+// ─────────────────────────────────────────────
+
+/**
+ * Author/Creator information from backend
+ */
+export interface ReelAuthor {
   _id: string;
-  id?: string;
-  userId: string;
-  title?: string;
-  description?: string;
-  videoUrl: string;
-  thumbnail?: string;
-  likes?: number;
-  comments?: number;
-  shares?: number;
-  views?: number;
-  isLiked?: boolean;
-  createdAt: string;
-  updatedAt: string;
-  [key: string]: any;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  profileImage?: string;
+  is_followed_by_me: boolean;
 }
 
+/**
+ * Reel statistics from backend
+ */
+export interface ReelStats {
+  votes?: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  tips?: number;
+}
+
+/**
+ * User's interaction state with the reel
+ */
+export interface UserInteractions {
+  voted?: boolean;
+  liked: boolean;
+  saved: boolean;
+}
+
+/**
+ * Raw backend reel response
+ */
+export interface BackendReel {
+  _id: string;
+  video_url: string;
+  thumbnail_url?: string;
+  caption: string;
+  author: ReelAuthor;
+  stats: ReelStats;
+  user_interactions: UserInteractions;
+  createdAt?: string;
+  duration?: number;
+  musicTrack?: {
+    id?: string;
+    title?: string;
+    artist?: string;
+    name?: string;
+  };
+}
+
+/**
+ * Normalized reel for UI consumption
+ * Maps backend fields to UI model
+ */
+export interface Reel {
+  id: number;
+  userId: string;
+  username: string;
+  caption: string;
+  musicName: string;
+  video: { uri: string };
+  likes: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  tips: number;
+  isLiked: boolean;
+  isSaved: boolean;
+  isFollowed: boolean;
+  _backendId?: string;
+  thumbnail?: string;
+  duration?: number;
+  createdAt?: string;
+}
+
+/**
+ * API response wrapper for reels list
+ */
 export interface ReelsResponse {
-  items: Reel[];
+  reels: BackendReel[];
+  nextCursor?: string;
+  hasMore: boolean;
+  page?: number;
+  limit?: number;
   total?: number;
 }
 
-// Get Reels Feed
-export async function getReelsFeed(params?: any): Promise<ApiResponse<ReelsResponse>> {
+// ─────────────────────────────────────────────
+// Mapping Functions
+// ─────────────────────────────────────────────
+
+/**
+ * Normalize backend reel response to UI model
+ * Converts backend field names and types to UI expectations
+ */
+function normalizeReel(backendReel: BackendReel, index: number): Reel {
+  const creatorName = backendReel.author?.firstName
+    ? `${backendReel.author.firstName}${backendReel.author.lastName ? ` ${backendReel.author.lastName}` : ""}`
+    : backendReel.author?.username || "Unknown User";
+
+  const musicName =
+    backendReel.musicTrack?.title ||
+    backendReel.musicTrack?.name ||
+    "Original Sound";
+
+  // Generate stable numeric ID from backend ID for UI state management
+  // This ensures consistent IDs across renders
+  const numericId =
+    parseInt(backendReel._id.slice(-8), 16) % 1000000 || index + 1;
+
+  return {
+    id: numericId,
+    _backendId: backendReel._id,
+    userId: backendReel.author._id,
+    username: creatorName,
+    caption: backendReel.caption,
+    musicName,
+    video: { uri: backendReel.video_url },
+    likes: backendReel.stats.likes || 0,
+    comments: backendReel.stats.comments || 0,
+    shares: backendReel.stats.shares || 0,
+    saves: backendReel.stats.saves || 0,
+    tips: backendReel.stats.tips || 0,
+    isLiked: backendReel.user_interactions.liked || false,
+    isSaved: backendReel.user_interactions.saved || false,
+    isFollowed: backendReel.author.is_followed_by_me || false,
+    thumbnail: backendReel.thumbnail_url,
+    duration: backendReel.duration,
+    createdAt: backendReel.createdAt,
+  };
+}
+
+// ─────────────────────────────────────────────
+// API Endpoints
+// ─────────────────────────────────────────────
+
+const REELS_ENDPOINT = "reels";
+
+/**
+ * Fetch reels with cursor-based pagination
+ * 
+ * @param limit - Number of reels per page (default: 10)
+ * @param cursor - Last reel ID from previous page (for next page)
+ * @returns API response with normalized reels and next cursor
+ */
+export async function getReels(
+  limit: number = 10,
+  cursor?: string
+): Promise<ApiResponse<ReelsResponse>> {
   try {
-    console.log("[reelsService] GET Reels Feed");
-
-   
-    const response = await apiClient.get<any>(API_ENDPOINTS.FEED.GET_HOME_FEED, { params });
-    const responseData = response.data as any;
-
-    console.log("[reelsService] RAW response code:", responseData.code);
-    console.log("[reelsService] RAW response data keys:", Object.keys(responseData.data || {}));
-    if (Array.isArray(responseData.data)) {
-      console.log("[reelsService] data is ARRAY, first item keys:", Object.keys(responseData.data[0] || {}));
-      console.log("[reelsService] FIRST REEL SAMPLE:", JSON.stringify(responseData.data[0]));
-    } else if (responseData.data) {
-      const nested = responseData.data.items || responseData.data.reels || responseData.data;
-      if (Array.isArray(nested) && nested.length > 0) {
-        console.log("[reelsService] FIRST REEL SAMPLE:", JSON.stringify(nested[0]));
-      }
+    if (__DEV__) {
+      console.log("[reelsService] Fetching reels:", { limit, cursor });
     }
 
-    if (responseData.code === 1 && responseData.data) {
-      let reels: Reel[] = [];
+    const params: any = { limit };
+    if (cursor) {
+      params.cursor = cursor;
+    }
 
-      if (Array.isArray(responseData.data)) {
-        reels = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        reels = responseData.data.items;
-      } else if (Array.isArray(responseData.data.reels)) {
-        reels = responseData.data.reels;
+    const response = await apiClient.get<any>(REELS_ENDPOINT, { params });
+    const responseData = response.data as any;
+
+    if (responseData.code === 1 && responseData.data) {
+      const raw = responseData.data;
+      const reels = Array.isArray(raw.reels) ? raw.reels : [];
+
+      // Determine if there are more pages
+      const hasMore = reels.length >= limit;
+      const nextCursor = hasMore && reels.length > 0 ? reels[reels.length - 1]._id : undefined;
+
+      const normalizedReels = reels.map((r: BackendReel, idx: number) =>
+        normalizeReel(r, idx)
+      );
+
+      if (__DEV__) {
+        console.log(`[reelsService] Loaded ${normalizedReels.length} reels`, {
+          hasMore,
+          nextCursor: nextCursor ? `${nextCursor.slice(0, 8)}...` : undefined,
+        });
       }
 
       return {
         success: true,
-        data: { items: reels, total: reels.length },
-        message: responseData.message || "Reels fetched successfully",
+        data: {
+          reels: normalizedReels,
+          nextCursor,
+          hasMore,
+          page: 1,
+          limit,
+          total: raw.total,
+        },
+        message: "Reels loaded successfully",
       };
     }
 
     return {
       success: false,
-      message: responseData.message || "Failed to fetch reels",
-      error: "API returned unsuccessful response",
-      data: { items: [], total: 0 },
+      message: responseData.message || "Failed to load reels",
+      data: {
+        reels: [],
+        hasMore: false,
+      },
     };
   } catch (error: any) {
-    console.error("[reelsService] GET Reels Feed error:", error.message);
+    console.error("[reelsService] Error fetching reels:", error.message || error);
+
     return {
       success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: { items: [], total: 0 },
+      message: error.message || "Failed to fetch reels",
+      data: {
+        reels: [],
+        hasMore: false,
+      },
     };
   }
 }
 
-// Get Reel by ID
-export async function getReelById(reelId: string): Promise<ApiResponse<Reel>> {
+/**
+ * Like or unlike a reel
+ * Uses the unified action endpoint
+ * 
+ * @param reelId - Backend reel ID
+ * @returns Updated stats from backend
+ */
+export async function toggleLikeReel(reelId: string): Promise<ApiResponse<any>> {
   try {
-    console.log("[reelsService] GET Reel By ID", { reelId });
-
-    const endpoint = replaceParams(API_ENDPOINTS.REELS.GET_BY_ID, { id: reelId });
-    const response = await apiClient.get<any>(endpoint);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const reel: Reel = responseData.data.reel || responseData.data;
-
-      return {
-        success: true,
-        data: reel,
-        message: responseData.message || "Reel fetched successfully",
-      };
+    if (__DEV__) {
+      console.log("[reelsService] Toggling like for reel:", reelId);
     }
 
-    return {
-      success: false,
-      message: responseData.message || "Failed to fetch reel",
-      error: "API returned unsuccessful response",
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error("[reelsService] GET Reel By ID error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: undefined,
-    };
-  }
-}
+    const response = await apiClient.post<any>(
+      `reels/${reelId}/action`,
+      { action_type: "like" }
+    );
 
-// Like Reel
-export async function likeReel(reelId: string): Promise<ApiResponse<any>> {
-  try {
-    console.log("[reelsService] LIKE Reel", { reelId });
-
-    const endpoint = replaceParams(API_ENDPOINTS.REELS.LIKE, { id: reelId });
-    const response = await apiClient.post<any>(endpoint, {});
     const responseData = response.data as any;
 
     if (responseData.code === 1) {
+      if (__DEV__) {
+        console.log("[reelsService] Like action successful:", responseData.data);
+      }
       return {
         success: true,
         data: responseData.data,
-        message: responseData.message || "Reel liked successfully",
+        message: "Like action completed",
       };
     }
 
     return {
       success: false,
       message: responseData.message || "Failed to like reel",
-      error: "API returned unsuccessful response",
-      data: undefined,
     };
   } catch (error: any) {
-    console.error("[reelsService] LIKE Reel error:", error.message);
+    console.error("[reelsService] Error toggling like:", error.message || error);
     return {
       success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: undefined,
+      message: error.message || "Failed to like reel",
     };
   }
 }
 
-// Unlike Reel
-export async function unlikeReel(reelId: string): Promise<ApiResponse<any>> {
+/**
+ * Save or unsave a reel
+ * Uses the unified action endpoint
+ * 
+ * @param reelId - Backend reel ID
+ * @returns Updated stats from backend
+ */
+export async function toggleSaveReel(reelId: string): Promise<ApiResponse<any>> {
   try {
-    console.log("[reelsService] UNLIKE Reel", { reelId });
+    if (__DEV__) {
+      console.log("[reelsService] Toggling save for reel:", reelId);
+    }
 
-    const endpoint = replaceParams(API_ENDPOINTS.REELS.UNLIKE, { id: reelId });
-    const response = await apiClient.post<any>(endpoint, {});
+    const response = await apiClient.post<any>(
+      `reels/${reelId}/action`,
+      { action_type: "save" }
+    );
+
     const responseData = response.data as any;
 
     if (responseData.code === 1) {
-      return {
-        success: true,
-        data: responseData.data,
-        message: responseData.message || "Reel unliked successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to unlike reel",
-      error: "API returned unsuccessful response",
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error("[reelsService] UNLIKE Reel error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: undefined,
-    };
-  }
-}
-
-// Comment on Reel
-export async function commentReel(reelId: string, comment: string): Promise<ApiResponse<any>> {
-  try {
-    console.log("[reelsService] COMMENT Reel", { reelId, comment });
-
-    const endpoint = replaceParams(API_ENDPOINTS.REELS.ADD_COMMENT, { id: reelId });
-    const response = await apiClient.post<any>(endpoint, { comment });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      return {
-        success: true,
-        data: responseData.data,
-        message: responseData.message || "Comment added successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to add comment",
-      error: "API returned unsuccessful response",
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error("[reelsService] COMMENT Reel error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: undefined,
-    };
-  }
-}
-
-// Upload Reel
-export async function uploadReel(formData: FormData): Promise<ApiResponse<Reel>> {
-  try {
-    console.log("[reelsService] UPLOAD Reel");
-
-    // Use GET_UPLOAD_URL endpoint (presigned URL flow)
-    const response = await apiClient.post<any>(API_ENDPOINTS.REELS.GET_UPLOAD_URL, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const reel: Reel = responseData.data.reel || responseData.data;
-
-      return {
-        success: true,
-        data: reel,
-        message: responseData.message || "Reel uploaded successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to upload reel",
-      error: "API returned unsuccessful response",
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error("[reelsService] UPLOAD Reel error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: undefined,
-    };
-  }
-}
-
-
-export async function getUserReels(
-  userId: string,
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<ReelsResponse>> {
-  try {
-    console.log("[reelsService] GET User Reels", { userId, params });
-
-    // Use the USER.GET_REELS endpoint which is "user/reels"
-    // This gets the logged-in user's reels, not someone else's
-    const endpoint = API_ENDPOINTS.USER.GET_REELS;
-    console.log("[reelsService] Using endpoint:", endpoint);
-    
-    const response = await apiClient.get<any>(endpoint, { params });
-    const responseData = response.data as any;
-
-    console.log("[reelsService] Response code:", responseData.code);
-    console.log("[reelsService] Response data keys:", Object.keys(responseData.data || {}));
-
-    if (responseData.code === 1 && responseData.data) {
-      let reels: Reel[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        reels = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        reels = responseData.data.items;
-      } else if (Array.isArray(responseData.data.reels)) {
-        reels = responseData.data.reels;
+      if (__DEV__) {
+        console.log("[reelsService] Save action successful:", responseData.data);
       }
-
-      console.log("[reelsService] Reels found:", reels.length);
-      reels.forEach((reel: any) => {
-        console.log("[reelsService]   - Reel ID:", reel._id || reel.id, "- Status:", reel.status || reel.published);
-      });
-
       return {
         success: true,
-        data: { items: reels, total: responseData.data.total || reels.length },
-        message: responseData.message || "User reels fetched successfully",
+        data: responseData.data,
+        message: "Save action completed",
       };
     }
 
     return {
       success: false,
-      message: responseData.message || "Failed to fetch user reels",
-      error: "API returned unsuccessful response",
-      data: { items: [], total: 0 },
+      message: responseData.message || "Failed to save reel",
     };
   } catch (error: any) {
-    console.error("[reelsService] GET User Reels error:", error.message);
-    console.error("[reelsService] Error details:", error.response?.data || error);
+    console.error("[reelsService] Error toggling save:", error.message || error);
     return {
       success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message || "Network error",
-      data: { items: [], total: 0 },
+      message: error.message || "Failed to save reel",
     };
   }
 }
 
 export const reelsService = {
-  getReelsFeed,
-  getReelById,
-  getUserReels,
-  likeReel,
-  unlikeReel,
-  commentReel,
-  uploadReel,
+  getReels,
+  toggleLikeReel,
+  toggleSaveReel,
 };
+
+export default reelsService;

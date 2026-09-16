@@ -2,17 +2,16 @@ import React, { useEffect, useRef, useState } from "react";
 import { View, StyleSheet, Animated } from "react-native";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { wp, hp } from "@utils/responsive";
+import { wp, hp } from "@/utils/responsive";
 
-const DEFAULT_LOGO = require("@assets/images/logogfi.png");
+// Points directly to apps/gully-fame-mobile/assets/images/logo.png
+const DEFAULT_LOGO = require("../../assets/images/logo.png");
 const DEFAULT_BACKGROUND = "#3C2610";
 
 export default function SplashScreen() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
   const [hasStartedAnimation, setHasStartedAnimation] = useState(false);
-  const [hasNavigated, setHasNavigated] = useState(false);
-  const navigationTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (!hasStartedAnimation) {
@@ -30,55 +29,44 @@ export default function SplashScreen() {
         }),
       ]).start();
     }
-  }, []);
+  }, [hasStartedAnimation, fadeAnim, scaleAnim]);
 
   useEffect(() => {
-    if (!hasNavigated) {
-      navigationTimer.current = setTimeout(async () => {
-        if (hasNavigated) return;
-        setHasNavigated(true);
-        
-        try {
-          const isLoggedIn = await AsyncStorage.getItem("isLoggedIn");
-          let hasSeenOnboarding = await AsyncStorage.getItem("hasSeenOnboarding");
-          
-          
-          console.log("[SplashScreen] Navigation check:", {
-            isLoggedIn,
-            hasSeenOnboarding,
-            __DEV__,
-          });
-          
-          
-          
-          if (__DEV__) {
-            await AsyncStorage.removeItem("hasSeenOnboarding");
-            hasSeenOnboarding = null;
-          }
-          
-          if (isLoggedIn === "true") {
-            console.log("[SplashScreen] User is logged in, going to home");
-            router.replace("/(main)/home" as any);
-          } else {
-            if (hasSeenOnboarding === "true") {
-              console.log("[SplashScreen] User has seen onboarding, going to signin");
-              router.replace("/auth/signin" as any);
-            } else {
-              console.log("[SplashScreen] User has NOT seen onboarding, going to onboarding1");
-              router.replace("/auth/onboarding1" as any);
-            }
-          }
-        } catch (error) {
-          console.error("[SplashScreen] Navigation error:", error);
-          router.replace("/auth/onboarding1" as any);
+    let isMounted = true;
+
+    const navigationTimer = setTimeout(async () => {
+      try {
+        if (!isMounted) return;
+
+        const isLoggedIn = await AsyncStorage.getItem("isLoggedIn");
+        const hasSeenOnboarding = await AsyncStorage.getItem("hasSeenOnboarding");
+
+        if (!isMounted) return;
+
+        console.log("[SplashScreen] Navigation check - isLoggedIn:", isLoggedIn, "hasSeenOnboarding:", hasSeenOnboarding);
+
+        if (isLoggedIn === "true") {
+          console.log("[SplashScreen] Navigating to home");
+          router.replace("/(main)/home");
+        } else if (hasSeenOnboarding === "true") {
+          console.log("[SplashScreen] Navigating to signin");
+          router.replace("/auth/signin");
+        } else {
+          console.log("[SplashScreen] Navigating to onboarding1");
+          router.replace("/auth/onboarding1");
         }
-      }, 2500);
-    }
+      } catch (error) {
+        console.error("[SplashScreen] Navigation error:", error);
+        if (isMounted) {
+          console.log("[SplashScreen] Error - defaulting to onboarding1");
+          router.replace("/auth/onboarding1");
+        }
+      }
+    }, 1500);
 
     return () => {
-      if (navigationTimer.current) {
-        clearTimeout(navigationTimer.current);
-      }
+      isMounted = false;
+      clearTimeout(navigationTimer);
     };
   }, []);
 

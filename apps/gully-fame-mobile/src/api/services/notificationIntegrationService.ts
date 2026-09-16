@@ -6,6 +6,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 
 let Device: any = null;
@@ -14,6 +15,35 @@ try {
 } catch (e) {
   console.warn("[notificationIntegrationService] expo-device not available:", (e as any)?.message);
 }
+
+// Emulator detection helper
+const isEmulator = (): boolean => {
+  try {
+    if (!Device) return false;
+    // Android emulator detection
+    if (Device.osName === "Android" && (Device.modelName?.includes("Emulator") || Device.modelName?.includes("Android SDK"))) {
+      return true;
+    }
+    // iOS simulator detection
+    if (Device.osName === "iOS" && !Device.isDevice) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+};
+
+// API timeout wrapper
+const API_TIMEOUT_MS = 5000;
+const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = API_TIMEOUT_MS): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Notification API call timed out after ${timeoutMs}ms`)), timeoutMs)
+    ),
+  ]);
+};
 
 export interface Notification {
   id: string;
@@ -47,6 +77,17 @@ export async function registerDeviceForNotifications(): Promise<
   try {
     console.log("[notificationIntegrationService] Registering device for notifications");
 
+    // Skip on emulator - notifications not supported
+    if (isEmulator()) {
+      console.warn("[notificationIntegrationService] Running on emulator, skipping notification registration");
+      return {
+        success: false,
+        message: "Notifications not available on emulator",
+        error: "Emulator detected",
+        data: { deviceToken: "" },
+      };
+    }
+
     // Get device token
     if (!Device || !Device.isDevice) {
       console.warn("[notificationIntegrationService] Not a physical device or Device module not available, skipping registration");
@@ -58,15 +99,17 @@ export async function registerDeviceForNotifications(): Promise<
       };
     }
 
-    const token = (await Notifications.getExpoPushTokenAsync()).data;
-    console.log("[notificationIntegrationService] Device token:", token);
+    const token = (await withTimeout(Notifications.getExpoPushTokenAsync())).data;
+    console.log("[notificationIntegrationService] Device token obtained");
 
     // Register with backend
-    const response = await apiClient.post<any>("notifications/register-device", {
-      deviceToken: token,
-      deviceType: Device?.osName || "unknown",
-      deviceModel: Device?.modelName || "unknown",
-    });
+    const response = await withTimeout(
+      apiClient.post<any>("notifications/register-device", {
+        deviceToken: token,
+        deviceType: Device?.osName || "unknown",
+        deviceModel: Device?.modelName || "unknown",
+      })
+    );
 
     const responseData = response.data as any;
 
@@ -105,11 +148,24 @@ export async function getNotifications(
   unreadOnly: boolean = false
 ): Promise<ApiResponse<Notification[]>> {
   try {
-    console.log("[notificationIntegrationService] Fetching notifications");
+    // Check if user is authenticated before making API call
+    const token = await AsyncStorage.getItem('authToken');
+    if (!token) {
+      console.warn("[notificationIntegrationService] No auth token - returning empty notifications");
+      return {
+        success: true,
+        data: [],
+        message: "User not authenticated yet",
+      };
+    }
 
-    const response = await apiClient.get<any>("notifications", {
-      params: { limit, offset, unreadOnly },
-    });
+    console.log("[notificationIntegrationService] Fetching notifications with auth token");
+
+    const response = await withTimeout(
+      apiClient.get<any>("notifications", {
+        params: { limit, offset, unreadOnly },
+      })
+    );
     const responseData = response.data as any;
 
     if (responseData.code === 1 && Array.isArray(responseData.data)) {
@@ -349,21 +405,39 @@ export async function getUnreadNotificationCount(): Promise<ApiResponse<{ count:
   try {
     console.log("[notificationIntegrationService] Fetching unread count");
 
-    const response = await apiClient.get<any>("notifications/unread-count");
-    const responseData = response.data as any;
+    // Try the direct endpoint first (if backend implements it)
+    try {
+      const response = await withTimeout(apiClient.get<any>("notifications/unread-count"));
+      const responseData = response.data as any;
 
-    if (responseData.code === 1) {
+      if (responseData.code === 1) {
+        return {
+          success: true,
+          data: { count: responseData.data?.count || 0 },
+          message: "Unread count fetched successfully",
+        };
+      }
+    } catch (error: any) {
+      // Endpoint doesn't exist, fall back to fetching unread notifications
+      console.warn("[notificationIntegrationService] Unread count endpoint not available, falling back");
+    }
+
+    // Fallback: Fetch unread notifications and count them
+    const notificationsResponse = await getNotifications(100, 0, true);
+    
+    if (notificationsResponse.success) {
+      const count = (notificationsResponse.data || []).length;
       return {
         success: true,
-        data: { count: responseData.data?.count || 0 },
+        data: { count },
         message: "Unread count fetched successfully",
       };
     }
 
     return {
       success: false,
-      message: responseData.message || "Failed to fetch unread count",
-      error: "API returned unsuccessful response",
+      message: "Failed to fetch unread count",
+      error: "Could not fetch notifications",
       data: { count: 0 },
     };
   } catch (error: any) {

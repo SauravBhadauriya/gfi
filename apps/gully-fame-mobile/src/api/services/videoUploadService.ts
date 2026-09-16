@@ -7,7 +7,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import * as FileSystem from "expo-file-system/legacy";
+import * as FileSystem from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 
 export interface VideoUploadRequest {
@@ -105,12 +105,19 @@ async function uploadToPresignedUrl(
   onProgress?: (progress: UploadProgress) => void
 ): Promise<void> {
   // Validate file exists
-  const fileInfo = await FileSystem.getInfoAsync(videoUri);
-  if (!fileInfo.exists) {
+  let fileSize = 0;
+  try {
+    const fileInfo = await FileSystem.getInfoAsync(videoUri);
+    if (!fileInfo.exists) {
+      throw new Error("Video file not found");
+    }
+    fileSize = fileInfo.size || 0;
+  } catch (error) {
+    console.error(`[videoUploadService] File validation failed:`, error);
     throw new Error("Video file not found");
   }
 
-  const fileSizeInMB = (fileInfo.size || 0) / (1024 * 1024);
+  const fileSizeInMB = fileSize / (1024 * 1024);
   console.log(`[videoUploadService] 📹 Uploading to presigned URL - size: ${fileSizeInMB.toFixed(2)}MB`);
   console.log(`[videoUploadService] 📹 Using streaming upload (uploadAsync) to avoid memory issues`);
 
@@ -151,13 +158,20 @@ export async function uploadVideoFile(
       console.log(`[videoUploadService] Upload attempt ${attempt}/${retries}:`, videoUri);
 
       // Validate file exists
-      const fileInfo = await FileSystem.getInfoAsync(videoUri);
-      if (!fileInfo.exists) {
+      let fileSize = 0;
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(videoUri);
+        if (!fileInfo.exists) {
+          throw new Error("Video file not found");
+        }
+        fileSize = fileInfo.size || 0;
+      } catch (error) {
+        console.error(`[videoUploadService] File validation failed:`, error);
         throw new Error("Video file not found");
       }
 
       // Check file size (limit to 500MB)
-      const fileSizeInMB = (fileInfo.size || 0) / (1024 * 1024);
+      const fileSizeInMB = fileSize / (1024 * 1024);
       console.log(`[videoUploadService] 📹 [VERIFICATION] File validation - exists: true, size: ${fileSizeInMB.toFixed(2)}MB`);
       
       if (fileSizeInMB > 500) {

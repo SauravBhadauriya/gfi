@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -18,12 +18,12 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path, Circle, Rect, G } from "react-native-svg";
 
 let VideoEditorModule: any = null;
-import { MusicPickerModal } from "@/components/modals/MusicPickerModal";
+import { MusicLibraryModal } from "@/components/MusicLibraryModal";
 import { listAudio } from "@api/services/musicLibraryService";
 import { listFilters, FilterPreset } from "@api/services/filterLibraryService";
 import {
@@ -39,6 +39,29 @@ import {
 
 const { width } = Dimensions.get("window");
 
+
+  useEffect(() => {
+    const requestPermissions = async () => {
+      console.log("[CAMERA] Mounted - requesting permissions");
+      try {
+        if (!cameraPermission?.granted) {
+          console.log("[CAMERA] Requesting camera permission");
+          if (requestCameraPermission) {
+            await requestCameraPermission();
+          }
+        }
+        if (!microphonePermission?.granted) {
+          console.log("[CAMERA] Requesting microphone permission");
+          if (requestMicrophonePermission) {
+            await requestMicrophonePermission();
+          }
+        }
+      } catch (error) {
+        console.error("[CAMERA] Permission error:", error);
+      }
+    };
+    requestPermissions();
+  }, [requestCameraPermission, requestMicrophonePermission]);
 
 type RecordingMode = "video";
 type CameraFacing = "front" | "back";
@@ -83,9 +106,35 @@ function _mapResolutionToQuality(resolution: string): string {
   }
 }
 
+function _getVideoQualityBitrate(resolution: string): number {
+  // Bitrate in bits per second for different resolutions
+  switch (resolution?.toLowerCase()) {
+    case "4k":
+    case "4k_3840x2160":
+      return 15000000; // 15 Mbps for 4K
+    case "2k":
+    case "2k_2560x1440":
+      return 8000000;  // 8 Mbps for 2K
+    case "fhd":
+    case "1080p":
+      return 5000000;  // 5 Mbps for FHD
+    case "hd":
+    case "720p":
+    default:
+      return 2500000;  // 2.5 Mbps for HD
+  }
+}
+
 
 export default function TikTokCameraScreen() {
   console.log("🔥🔥🔥 GULLYFAME CAMERA SCREEN RUNTIME VERSION 999 - ACTUAL ROUTE 🔥🔥🔥");
+  const [isFocused, setIsFocused] = useState(true);
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
+  );
   const params = useLocalSearchParams();
   const competitionId = params.competitionId ? String(params.competitionId) : null;
   const [showVideoEditor, setShowVideoEditor] = useState(false);
@@ -166,23 +215,24 @@ export default function TikTokCameraScreen() {
 
   
   const handleCameraReady = () => {
-    console.log("[CAMERA] onCameraReady fired");
+    console.log("[CAMERA] ========== onCameraReady FIRED ==========");
+    console.log("[CAMERA] Platform:", Platform.OS);
+    console.log("[CAMERA] Camera is now ready for recording/photos");
+    if (Platform.OS === 'android') {
+      console.log("[CAMERA-ANDROID] Preview should now be initialized");
+      console.log("[CAMERA-ANDROID] Ratio: 16:9");
+    }
     setCameraReady(true);
   };
 
   const startRecording = async () => {
     console.log("[RECORDING] START REQUESTED");
     
-    
-    console.log("[PERMISSION] camera granted:", cameraPermission?.granted);
-    console.log("[PERMISSION] microphone granted:", microphonePermission?.granted);
-    
     if (isRecording) {
       console.log("[RECORDING] Already recording, ignoring");
       return;
     }
 
-    
     if (!microphonePermission?.granted) {
       try {
         const micPermission = await requestMicrophonePermission();
@@ -206,7 +256,6 @@ export default function TikTokCameraScreen() {
       }
     }
 
-    
     if (!cameraRef.current) {
       console.log("[CAMERA] ref NOT ready");
       Alert.alert("Error", "Camera not ready. Please wait a moment and try again.");
@@ -214,7 +263,6 @@ export default function TikTokCameraScreen() {
     }
     
     console.log("[CAMERA] ref ready");
-    
     
     if (!cameraReady) {
       console.log("[CAMERA] Camera not ready yet (onCameraReady not fired)");
@@ -224,11 +272,9 @@ export default function TikTokCameraScreen() {
     
     console.log("[CAMERA] Camera ready to record");
 
-    
     setIsRecording(true);
     recordingStartTime.current = Date.now();
 
-    
     Animated.timing(toolbarOpacity, {
       toValue: 0.3,
       duration: 200,
@@ -249,7 +295,6 @@ export default function TikTokCameraScreen() {
       friction: 8,
     }).start();
 
-    
     const maxDuration = maxRecordingDuration > 0 ? maxRecordingDuration : 60;
     progressAnim.setValue(0);
     Animated.timing(progressAnim, {
@@ -261,67 +306,84 @@ export default function TikTokCameraScreen() {
     try {
       console.log("[RECORDING] INVOKING recordAsync");
       
-      
-      console.log("[CAMERA API]", {
-        refExists: !!cameraRef.current,
-        recordAsync: typeof cameraRef.current?.recordAsync,
-        stopRecording: typeof cameraRef.current?.stopRecording,
-      });
-      
-      
       const recordingOptions: any = {
         mute: false, 
-        maxDuration: (maxRecordingDuration || 60) * 1000, 
-        
+        maxDuration: (maxRecordingDuration || 60) * 1000,
         quality: _mapResolutionToQuality(selectedCameraFormat.resolution),
-        codec: 'H264',
       };
       
-      console.log("[RECORDING OPTIONS]", {
-        permissions: {
-          camera: cameraPermission?.granted,
-          microphone: microphonePermission?.granted,
-        },
-        maxDuration: recordingOptions.maxDuration,
-        quality: recordingOptions.quality,
-        frameRate: selectedCameraFormat.frameRate,
-        resolution: selectedCameraFormat.resolution,
-      });
+      console.log("[RECORDING OPTIONS]", recordingOptions);
       
-      console.log("[RECORDING] Calling recordAsync with quality options");
-      const promise = cameraRef.current.recordAsync(recordingOptions);
+      const videoData = await cameraRef.current.recordAsync(recordingOptions);
       
-      if (!promise) {
-        throw new Error("recordAsync returned null");
+      console.log("[RECORDING] RESOLVED with data:", videoData);
+
+      if (!videoData?.uri) {
+        console.log("[FILE] NO URI - recording produced no data");
+        setIsRecording(false);
+        recordingRef.current = null;
+        Alert.alert("Error", "No video recorded");
+        
+        Animated.timing(toolbarOpacity, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }).start();
+        Animated.spring(clipBarTranslateY, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 8,
+        }).start();
+        Animated.spring(zoomMenuScale, {
+          toValue: 0,
+          useNativeDriver: true,
+          tension: 50,
+          friction: 8,
+        }).start();
+        progressAnim.setValue(0);
+        return;
       }
 
-      console.log("[RECORDING] recordAsync INVOKED");
-      recordingRef.current = promise;
+      console.log("[FILE] URI:", videoData.uri);
+      const newClip: VideoClip = {
+        id: Date.now().toString(),
+        uri: videoData.uri,
+        duration: Math.floor((Date.now() - recordingStartTime.current) / 1000),
+      };
+      
+      console.log("[CLIP] CREATED:", newClip);
+      setRecordedClips((prev) => [...prev, newClip]);
 
-      
-      console.log("[TIMER] START - max duration:", maxRecordingDuration, "seconds");
-      const timerInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recordingStartTime.current) / 1000);
-        const minutes = Math.floor(elapsed / 60);
-        const seconds = elapsed % 60;
-        const timeStr = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        setRecordingTime(timeStr);
-        console.log(`[TIMER] ${timeStr}`);
-        
-        
-        if (maxRecordingDuration > 0 && elapsed >= maxRecordingDuration) {
-          console.log("[TIMER] Max duration reached, auto-stopping");
-          stopRecording();
-        }
-      }, 1000);
-      
-      timerIntervalRef.current = timerInterval as any;
+      setIsRecording(false);
+      recordingRef.current = null;
+
+      Animated.timing(toolbarOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+
+      Animated.spring(clipBarTranslateY, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 50,
+        friction: 8,
+      }).start();
+
+      Animated.spring(zoomMenuScale, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 50,
+        friction: 8,
+      }).start();
+
+      progressAnim.setValue(0);
 
     } catch (error: any) {
       console.error("[RECORDING] START ERROR:", error?.message);
       setIsRecording(false);
-      isStopping.current = false;
-      
+      recordingRef.current = null;
       
       Animated.timing(toolbarOpacity, {
         toValue: 1,
@@ -348,120 +410,27 @@ export default function TikTokCameraScreen() {
       );
     }
   };
-
-  
   const stopRecording = async () => {
-    console.log("[STOP] REQUESTED - source: USER");
-    
-    if (isStopping.current) {
-      console.log("[STOP] Already stopping, ignoring");
-      return;
-    }
+    console.log("[STOP] REQUESTED");
     
     if (!isRecording) {
       console.log("[STOP] Not recording, ignoring");
       return;
     }
 
-    isStopping.current = true;
-
     try {
-      const elapsed = (Date.now() - recordingStartTime.current) / 1000;
-      
-      
       if (timerIntervalRef.current) {
         clearInterval(timerIntervalRef.current);
         timerIntervalRef.current = null;
       }
-      console.log("[TIMER] STOPPED");
 
-      progressAnim.stopAnimation();
-
-      
-      if (!cameraRef.current || !recordingRef.current) {
-        console.log("[STOP] No camera ref or recording promise");
-        setIsRecording(false);
-        isStopping.current = false;
-        return;
+      if (cameraRef.current?.isRecording) {
+        cameraRef.current.stopRecording();
       }
-
-      
-      console.log("[STOP] NATIVE STOP EXECUTING");
-      cameraRef.current.stopRecording();
-
-      
-      console.log("[RECORDING] WAITING FOR RESULT");
-      const result = await recordingRef.current;
-      
-      console.log("[RECORDING] RESOLVED");
-      console.log("[RECORDING] result:", result);
-
-      
-      if (!result?.uri) {
-        console.log("[FILE] NO URI - recording produced no data");
-        setIsRecording(false);
-        isStopping.current = false;
-        recordingRef.current = null;
-        return;
-      }
-
-      
-      console.log("[FILE] URI:", result.uri);
-      const newClip: VideoClip = {
-        id: Date.now().toString(),
-        uri: result.uri,
-        duration: elapsed,
-      };
-      
-      console.log("[CLIP] CREATED:", newClip);
-      setRecordedClips((prev) => [...prev, newClip]);
-      console.log("[CLIPS] count:", recordedClips.length + 1);
-
-    } catch (error: any) {
-      console.error("[RECORDING] ERROR MESSAGE:", error?.message);
-      console.error("[RECORDING] ERROR CODE:", error?.code);
-      console.error("[RECORDING] ERROR:", error);
-      
-      const errorMsg = String(error?.message || "").toLowerCase();
-      
-      if (errorMsg.includes("unknown")) {
-        console.log("[NATIVE RECORDING FAILURE] Unknown error - likely permission or codec issue");
-        console.log("[DEBUG] Check microphone permission, storage permission, and device codec support");
-      } else if (errorMsg.includes("no data") || errorMsg.includes("stopped before")) {
-        console.log("[NATIVE RECORDING FAILURE] No video data produced");
-      }
-    } finally {
-      
-      setIsRecording(false);
-      isStopping.current = false;
-      recordingRef.current = null;
-
-      
-      Animated.timing(toolbarOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-
-      Animated.spring(clipBarTranslateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-
-      Animated.spring(zoomMenuScale, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-
-      progressAnim.setValue(0);
+    } catch (error) {
+      console.error("[STOP] ERROR:", error);
     }
   };
-
-  
   const handleRecordPress = () => {
     console.log("🔥🔥🔥 ACTUAL VISIBLE CAMERA BUTTON PRESSED 🔥🔥🔥");
     if (isRecording) {
@@ -781,6 +750,10 @@ export default function TikTokCameraScreen() {
   
   useEffect(() => {
     console.log("[COMPONENT] CameraScreen mounted");
+    console.log("[COMPONENT] Platform:", Platform.OS);
+    if (Platform.OS === 'android') {
+      console.log("[CAMERA-ANDROID] Initializing Android camera preview with ratio prop");
+    }
     
     return () => {
       console.log("[COMPONENT] CameraScreen unmounted");
@@ -827,11 +800,24 @@ export default function TikTokCameraScreen() {
 
 
   
+  useEffect(() => {
+    if (!cameraPermission?.granted) {
+      console.log("[PERMISSIONS] Requesting camera permission");
+      requestCameraPermission();
+    }
+  }, []);
+
   if (!cameraPermission) {
-    return <View style={styles.container} />;
+    console.log("[PERMISSIONS] Loading permissions...");
+    return (
+      <View style={styles.container}>
+        <Text style={{ color: "#fff", alignSelf: "center", marginTop: 50 }}>Loading...</Text>
+      </View>
+    );
   }
 
   if (!cameraPermission.granted) {
+    console.log("[PERMISSIONS] Camera permission not granted");
     return (
       <View style={styles.container}>
         <View style={styles.permissionContainer}>
@@ -847,31 +833,29 @@ export default function TikTokCameraScreen() {
 
   const bottomOffset = recordedClips.length > 0 ? 80 : 0;
 
+  console.log("[CAMERA] Render - isFocused:", isFocused, "cameraReady:", cameraReady, "hasPermission:", cameraPermission?.granted);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
       <CameraView
-        style={styles.camera}
+        style={StyleSheet.absoluteFillObject}
         facing={facing}
         flash={flashEnabled}
-        zoom={zoomRatio}
         ref={cameraRef}
-        enableTorch={flashEnabled === "on"}
         onCameraReady={handleCameraReady}
-        active={true}
         mode="video"
         mute={false}
-        {...cameraSwipeResponder.panHandlers}
-        onMountError={(event) => {
-          console.error("[CAMERA] MOUNT ERROR:", event);
-        }}
       />
 
       {}
       {isRecording && (
-        <View style={styles.recordingTimerContainer}>
-          <Text style={styles.recordingTimerText}>{recordingTime}</Text>
+        <View style={styles.recordingIndicatorsContainer}>
+          <View style={styles.recordingTimerContainer}>
+            <View style={styles.recordingIndicatorDot} />
+            <Text style={styles.recordingTimerText}>{recordingTime}</Text>
+          </View>
         </View>
       )}
 
@@ -1421,14 +1405,14 @@ export default function TikTokCameraScreen() {
       )}
 
       {}
-      <MusicPickerModal
-        isVisible={showMusicPickerModal}
-        onClose={() => setShowMusicPickerModal(false)}
-        onSelectTrack={(track) => {
-          setSelectedMusicTrack(track);
-          console.log("[MUSIC] Selected from picker:", track.title);
+      <MusicLibraryModal
+        visible={showMusicPickerModal}
+        onCancel={() => setShowMusicPickerModal(false)}
+        onSelect={(music) => {
+          setSelectedMusicTrack(music);
+          console.log("[MUSIC] Selected from picker:", music.title);
         }}
-        selectedTrackId={selectedMusicTrack?._id}
+        selectedMusic={selectedMusicTrack}
       />
 
       {}
@@ -1664,7 +1648,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   overlay: {
+    ...StyleSheet.absoluteFillObject,
     zIndex: 100,
+    pointerEvents: 'box-none',
   },
   permissionContainer: {
     flex: 1,
@@ -1708,14 +1694,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     zIndex: 15,
+    flexDirection: "row",
+    gap: 12,
+  },
+  recordingIndicatorDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: "#FF0000",
+    opacity: 1,
+    shadowColor: "#FF0000",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 4,
   },
   recordingTimerText: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#FF0080",
-    textShadowColor: "rgba(0, 0, 0, 0.8)",
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    color: "#fff",
+    fontFamily: "monospace",
+    textShadowColor: "#000",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
+  },
+  recordingIndicatorsContainer: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    pointerEvents: "none",
+    zIndex: 20,
   },
   modeSelector: {
     position: "absolute",
@@ -1978,6 +1987,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: "#EC9A15",
     marginLeft: 12,
+    zIndex: 100,
   },
   nextButtonText: {
     color: "#fff",

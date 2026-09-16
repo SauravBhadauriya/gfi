@@ -7,7 +7,7 @@ import {
   View,
   Image,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-video';
+import { Video } from 'expo-video';
 import type { CameraClip } from '../types/camera.types';
 
 interface ClipPlayerOverlayProps {
@@ -39,7 +39,7 @@ const ClipPlayerOverlay: React.FC<ClipPlayerOverlayProps> = ({ clip, onClose }) 
             style={styles.media}
             source={{ uri: clip.uri }}
             useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
+            resizeMode="contain"
             shouldPlay
             isLooping={false}
             rate={clip.speed ?? 1.0}

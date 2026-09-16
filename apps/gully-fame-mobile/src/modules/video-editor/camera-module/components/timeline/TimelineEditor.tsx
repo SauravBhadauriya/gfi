@@ -1,10 +1,11 @@
 // PATH: apps/gully-fame-mobile/src/modules/video-editor/camera-module/components/timeline/TimelineEditor.tsx
 
-import React, { useCallback, useState, useMemo, useRef } from "react";
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View, ScrollView, Modal, TextInput, Alert, SafeAreaView } from "react-native";
+import React, { useCallback, useState, useMemo, useRef, useEffect } from "react";
+import { Dimensions, StyleSheet, Text, TouchableOpacity, View, ScrollView, Modal, TextInput, Alert, SafeAreaView, ActivityIndicator } from "react-native";
 import Svg, { Path, Rect, Circle } from "react-native-svg";
 import type { CameraClip } from "../../types/camera.types";
 import MultiClipPlayer from "./MultiClipPlayer";
+import { musicLibraryService } from "../../../../../api/services/musicLibraryService";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -31,15 +32,18 @@ interface TimelineEditorProps {
   onRedo?: () => void;
 }
 
-// --- DUMMY DATA FOR LIBRARIES ---
-const DUMMY_AUDIO = [
-  { id: '1', title: 'Musicaltunnel', artist: 'musicaltunnel • 27L reels', duration: 6 },
-  { id: '2', title: 'Sukoon', artist: 'Othoms • 3.9L reels', duration: 10 },
-  { id: '3', title: 'Koi Baat Hai', artist: 'Arjun Tanwar', duration: 15 },
-];
-const DUMMY_SOUND_FX = ['Swoosh', 'Ding', 'Heartbeat', 'Glitch', 'Laughter'];
+// --- EFFECTS & STICKERS (Not track data) ---
 const DUMMY_FILTERS = ['Paris', 'Vintage', 'Cinematic', 'B&W', 'Cool', 'Warm'];
 const DUMMY_STICKERS = ['🔥', '❤️', '😂', '✨', '🎵', '💯'];
+
+interface AudioTrack {
+  _id: string;
+  title: string;
+  artist: string;
+  duration: number;
+  audioUrl?: string;
+  usageCount?: number;
+}
 
 const TimelineEditor: React.FC<TimelineEditorProps> = ({
   clips, onClipsUpdate, onBack, onNext, onAddClip, onUndo, onRedo,
@@ -55,6 +59,37 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
   // Modals System
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [textInput, setTextInput] = useState('');
+
+  // Audio Library State (Real API)
+  const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+
+  // Load audio tracks from real API when modal opens
+  const loadAudioTracks = async () => {
+    try {
+      setAudioLoading(true);
+      setAudioError(null);
+      const result = await musicLibraryService.listAudio("trending", 1, 20);
+      if (result.success && result.data?.tracks) {
+        setAudioTracks(result.data.tracks);
+      } else {
+        setAudioError('Failed to load audio tracks');
+      }
+    } catch (error) {
+      console.error('[TimelineEditor] Error loading audio tracks:', error);
+      setAudioError('Error loading audio library');
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
+  // Load audio tracks on component mount or when modal opens
+  useEffect(() => {
+    if (activeModal === 'audio' && audioTracks.length === 0 && !audioLoading) {
+      loadAudioTracks();
+    }
+  }, [activeModal]);
 
   const totalDuration = useMemo(() => localClips.reduce((acc, c) => acc + (c.duration || 3), 0), [localClips]);
 
@@ -334,13 +369,50 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
         <View style={styles.modalOverlay}>
           <View style={[styles.modalSheet, {height: '60%'}]}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>Audio Library</Text><TouchableOpacity onPress={() => setActiveModal(null)}><Text style={{color:'#FFF', fontSize: 20}}>✕</Text></TouchableOpacity></View>
-            <ScrollView>
-              {DUMMY_AUDIO.map(s => (
-                <TouchableOpacity key={s.id} style={styles.listItem} onPress={() => handleAddTrack('audio', 'audio', s.title, '#D81B60', s.duration)}>
-                  <View style={styles.albumArt}><Text>🎵</Text></View><View><Text style={{color: '#FFF', fontWeight: 'bold'}}>{s.title}</Text><Text style={{color: '#888', fontSize: 12}}>{s.artist}</Text></View>
+            {audioLoading && (
+              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                <ActivityIndicator size="large" color="#D81B60" />
+                <Text style={{color: '#AAA', marginTop: 12}}>Loading audio tracks...</Text>
+              </View>
+            )}
+            {audioError && !audioLoading && (
+              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20}}>
+                <Text style={{color: '#FF6B6B', textAlign: 'center', marginBottom: 12}}>{audioError}</Text>
+                <TouchableOpacity style={styles.primaryBtn} onPress={loadAudioTracks}>
+                  <Text style={{color: '#000', fontWeight: 'bold'}}>Retry</Text>
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              </View>
+            )}
+            {!audioLoading && !audioError && audioTracks.length === 0 && (
+              <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}>
+                <Text style={{color: '#888'}}>No audio tracks available</Text>
+              </View>
+            )}
+            {!audioLoading && !audioError && audioTracks.length > 0 && (
+              <ScrollView>
+                {audioTracks.map(track => {
+                  const usageDisplay = track.usageCount 
+                    ? track.usageCount >= 100000 
+                      ? `${Math.floor(track.usageCount / 100000)}L reels`
+                      : `${track.usageCount} uses`
+                    : 'No usage data';
+                  
+                  return (
+                    <TouchableOpacity 
+                      key={track._id} 
+                      style={styles.listItem} 
+                      onPress={() => handleAddTrack('audio', 'audio', track.title, '#D81B60', track.duration || 6)}
+                    >
+                      <View style={styles.albumArt}><Text>🎵</Text></View>
+                      <View style={{flex: 1}}>
+                        <Text style={{color: '#FFF', fontWeight: 'bold'}}>{track.title}</Text>
+                        <Text style={{color: '#888', fontSize: 12}}>{track.artist} • {usageDisplay}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>

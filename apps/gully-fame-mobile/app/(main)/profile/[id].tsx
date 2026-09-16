@@ -1,10 +1,8 @@
-
-
-
+import React, { useEffect, useRef } from "react";
 import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { View, ActivityIndicator, StatusBar } from "react-native";
+import { useFocusEffect } from "@react-navigation/native";
 import { getProfileRoute, DEFAULT_ROLE } from "@/components/profile/shared/profileTypes";
 
 export default function ProfileRouter() {
@@ -12,23 +10,23 @@ export default function ProfileRouter() {
   const hasRouted = useRef(false);
   const profileIdRef = useRef<string>("");
   const lastRefreshRef = useRef<string>("");
-  
+
   const profileId = (params.id as string) || (params.userId as string) || "";
   const role = (params.role as string) || DEFAULT_ROLE;
   const firstName = (params.firstName as string) || "";
   const lastName = (params.lastName as string) || "";
   const bio = (params.bio as string) || "";
   const refresh = (params.refresh as string) || "";
+
   useEffect(() => {
     if (refresh && refresh !== lastRefreshRef.current) {
       hasRouted.current = false;
       profileIdRef.current = "";
       lastRefreshRef.current = refresh;
     }
-    
+
     if (hasRouted.current) return;
 
-    
     if (!profileId || profileId === profileIdRef.current) {
       return;
     }
@@ -37,11 +35,8 @@ export default function ProfileRouter() {
 
     const determineRoute = async () => {
       try {
-        
         const currentUserId = await AsyncStorage.getItem("userId");
 
-        
-        
         const isViewingOther =
           profileId &&
           profileId !== "me" &&
@@ -49,7 +44,6 @@ export default function ProfileRouter() {
           profileId !== currentUserId;
 
         if (isViewingOther) {
-          
           const userRole = role || DEFAULT_ROLE;
           const route = getProfileRoute(userRole, false);
 
@@ -66,7 +60,6 @@ export default function ProfileRouter() {
             },
           } as any);
         } else {
-          
           const userRole =
             (await AsyncStorage.getItem("userRole")) || DEFAULT_ROLE;
           const route = getProfileRoute(userRole, true);
@@ -76,7 +69,6 @@ export default function ProfileRouter() {
         }
       } catch (error) {
         console.error("Error determining profile route:", error);
-        
         try {
           const userRole =
             (await AsyncStorage.getItem("userRole")) || DEFAULT_ROLE;
@@ -90,9 +82,8 @@ export default function ProfileRouter() {
     };
 
     determineRoute();
-  }, [profileId, role, firstName, lastName, bio, refresh]); 
+  }, [profileId, role, firstName, lastName, bio, refresh]);
 
-  
   return (
     <View
       style={{

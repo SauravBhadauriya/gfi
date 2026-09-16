@@ -1,25 +1,24 @@
-
-
-
-import { useRouter } from "expo-router";
-import React, { useState } from "react";
+import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect } from "expo-router/react-navigation";
+import React, { useState, useEffect } from "react";
+import { LeaderboardStyles as styles } from "@/components/TopTenLeaderboard/styles";
 import {
   Dimensions,
   Image,
   ScrollView,
   StatusBar,
+  StyleSheet,
   Text,
   TouchableOpacity,
   View,
   Modal,
   TextInput,
   Linking,
+  ActivityIndicator,
 } from "react-native";
 import BottomNav from "@components/layout/BottomNav";
 
-import { fanSelfProfileScreenStyles as styles } from "@/styles/fanSelfProfileScreenStyles";
+import { fanSelfProfileScreenStyles as profileStyles } from "@/styles/fanSelfProfileScreenStyles";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path } from "react-native-svg";
 import { authService } from "@api/services/authService";
@@ -41,27 +40,32 @@ import {
 } from "@/icons";
 import UpgradeFanToParticipantModal from "@/components/modals/UpgradeFanToParticipantModal/UpgradeFanToParticipantModal";
 import ProfileBurgerMenuModal from "@/components/modals/ProfileBurgerMenuModal/ProfileBurgerMenuModal";
+import { feedService } from "@/api/services/feedService";
+import { apiClient } from "@/api";
+import { BASE_URL } from "@/api/axios";
+
 const InstagramIconSVG = ({ width = 26, height = 26, color = "#fff" }) => (
   <Svg width={width} height={height} viewBox="0 0 24 24" fill={color}>
     <Path d="M12 2.163c3.204 0 3.584.012 4.85.067 3.249.148 4.771 1.691 4.919 4.919.055 1.266.067 1.646.067 4.851s-.012 3.584-.067 4.85c-.148 3.228-1.67 4.771-4.919 4.919-1.266.055-1.646.067-4.85.067s-3.584-.012-4.85-.067c-3.249-.148-4.771-1.691-4.919-4.919-.055-1.266-.067-1.646-.067-4.851s.012-3.584.067-4.85c.148-3.228 1.67-4.771 4.919-4.919 1.266-.055 1.646-.067 4.85-.067zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 1.76-6.982 6.982-.058 1.28-.072 1.688-.072 4.947s.014 3.667.072 4.947c.2 5.222 2.624 6.782 6.982 6.982 1.28.058 1.688.072 4.947.072s3.667-.014 4.947-.072c4.358-.2 6.78-1.76 6.982-6.982.058-1.28.072-1.688.072-4.947s-.014-3.667-.072-4.947c-.2-5.222-2.624-6.782-6.982-6.982-1.28-.058-1.688-.072-4.947-.072zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4s1.791-4 4-4 4 1.79 4 4-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z" />
   </Svg>
 );
+
 const formatHandle = (input: string) => {
   if (!input) return "";
-  
   let clean = input.replace(
     /(https?:\/\/)?(www\.)?(instagram\.com|x\.com|twitter\.com)\/?/g,
     "",
   );
-  
   clean = clean.replace(/^@/, "").replace(/\/$/, "");
   return `@${clean}`;
 };
+
 const XIconSVG = ({ width = 26, height = 26, color = "#fff" }) => (
   <Svg width={width} height={height} viewBox="0 0 24 24" fill={color}>
     <Path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.008 4.076H5.059z" />
   </Svg>
 );
+
 const { width, height } = Dimensions.get("window");
 
 const fanTabs = [
@@ -72,65 +76,8 @@ const fanTabs = [
   { name: "MyFame", icon: UserIconSVG, label: "" },
 ];
 
-const likedReels = [
-  { id: 1, image: require("@assets/images/music.png"), width: 1, height: 1 },
-  {
-    id: 2,
-    image: require("@assets/images/trending1.png"),
-    width: 1,
-    height: 2,
-  },
-  {
-    id: 3,
-    image: require("@assets/images/trending2.png"),
-    width: 2,
-    height: 1,
-  },
-  {
-    id: 4,
-    image: require("@assets/images/trending3.png"),
-    width: 1,
-    height: 1,
-  },
-  {
-    id: 5,
-    image: require("@assets/images/trending_reel1.png"),
-    width: 1,
-    height: 2,
-  },
-  {
-    id: 6,
-    image: require("@assets/images/trending_reel2.png"),
-    width: 2,
-    height: 1,
-  },
-];
-
-const saved = [
-  { id: 1, image: require("@assets/images/art.png"), width: 1, height: 1 },
-  {
-    id: 2,
-    image: require("@assets/images/trending1.png"),
-    width: 2,
-    height: 1,
-  },
-  {
-    id: 3,
-    image: require("@assets/images/trending2.png"),
-    width: 1,
-    height: 2,
-  },
-  {
-    id: 4,
-    image: require("@assets/images/trending3.png"),
-    width: 1,
-    height: 1,
-  },
-];
-
 export default function OwnFanProfile() {
-  const { profileData, setProfileData, isLoading, reloadProfile } =
-    useOwnProfile();
+  const { profileData, setProfileData, isLoading, reloadProfile } = useOwnProfile();
   const [activeTab, setActiveTab] = useState("MyFame");
   const [selectedTab, setSelectedTab] = useState("Saved");
   const [tempInsta, setTempInsta] = useState(profileData.instagramLink || "");
@@ -141,34 +88,49 @@ export default function OwnFanProfile() {
   const [tempBio, setTempBio] = useState("");
   const [tempThreeWords, setTempThreeWords] = useState(["", "", ""]);
   const [levelUpModalVisible, setLevelUpModalVisible] = useState(false);
-  const router = useRouter();
 
-  
+  // Live data states for the grid
+  const [liveLikedReels, setLiveLikedReels] = useState<any[]>([]);
+  const [liveSavedReels, setLiveSavedReels] = useState<any[]>([]);
+  const [loadingGrids, setLoadingGrids] = useState(true);
+
   const { stats: followStats } = useFollowStats(profileData.id || "");
-
-  
   const { reels: userReels, loading: reelsLoading, refetch: refetchReels } = useUserReels(profileData.id || "");
 
-  
-  useFocusEffect(
-    React.useCallback(() => {
-      
-      if (profileData.id || profileData._id) {
-        refetchReels();
+  useEffect(() => {
+    const fetchGridData = async () => {
+      setLoadingGrids(true);
+      try {
+        // Fetch saved reels
+        const savedRes = await feedService.getSavedReels(1, 20);
+        if (savedRes.success && savedRes.data?.reels) {
+          setLiveSavedReels(savedRes.data.reels);
+        }
+
+        // Fetch liked reels (Assuming backend supports ?liked=true on reels endpoint)
+        try {
+          const likedRes = await apiClient.get('/reels', { params: { liked: true, limit: 20 } });
+          if (likedRes.data && likedRes.data.code === 1 && likedRes.data.data?.reels) {
+            setLiveLikedReels(likedRes.data.data.reels);
+          }
+        } catch (e) {
+          console.warn("Could not fetch liked reels", e);
+        }
+
+      } catch (error) {
+        console.error("Error fetching grid data:", error);
+      } finally {
+        setLoadingGrids(false);
       }
-      
-      
-      if (!profileData.firstName && !profileData.lastName) {
-        reloadProfile();
-      }
-    }, [profileData.id, profileData._id, profileData.firstName, profileData.lastName, reloadProfile, refetchReels]),
-  );
+    };
+
+    fetchGridData();
+  }, []);
 
   const handleBackPress = () => {
     router.replace("/(main)" as any);
   };
 
-  
   const handleFollowersPress = () => {
     const currentUserId = profileData.id || profileData._id || "";
     if (!currentUserId) {
@@ -181,7 +143,6 @@ export default function OwnFanProfile() {
     } as any);
   };
 
-  
   const handleFollowingPress = () => {
     const currentUserId = profileData.id || profileData._id || "";
     if (!currentUserId) {
@@ -196,27 +157,19 @@ export default function OwnFanProfile() {
 
   const handleEditBio = () => {
     setTempBio(profileData.bio || "");
-    
     const threeWordsStr = profileData.threeWords || "";
     if (threeWordsStr) {
-      const words = threeWordsStr
-        .split("|")
-        .map((w) => w.trim())
-        .filter((w) => w);
+      const words = threeWordsStr.split("|").map((w) => w.trim()).filter((w) => w);
       setTempThreeWords([words[0] || "", words[1] || "", words[2] || ""]);
     } else {
-      
       setTempThreeWords(["🎵 MusicLover", "💃 DanceFreak", "✨ VibeCreator"]);
     }
     setEditBioVisible(true);
   };
 
   const handleSaveBio = async () => {
-    const threeWordsFormatted = tempThreeWords
-      .filter((w) => w.trim())
-      .join(" | ");
+    const threeWordsFormatted = tempThreeWords.filter((w) => w.trim()).join(" | ");
 
-    
     setProfileData((prev) => ({
       ...prev,
       bio: tempBio,
@@ -233,7 +186,6 @@ export default function OwnFanProfile() {
         ["userXLink", tempX],
       ]);
 
-      
       const updateData: any = {
         bio: tempBio,
         instagramLink: tempInsta,
@@ -244,9 +196,7 @@ export default function OwnFanProfile() {
         updateData.threeWords = threeWordsFormatted;
       }
 
-      const updateResult = await authService.updateProfile(updateData);
-      if (updateResult.success && __DEV__)
-        console.log("✅ Bio and socials updated");
+      await authService.updateProfile(updateData);
     } catch (error) {
       console.error("Error saving profile data:", error);
     }
@@ -260,20 +210,11 @@ export default function OwnFanProfile() {
     setEditBioVisible(false);
   };
 
-  if (
-    isLoading &&
-    !profileData.firstName &&
-    !profileData.lastName &&
-    !profileData.profileImage
-  ) {
+  if (isLoading && !profileData.firstName && !profileData.lastName && !profileData.profileImage) {
     return (
-      <View
-        style={[
-          styles.container,
-          { justifyContent: "center", alignItems: "center" },
-        ]}
-      >
+      <View style={[profileStyles.container, { justifyContent: "center", alignItems: "center" }]}>
         <StatusBar barStyle="light-content" />
+        <ActivityIndicator size="large" color="#EC9A15" />
       </View>
     );
   }
@@ -282,63 +223,48 @@ export default function OwnFanProfile() {
     setUpgradeModalVisible(true);
   };
 
+  const currentGridData = selectedTab === "Liked Reels" ? liveLikedReels : liveSavedReels;
+
   return (
-    <View style={styles.container}>
+    <View style={profileStyles.container}>
       <StatusBar barStyle="light-content" />
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+      <ScrollView contentContainerStyle={profileStyles.scrollContent} showsVerticalScrollIndicator={false}>
+        <View style={profileStyles.header}>
+          <TouchableOpacity onPress={handleBackPress} style={profileStyles.backButton}>
             <BackIcon color="white" size={24} />
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={() => setMenuVisible(true)}
-            style={styles.menuButton}
-          >
-            <View style={styles.hamburgerIcon}>
-              <View style={styles.hamburgerLine} />
-              <View style={styles.hamburgerLine} />
-              <View style={styles.hamburgerLine} />
+          <TouchableOpacity onPress={() => setMenuVisible(true)} style={profileStyles.menuButton}>
+            <View style={profileStyles.hamburgerIcon}>
+              <View style={profileStyles.hamburgerLine} />
+              <View style={profileStyles.hamburgerLine} />
+              <View style={profileStyles.hamburgerLine} />
             </View>
           </TouchableOpacity>
         </View>
 
-        {}
-        <View style={styles.gamifiedAvatarContainer}>
+        <View style={profileStyles.gamifiedAvatarContainer}>
           <LinearGradient
-            colors={["#E3E4E5", "#9CA3AF", "#4B5563"]} 
-            style={styles.avatarGradientRing}
+            colors={["#E3E4E5", "#9CA3AF", "#4B5563"]}
+            style={profileStyles.avatarGradientRing}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
             <Image
               source={
                 profileData.profileImage
-                  ? { uri: profileData.profileImage }
+                  ? { uri: profileData.profileImage.startsWith('http') ? profileData.profileImage : `${BASE_URL}${profileData.profileImage}` }
                   : require("@assets/images/user1.png")
               }
-              style={styles.gamifiedProfileImage}
+              style={profileStyles.gamifiedProfileImage}
             />
           </LinearGradient>
 
-          <View
-            style={[
-              styles.rankBadgeContainer,
-              {
-                backgroundColor: "#4B5563",
-                borderColor: "#E3E4E5",
-              },
-            ]}
-          >
-            <Text style={[styles.rankBadgeText, { color: "#fff" }]}>FAN</Text>
+          <View style={[profileStyles.rankBadgeContainer, { backgroundColor: "#4B5563", borderColor: "#E3E4E5" }]}>
+            <Text style={[profileStyles.rankBadgeText, { color: "#fff" }]}>FAN</Text>
           </View>
         </View>
 
-        {}
         <UserInfoSection
           profileData={profileData}
           onEditBio={handleEditBio}
@@ -348,12 +274,10 @@ export default function OwnFanProfile() {
           handleUpgradeClick={handleUpgradeClick}
         />
 
-        {}
-        <View style={styles.socialLinksContainer}>
-          {}
+        <View style={profileStyles.socialLinksContainer}>
           {profileData.instagramLink && (
             <TouchableOpacity
-              style={styles.socialIconButton}
+              style={profileStyles.socialIconButton}
               onPress={() => {
                 const raw = profileData.instagramLink;
                 const cleanHandle = formatHandle(raw).replace("@", "");
@@ -366,12 +290,9 @@ export default function OwnFanProfile() {
 
           {profileData.xLink && (
             <TouchableOpacity
-              style={styles.socialIconButton}
+              style={profileStyles.socialIconButton}
               onPress={() => {
-                const cleanHandle = formatHandle(profileData.xLink).replace(
-                  "@",
-                  "",
-                );
+                const cleanHandle = formatHandle(profileData.xLink).replace("@", "");
                 Linking.openURL(`https://x.com/${cleanHandle}`);
               }}
             >
@@ -380,13 +301,11 @@ export default function OwnFanProfile() {
           )}
         </View>
 
-        {}
         <LinearGradient
           colors={["rgba(41, 33, 24, 0.2)", "#3C2610"]}
           locations={[0.0, 0.4]}
-          style={styles.contentContainer}
+          style={profileStyles.contentContainer}
         >
-          {}
           <StatsSection
             photos={userReels.length}
             followers={followStats.followers}
@@ -395,49 +314,41 @@ export default function OwnFanProfile() {
             onFollowingPress={handleFollowingPress}
           />
 
-          {}
           <LevelUpSection
             onPress={() => setLevelUpModalVisible(true)}
             levelPercentage={profileData.levelPercentage}
           />
 
-          {}
-          <View style={styles.tabContainer}>
+          <View style={profileStyles.tabContainer}>
             <TouchableOpacity
-              style={[
-                styles.tab,
-                selectedTab === "Liked Reels" && styles.tabActive,
-              ]}
+              style={[profileStyles.tab, selectedTab === "Liked Reels" && profileStyles.tabActive]}
               onPress={() => setSelectedTab("Liked Reels")}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === "Liked Reels" && styles.activeTabText,
-                ]}
-              >
+              <Text style={[profileStyles.tabText, selectedTab === "Liked Reels" && profileStyles.activeTabText]}>
                 Liked Reels
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.tab, selectedTab === "Saved" && styles.tabActive]}
+              style={[profileStyles.tab, selectedTab === "Saved" && profileStyles.tabActive]}
               onPress={() => setSelectedTab("Saved")}
             >
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === "Saved" && styles.activeTabText,
-                ]}
-              >
+              <Text style={[profileStyles.tabText, selectedTab === "Saved" && profileStyles.activeTabText]}>
                 Saved
               </Text>
             </TouchableOpacity>
           </View>
 
-          {}
-          <View style={styles.gridContainer}>
-            {(selectedTab === "Liked Reels" ? likedReels : saved).map(
-              (item, index) => {
+          <View style={profileStyles.gridContainer}>
+            {loadingGrids ? (
+              <View style={{ width: '100%', paddingVertical: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#EC9A15" />
+              </View>
+            ) : currentGridData.length === 0 ? (
+              <View style={{ width: '100%', paddingVertical: 40, alignItems: 'center' }}>
+                <Text style={{ color: '#999' }}>No {selectedTab.toLowerCase()} found.</Text>
+              </View>
+            ) : (
+              currentGridData.map((item, index) => {
                 const baseSize = (width - 28 - 4) / 2;
                 const itemStyle = {
                   width: baseSize,
@@ -447,224 +358,87 @@ export default function OwnFanProfile() {
                 };
                 return (
                   <TouchableOpacity
-                    key={item.id}
-                    style={[styles.gridItem, itemStyle]}
+                    key={item._id || item.id || index}
+                    style={[profileStyles.gridItem, itemStyle]}
                     onPress={() => {
-                      
-                      
-                      console.log(
-                        `Opening ${selectedTab === "Liked Reels" ? "reel" : "saved post"} ${item.id}`,
-                      );
+                      // Navigate to reel view later
                     }}
                   >
-                    <Image source={item.image} style={styles.gridImage} />
+                    <Image 
+                      source={item.thumbnail_url || item.thumbnail ? { uri: `${BASE_URL}${item.thumbnail_url || item.thumbnail}` } : require("@assets/images/trending_reel2.png")} 
+                      style={profileStyles.gridImage} 
+                    />
                   </TouchableOpacity>
                 );
-              },
+              })
             )}
           </View>
         </LinearGradient>
       </ScrollView>
 
-      {}
-      <Modal
-        visible={levelUpModalVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setLevelUpModalVisible(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setLevelUpModalVisible(false)}
-        >
-          <View style={styles.levelUpModalContainer}>
-            <View style={styles.levelUpModalContent}>
-              <Text style={styles.levelUpModalTitle}>How to Level Up</Text>
-
-              <View style={styles.levelUpRulesContainer}>
-                <View style={styles.levelUpRuleItem}>
-                  <Text style={styles.levelUpRuleText}>
-                    Unlock 1st star → after 3 competitions
-                  </Text>
-                </View>
-                <View style={styles.levelUpRuleItem}>
-                  <Text style={styles.levelUpRuleText}>
-                    Unlock 2nd star → after 5 competitions
-                  </Text>
-                </View>
-                <View style={styles.levelUpRuleItem}>
-                  <Text style={styles.levelUpRuleText}>
-                    Unlock 3rd star → after 10 competitions
-                  </Text>
-                </View>
-                <View style={styles.levelUpRuleItem}>
-                  <Text style={styles.levelUpRuleText}>
-                    Unlock 4th star → after 20 competitions
-                  </Text>
-                </View>
-                <View style={styles.levelUpRuleItem}>
-                  <Text style={styles.levelUpRuleText}>
-                    Unlock 5th star → after 30 competitions
-                  </Text>
-                </View>
+      {/* Modals Truncated for Brevity - Keeping exact same UI */}
+      <Modal visible={levelUpModalVisible} transparent={true} animationType="slide" onRequestClose={() => setLevelUpModalVisible(false)}>
+        <TouchableOpacity style={profileStyles.modalOverlay} activeOpacity={1} onPress={() => setLevelUpModalVisible(false)}>
+          <View style={profileStyles.levelUpModalContainer}>
+            <View style={profileStyles.levelUpModalContent}>
+              <Text style={profileStyles.levelUpModalTitle}>How to Level Up</Text>
+              <View style={profileStyles.levelUpRulesContainer}>
+                <View style={profileStyles.levelUpRuleItem}><Text style={profileStyles.levelUpRuleText}>Unlock 1st star → after 3 competitions</Text></View>
+                <View style={profileStyles.levelUpRuleItem}><Text style={profileStyles.levelUpRuleText}>Unlock 2nd star → after 5 competitions</Text></View>
+                <View style={profileStyles.levelUpRuleItem}><Text style={profileStyles.levelUpRuleText}>Unlock 3rd star → after 10 competitions</Text></View>
+                <View style={profileStyles.levelUpRuleItem}><Text style={profileStyles.levelUpRuleText}>Unlock 4th star → after 20 competitions</Text></View>
+                <View style={profileStyles.levelUpRuleItem}><Text style={profileStyles.levelUpRuleText}>Unlock 5th star → after 30 competitions</Text></View>
               </View>
-
-              <Text style={styles.levelUpModalNote}>
-                If your fans upgrade your profile to Participant, your level-up
-                progress will increase.
-              </Text>
-
-              <TouchableOpacity
-                style={styles.levelUpModalCloseButton}
-                onPress={() => setLevelUpModalVisible(false)}
-              >
-                <Text style={styles.levelUpModalCloseButtonText}>Close</Text>
+              <Text style={profileStyles.levelUpModalNote}>If your fans upgrade your profile to Participant, your level-up progress will increase.</Text>
+              <TouchableOpacity style={profileStyles.levelUpModalCloseButton} onPress={() => setLevelUpModalVisible(false)}>
+                <Text style={profileStyles.levelUpModalCloseButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
         </TouchableOpacity>
       </Modal>
 
-      {}
-      <ProfileBurgerMenuModal
-        isVisible={menuVisible}
-        profileData={profileData}
-        onClose={() => setMenuVisible(false)}
-      ></ProfileBurgerMenuModal>
-      <UpgradeFanToParticipantModal
-        isVisible={upgradeModalVisible}
-        onClose={() => setUpgradeModalVisible(false)}
-        onUpgradeSuccess={() => setUpgradeModalVisible(false)}
-      ></UpgradeFanToParticipantModal>
-      {}
-      <Modal
-        visible={editBioVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={handleCancelEdit}
-      >
-        <View style={styles.editBioOverlay}>
-          <View style={styles.editBioContainer}>
-            <View style={styles.editBioHeader}>
-              <Text style={styles.editBioTitle}>Edit Bio & Three Words</Text>
-              <TouchableOpacity onPress={handleCancelEdit}>
-                <CrossIcon></CrossIcon>
-              </TouchableOpacity>
+      <ProfileBurgerMenuModal isVisible={menuVisible} profileData={profileData} onClose={() => setMenuVisible(false)} />
+      <UpgradeFanToParticipantModal isVisible={upgradeModalVisible} onClose={() => setUpgradeModalVisible(false)} onUpgradeSuccess={() => setUpgradeModalVisible(false)} />
+      
+      <Modal visible={editBioVisible} transparent={true} animationType="fade" onRequestClose={handleCancelEdit}>
+        <View style={profileStyles.editBioOverlay}>
+          <View style={profileStyles.editBioContainer}>
+            <View style={profileStyles.editBioHeader}>
+              <Text style={profileStyles.editBioTitle}>Edit Bio & Three Words</Text>
+              <TouchableOpacity onPress={handleCancelEdit}><CrossIcon /></TouchableOpacity>
             </View>
-
-            <Text style={styles.editLabel}>Bio</Text>
-            <TextInput
-              style={styles.editBioInput}
-              value={tempBio}
-              onChangeText={setTempBio}
-              placeholder="Write something about yourself..."
-              placeholderTextColor="#999"
-              multiline
-              maxLength={150}
-              autoFocus
-            />
-            <Text style={styles.bioCharCount}>{tempBio.length}/150</Text>
-
-            <Text style={[styles.editLabel, { marginTop: 20 }]}>
-              Describe yourself in three words
-            </Text>
-            <View style={styles.threeWordsEditContainer}>
-              <TextInput
-                style={styles.threeWordsEditInput}
-                placeholder="1st word"
-                placeholderTextColor="#999"
-                value={tempThreeWords[0]}
-                onChangeText={(text) => {
-                  const newWords = [...tempThreeWords];
-                  newWords[0] = text;
-                  setTempThreeWords(newWords);
-                }}
-              />
-              <Text style={styles.threeWordsEditSeparator}>|</Text>
-              <TextInput
-                style={styles.threeWordsEditInput}
-                placeholder="2nd word"
-                placeholderTextColor="#999"
-                value={tempThreeWords[1]}
-                onChangeText={(text) => {
-                  const newWords = [...tempThreeWords];
-                  newWords[1] = text;
-                  setTempThreeWords(newWords);
-                }}
-              />
-              <Text style={styles.threeWordsEditSeparator}>|</Text>
-              <TextInput
-                style={styles.threeWordsEditInput}
-                placeholder="3rd word"
-                placeholderTextColor="#999"
-                value={tempThreeWords[2]}
-                onChangeText={(text) => {
-                  const newWords = [...tempThreeWords];
-                  newWords[2] = text;
-                  setTempThreeWords(newWords);
-                }}
-              />
+            <Text style={profileStyles.editLabel}>Bio</Text>
+            <TextInput style={profileStyles.editBioInput} value={tempBio} onChangeText={setTempBio} placeholder="Write something about yourself..." placeholderTextColor="#999" multiline maxLength={150} autoFocus />
+            <Text style={profileStyles.bioCharCount}>{tempBio.length}/150</Text>
+            <Text style={[profileStyles.editLabel, { marginTop: 20 }]}>Describe yourself in three words</Text>
+            <View style={profileStyles.threeWordsEditContainer}>
+              <TextInput style={profileStyles.threeWordsEditInput} placeholder="1st word" placeholderTextColor="#999" value={tempThreeWords[0]} onChangeText={(text) => { const newWords = [...tempThreeWords]; newWords[0] = text; setTempThreeWords(newWords); }} />
+              <Text style={profileStyles.threeWordsEditSeparator}>|</Text>
+              <TextInput style={profileStyles.threeWordsEditInput} placeholder="2nd word" placeholderTextColor="#999" value={tempThreeWords[1]} onChangeText={(text) => { const newWords = [...tempThreeWords]; newWords[1] = text; setTempThreeWords(newWords); }} />
+              <Text style={profileStyles.threeWordsEditSeparator}>|</Text>
+              <TextInput style={profileStyles.threeWordsEditInput} placeholder="3rd word" placeholderTextColor="#999" value={tempThreeWords[2]} onChangeText={(text) => { const newWords = [...tempThreeWords]; newWords[2] = text; setTempThreeWords(newWords); }} />
             </View>
-            <Text style={[styles.editLabel, { marginTop: 20 }]}>
-              Social Links
-            </Text>
+            <Text style={[profileStyles.editLabel, { marginTop: 20 }]}>Social Links</Text>
             <View style={{ gap: 10 }}>
-              <View style={styles.socialInputContainer}>
-                <View style={{ marginRight: 8 }}>
-                  <InstagramIconSVG width={26} height={26} color="#EC9A15" />
-                </View>
-                <TextInput
-                  style={styles.socialInput}
-                  placeholder="Instagram handle"
-                  placeholderTextColor="#999"
-                  value={tempInsta}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setTempInsta}
-                />
+              <View style={profileStyles.socialInputContainer}>
+                <View style={{ marginRight: 8 }}><InstagramIconSVG width={26} height={26} color="#EC9A15" /></View>
+                <TextInput style={profileStyles.socialInput} placeholder="Instagram handle" placeholderTextColor="#999" value={tempInsta} autoCapitalize="none" autoCorrect={false} onChangeText={setTempInsta} />
               </View>
-              <View style={styles.socialInputContainer}>
-                <View style={{ marginRight: 8 }}>
-                  <XIconSVG color="#EC9A15" />
-                </View>
-                <TextInput
-                  style={styles.socialInput}
-                  placeholder="X (Twitter) handle"
-                  placeholderTextColor="#999"
-                  value={tempX}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  onChangeText={setTempX}
-                />
+              <View style={profileStyles.socialInputContainer}>
+                <View style={{ marginRight: 8 }}><XIconSVG color="#EC9A15" /></View>
+                <TextInput style={profileStyles.socialInput} placeholder="X (Twitter) handle" placeholderTextColor="#999" value={tempX} autoCapitalize="none" autoCorrect={false} onChangeText={setTempX} />
               </View>
             </View>
-            <View style={styles.editBioButtons}>
-              <TouchableOpacity
-                style={[styles.editBioButton, styles.cancelButton]}
-                onPress={handleCancelEdit}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.editBioButton, styles.saveButton]}
-                onPress={handleSaveBio}
-              >
-                <Text style={styles.saveButtonText}>Save</Text>
-              </TouchableOpacity>
+            <View style={profileStyles.editBioButtons}>
+              <TouchableOpacity style={[profileStyles.editBioButton, profileStyles.cancelButton]} onPress={handleCancelEdit}><Text style={profileStyles.cancelButtonText}>Cancel</Text></TouchableOpacity>
+              <TouchableOpacity style={[profileStyles.editBioButton, profileStyles.saveButton]} onPress={handleSaveBio}><Text style={profileStyles.saveButtonText}>Save</Text></TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
-      {}
-      <BottomNav
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        tabs={fanTabs}
-        onOpenDrawer={() => {}}
-      />
+      <BottomNav activeTab={activeTab} setActiveTab={setActiveTab} tabs={fanTabs} onOpenDrawer={() => {}} />
     </View>
   );
 }

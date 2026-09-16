@@ -13,7 +13,7 @@ import {
     Platform,
     Linking,
     LayoutAnimation,
-    UIManager,
+    ActivityIndicator,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -29,35 +29,15 @@ import { pastCompetitionStyles as styles } from "@/styles/pastCompetitionStyles"
 import TopPerformer from "@/components/home/TopDancers/TopPerformer";
 import TopTenLeaderboard from "@/components/TopTenLeaderboard/TopTenLeaderboard";
 import SafeImage from "@/components/SafeImage";
-import { apiClient } from "@/api";
-
-
-
-
-
-
-
+import { competitionService } from "@/api/services/competitionService";
+import { BASE_URL } from "@/api/axios";
 
 const { height } = Dimensions.get("window");
-
 
 const formatDateShort = (dateString: string): string => {
     if (!dateString) return "";
     const date = new Date(dateString);
-    const months = [
-        "Jan",
-        "Feb",
-        "Mar",
-        "Apr",
-        "May",
-        "Jun",
-        "Jul",
-        "Aug",
-        "Sep",
-        "Oct",
-        "Nov",
-        "Dec",
-    ];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     return `${months[date.getMonth()]} ${date.getDate()}`;
 };
 
@@ -72,241 +52,91 @@ const formatCurrency = (amount: number): string => {
     return `₹${amount.toLocaleString("en-IN")}`;
 };
 
-
-const getImageSource = (source: any) => {
-    if (typeof source === "string") return { uri: source };
-    return source;
-};
-
-
-const MOCK_PAST_DATA = {
-    _id: "3",
-    status: "ENDED",
-    title: "Monsoon Moves 2024",
-    subtitle: "Bollywood Fusion",
-    description:
-        "A celebration of Bollywood fusion dance celebrating the monsoon season!",
-    totalParticipants: 245,
-    prizePool: 22000,
-    startDate: "2024-09-01T00:00:00.000Z",
-    endDate: "2024-09-30T00:00:00.000Z",
-    totalViews: 5200000,
-    bannerImage: require("@assets/images/trending1.png"),
-    results: [
-        {
-            id: "1",
-            name: "Aarav Sharma",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 1,
-            votes: 300000,
-            prizeMoneyWon: 15000,
-        },
-        {
-            id: "2",
-            name: "Priya Verma",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 2,
-            votes: 250000,
-            prizeMoneyWon: 5000,
-        },
-        {
-            id: "3",
-            name: "Rohan Patel",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 3,
-            votes: 150000,
-            prizeMoneyWon: 2000,
-        },
-        {
-            id: "4",
-            name: "Neha Gupta",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 4,
-            votes: 100000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "5",
-            name: "Vikram Singh",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 5,
-            votes: 95000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "6",
-            name: "Ananya Desai",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 6,
-            votes: 80000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "7",
-            name: "Ananya Desai",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 7,
-            votes: 80000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "8",
-            name: "Ananya Desai",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 8,
-            votes: 80000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "9",
-            name: "Ananya Desai",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 9,
-            votes: 80000,
-            prizeMoneyWon: 0,
-        },
-        {
-            id: "10",
-            name: "Ananya Desai",
-            profilePictureUrl: require("@assets/images/user1.png"),
-            rank: 10,
-            votes: 80000,
-            prizeMoneyWon: 0,
-        },
-    ],
-    recommendedPastCompetitions: [
-        {
-            _id: "2",
-            title: "Mumbai Street Beats",
-            winnerName: "Meghan Jes",
-            prizePool: 15000,
-            startDate: "2025-09-05T00:00:00.000Z",
-            endDate: "2025-09-15T00:00:00.000Z",
-            image: require("@assets/images/trending2.png"),
-        },
-        {
-            _id: "3",
-            title: "Bangalore Fusion",
-            winnerName: "Alex Turner",
-            prizePool: 8000,
-            startDate: "2025-08-01T00:00:00.000Z",
-            endDate: "2025-08-10T00:00:00.000Z",
-            image: require("@assets/images/trending3.png"),
-        },
-    ],
-};
-
 export default function PastCompetitionScreen() {
     const params = useLocalSearchParams();
-    const competitionIdFromParams = params.id
-        ? String(params.id)
-        : MOCK_PAST_DATA._id;
+    const competitionIdFromParams = String(params.id);
 
-    
-    const [competitionData, setCompetitionData] = useState<any>(MOCK_PAST_DATA);
+    const [competitionData, setCompetitionData] = useState<any>(null);
+    const [morePastComps, setMorePastComps] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
     const [shareModalVisible, setShareModalVisible] = useState(false);
     const [isRulesExpanded, setIsRulesExpanded] = useState(false);
     const shareSlideAnim = useRef(new Animated.Value(height)).current;
+
     const toggleRules = () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
         setIsRulesExpanded(!isRulesExpanded);
     };
+
     useEffect(() => {
-        (async () => {
-            if (!competitionIdFromParams) return;
+        const fetchData = async () => {
             try {
-                const resp = await apiClient.get(
-                    `/competitions/${competitionIdFromParams}`,
-                );
-                if (resp.data.code === 1 && resp.data.message === "success") {
-                    
-                    setCompetitionData({
-                        ...MOCK_PAST_DATA,
-                        ...resp.data.data,
-                    });
+                setLoading(true);
+                if (!competitionIdFromParams) return;
+
+                // Fetch details, leaderboard, and other past competitions simultaneously
+                const [compRes, leadRes, moreRes] = await Promise.all([
+                    competitionService.getCompetitionById(competitionIdFromParams),
+                    competitionService.getCompetitionLeaderboard(competitionIdFromParams, { page: 1, limit: 10 }),
+                    competitionService.getCompetitionsByStatus('COMPLETED', { page: 1, limit: 5 })
+                ]);
+
+                let compData = compRes.success ? compRes.data : null;
+                let leadData = [];
+
+                if (leadRes.success && leadRes.data?.leaderboard) {
+                    leadData = leadRes.data.leaderboard.map((entry: any) => ({
+                        rank: entry.rank,
+                        name: `${entry.user?.firstName || ''} ${entry.user?.lastName || ''}`.trim() || entry.user?.username || 'Unknown User',
+                        id: entry.user?._id || `user_${entry.rank}`,
+                        userId: entry.user?._id,
+                        votes: entry.reel?.stats?.votes || entry.votes || 0,
+                        defaultProfilePicture: entry.user?.profileImage ? { uri: `${BASE_URL}${entry.user.profileImage}` } : require("@assets/images/user1.png"),
+                        isCurrentUser: false,
+                        role: "participants",
+                        badge: entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : "⭐",
+                    }));
+                }
+
+                if (compData) {
+                    setCompetitionData({ ...compData, leaderboard: leadData });
+                }
+
+                if (moreRes.success && moreRes.data) {
+                    // Filter out the current competition from the "More" section
+                    setMorePastComps(moreRes.data.items.filter((c: any) => c._id !== competitionIdFromParams && c.id !== competitionIdFromParams));
                 }
             } catch (err) {
-                console.warn(
-                    "[CompetitionsService] API failed, relying on mock fallback",
-                    err,
-                );
+                console.error("Failed to fetch past competition details", err);
+            } finally {
+                setLoading(false);
             }
-        })();
+        };
+
+        fetchData();
     }, [competitionIdFromParams]);
 
     const handleShare = async (platform: string) => {
-        const competitionLink = `https://gullyfame.com/competition/${competitionData._id}`;
-        const competitionText = `Check out "${competitionData.title}" competition on Gully Fame! ${competitionLink}`;
+        const competitionLink = `https://gullyfame.com/competition/${competitionData?._id || competitionIdFromParams}`;
+        const competitionText = `Check out "${competitionData?.title || 'this competition'}" on Gully Fame! ${competitionLink}`;
 
         try {
             switch (platform) {
                 case "copy":
-                    try {
-                        if (Platform.OS === "web") {
-                            await navigator.clipboard.writeText(
-                                competitionLink,
-                            );
-                            Alert.alert("Copied!", "Link copied to clipboard");
-                        } else {
-                            Alert.alert("Copy Link", competitionLink, [
-                                { text: "OK" },
-                            ]);
-                        }
-                    } catch {
-                        Alert.alert("Copy Link", competitionLink);
+                    if (Platform.OS === "web") {
+                        await navigator.clipboard.writeText(competitionLink);
+                        Alert.alert("Copied!", "Link copied to clipboard");
+                    } else {
+                        Alert.alert("Copy Link", competitionLink, [{ text: "OK" }]);
                     }
                     break;
                 case "whatsapp":
+                case "whatsapp-status":
                     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(competitionText)}`;
                     if (await Linking.canOpenURL(whatsappUrl)) {
                         await Linking.openURL(whatsappUrl);
                     } else {
-                        Alert.alert(
-                            "Error",
-                            "Please install WhatsApp to share",
-                        );
-                    }
-                    break;
-                case "whatsapp-status":
-                    const statusUrl = `whatsapp://send?text=${encodeURIComponent(competitionText)}`;
-                    if (await Linking.canOpenURL(statusUrl)) {
-                        await Linking.openURL(statusUrl);
-                    } else {
-                        Alert.alert(
-                            "Error",
-                            "Please install WhatsApp to share",
-                        );
-                    }
-                    break;
-                case "instagram":
-                    const instagramUrl = `instagram://share`;
-                    if (await Linking.canOpenURL(instagramUrl)) {
-                        await Linking.openURL(instagramUrl);
-                    } else {
-                        Alert.alert(
-                            "Error",
-                            "Please install Instagram to share",
-                        );
-                    }
-                    break;
-                case "snapchat":
-                    const snapchatUrl = `snapchat://`;
-                    if (await Linking.canOpenURL(snapchatUrl)) {
-                        await Linking.openURL(snapchatUrl);
-                    } else {
-                        Alert.alert(
-                            "Error",
-                            "Please install Snapchat to share",
-                        );
-                    }
-                    break;
-                case "facebook":
-                    const facebookUrl = `fb://share?text=${encodeURIComponent(competitionText)}`;
-                    if (await Linking.canOpenURL(facebookUrl)) {
-                        await Linking.openURL(facebookUrl);
-                    } else {
-                        const fbWebUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(competitionLink)}`;
-                        await Linking.openURL(fbWebUrl);
+                        Alert.alert("Error", "Please install WhatsApp to share");
                     }
                     break;
                 case "twitter":
@@ -330,52 +160,23 @@ export default function PastCompetitionScreen() {
         }
     };
 
-    
-    const mappedResults = (competitionData.results || []).map((r: any) => ({
-        id: r.id,
-        userId: r.id,
-        rank: r.rank,
-        name: r.name,
-        votes: r.votes,
-        badge:
-            r.rank === 1
-                ? "🥇"
-                : r.rank === 2
-                  ? "🥈"
-                  : r.rank === 3
-                    ? "🥉"
-                    : "⭐",
-        label: "Top Performer",
-        defaultProfilePicture: getImageSource(r.profilePictureUrl),
-    }));
+    if (loading || !competitionData) {
+        return (
+            <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+                <ActivityIndicator size="large" color="#EC9A15" />
+            </View>
+        );
+    }
 
-    const topThreePerformers = mappedResults.filter((p: any) => p.rank <= 3);
-    const leaderboardPerformers = mappedResults.filter((p: any) => p.rank > 3);
-
-    
-    const morePastCompetitions = (
-        competitionData.recommendedPastCompetitions || []
-    ).map((comp: any) => ({
-        id: comp._id,
-        title: comp.title,
-        category: "Competition",
-        prize: formatCurrency(comp.prizePool),
-        dates: `${formatDateShort(comp.startDate)} - ${formatDateShort(comp.endDate)}`,
-        winner: comp.winnerName,
-        image: comp.image || require("@assets/images/trending1.png"),
-        imageUrl: null,
-    }));
+    const topThreePerformers = competitionData.leaderboard?.filter((p: any) => p.rank <= 3) || [];
+    const leaderboardPerformers = competitionData.leaderboard?.filter((p: any) => p.rank > 3) || [];
 
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" backgroundColor="#3C2610" />
 
-            {}
             <View style={styles.header}>
-                <TouchableOpacity
-                    onPress={() => router.back()}
-                    style={styles.headerButton}
-                >
+                <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
                     <BackIcon />
                 </TouchableOpacity>
                 <Text style={styles.headerTitle} numberOfLines={1}>
@@ -398,25 +199,16 @@ export default function PastCompetitionScreen() {
                 </TouchableOpacity>
             </View>
 
-            <ScrollView
-                style={styles.scrollView}
-                showsVerticalScrollIndicator={false}
-            >
-                {}
+            <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
                 <View style={styles.compCardContainer}>
                     <View style={styles.titleCard}>
                         <View style={styles.compCardImageWrapper}>
                             <Image
-                                source={getImageSource(
-                                    competitionData.bannerImage,
-                                )}
+                                source={competitionData.image ? { uri: `${BASE_URL}${competitionData.image}` } : require("@assets/images/trending1.png")}
                                 style={styles.titleCardImage}
                                 resizeMode="cover"
                             />
-                            <LinearGradient
-                                colors={["transparent", "rgba(0,0,0,0.6)"]}
-                                style={styles.bannerGradient}
-                            />
+                            <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)"]} style={styles.bannerGradient} />
                             <View style={styles.endedBadge}>
                                 <Text style={styles.endedBadgeText}>Ended</Text>
                             </View>
@@ -424,9 +216,7 @@ export default function PastCompetitionScreen() {
                                 <View style={styles.statItemOverlay}>
                                     <EyeIcon color="#fff" size={18} />
                                     <Text style={styles.statTextOverlay}>
-                                        {formatNumber(
-                                            competitionData.totalViews || 0,
-                                        )}
+                                        {formatNumber(competitionData.views || 0)}
                                     </Text>
                                 </View>
                             </View>
@@ -434,156 +224,65 @@ export default function PastCompetitionScreen() {
 
                         <View style={styles.titleCardContent}>
                             <View style={styles.titleCardHeader}>
-                                <Text style={styles.compCardTitleNew}>
-                                    {competitionData.title}
-                                </Text>
-                                <Text style={styles.compCardSubtitle}>
-                                    {competitionData.subtitle || "Competition"}
-                                </Text>
+                                <Text style={styles.compCardTitleNew}>{competitionData.title}</Text>
+                                <Text style={styles.compCardSubtitle}>{competitionData.category || "Competition"}</Text>
                             </View>
 
                             <View style={styles.heroPrizeContainer}>
-                                <Text style={styles.heroPrizeLabel}>
-                                    PRIZE POOL DISTRIBUTED
-                                </Text>
-                                <Text style={styles.heroPrizeAmount}>
-                                    {formatCurrency(
-                                        competitionData.prizePool || 0,
-                                    )}
-                                </Text>
+                                <Text style={styles.heroPrizeLabel}>PRIZE POOL DISTRIBUTED</Text>
+                                <Text style={styles.heroPrizeAmount}>{formatCurrency(competitionData.prizePool || 0)}</Text>
                             </View>
 
-                            {}
                             <View style={styles.specsRow}>
                                 <View style={styles.specBoxCenter}>
                                     <View style={styles.specHeaderCenter}>
                                         <Text style={styles.specIcon}>👥</Text>
-                                        <Text style={styles.specLabel}>
-                                            Participants
-                                        </Text>
+                                        <Text style={styles.specLabel}>Participants</Text>
                                     </View>
                                     <Text style={styles.specValueLarge}>
-                                        {competitionData.totalParticipants || 0}
+                                        {competitionData.participants?.length || 0}
                                     </Text>
                                 </View>
-
                                 <View style={styles.specVerticalDivider} />
-
                                 <View style={styles.specBoxCenter}>
                                     <View style={styles.specHeaderCenter}>
                                         <Text style={styles.specIcon}>📅</Text>
-                                        <Text style={styles.specLabel}>
-                                            Timeline
-                                        </Text>
+                                        <Text style={styles.specLabel}>Timeline</Text>
                                     </View>
                                     <Text style={styles.specValue}>
-                                        {formatDateShort(
-                                            competitionData.startDate,
-                                        )}{" "}
-                                        -{" "}
-                                        {formatDateShort(
-                                            competitionData.endDate,
-                                        )}
+                                        {formatDateShort(competitionData.startDate)} - {formatDateShort(competitionData.endDate)}
                                     </Text>
                                 </View>
                             </View>
 
-                            {}
-                            {(competitionData.description ||
-                                competitionData.rules) && (
-                                <TouchableOpacity
-                                    style={styles.missionBriefingCard}
-                                    activeOpacity={0.8}
-                                    onPress={toggleRules}
-                                >
-                                    {}
+                            {(competitionData.description || competitionData.rules) && (
+                                <TouchableOpacity style={styles.missionBriefingCard} activeOpacity={0.8} onPress={toggleRules}>
                                     <View style={styles.missionHeader}>
                                         <View style={styles.missionTitleRow}>
-                                            <Text style={styles.missionIcon}>
-                                                📜
-                                            </Text>
-                                            <Text style={styles.missionTitle}>
-                                                Event Details & Rules
-                                            </Text>
+                                            <Text style={styles.missionIcon}>📜</Text>
+                                            <Text style={styles.missionTitle}>Event Details & Rules</Text>
                                         </View>
-                                        <Text style={styles.chevron}>
-                                            {isRulesExpanded ? "▲" : "▼"}
-                                        </Text>
+                                        <Text style={styles.chevron}>{isRulesExpanded ? "▲" : "▼"}</Text>
                                     </View>
-
                                     {isRulesExpanded && (
                                         <View style={styles.missionContent}>
                                             {competitionData.description && (
                                                 <>
-                                                    <Text
-                                                        style={
-                                                            styles.missionSectionTitle
-                                                        }
-                                                    >
-                                                        About
-                                                    </Text>
-                                                    <Text
-                                                        style={
-                                                            styles.missionText
-                                                        }
-                                                    >
-                                                        {
-                                                            competitionData.description
-                                                        }
-                                                    </Text>
+                                                    <Text style={styles.missionSectionTitle}>About</Text>
+                                                    <Text style={styles.missionText}>{competitionData.description}</Text>
                                                 </>
                                             )}
-
-                                            {}
                                             {competitionData.rules && (
                                                 <>
-                                                    {competitionData.description && (
-                                                        <View
-                                                            style={
-                                                                styles.missionDivider
-                                                            }
-                                                        />
-                                                    )}
-                                                    <Text
-                                                        style={
-                                                            styles.missionSectionTitle
-                                                        }
-                                                    >
-                                                        Rules
-                                                    </Text>
-                                                    <View
-                                                        style={styles.rulesList}
-                                                    >
-                                                        {competitionData.rules
-                                                            .split("\n")
-                                                            .map(
-                                                                (
-                                                                    rule: string,
-                                                                    index: number,
-                                                                ) => (
-                                                                    <View
-                                                                        key={
-                                                                            index
-                                                                        }
-                                                                        style={
-                                                                            styles.ruleBulletRow
-                                                                        }
-                                                                    >
-                                                                        <View
-                                                                            style={
-                                                                                styles.ruleBullet
-                                                                            }
-                                                                        />
-                                                                        <Text
-                                                                            style={
-                                                                                styles.missionText
-                                                                            }
-                                                                        >
-                                                                            {rule.trim()}
-                                                                        </Text>
-                                                                    </View>
-                                                                ),
-                                                            )}
+                                                    {competitionData.description && <View style={styles.missionDivider} />}
+                                                    <Text style={styles.missionSectionTitle}>Rules</Text>
+                                                    <View style={styles.rulesList}>
+                                                        {competitionData.rules.split("\n").map((rule: string, index: number) => (
+                                                            <View key={index} style={styles.ruleBulletRow}>
+                                                                <View style={styles.ruleBullet} />
+                                                                <Text style={styles.missionText}>{rule.trim()}</Text>
+                                                            </View>
+                                                        ))}
                                                     </View>
                                                 </>
                                             )}
@@ -595,137 +294,71 @@ export default function PastCompetitionScreen() {
                     </View>
                 </View>
 
-                {}
-                {mappedResults.length > 0 && (
+                {topThreePerformers.length > 0 && (
                     <View style={styles.section}>
                         <View style={styles.finalResultsSection}>
                             <View style={styles.leaderboardTitleContainer}>
-                                <Text style={styles.leaderboardMainTitle}>
-                                    🏆 FINAL STANDINGS
-                                </Text>
-                                <Text style={styles.leaderboardSubTitle}>
-                                    Top 10 Champions
-                                </Text>
+                                <Text style={styles.leaderboardMainTitle}>🏆 FINAL STANDINGS</Text>
+                                <Text style={styles.leaderboardSubTitle}>Top 10 Champions</Text>
                             </View>
                             <View style={styles.finalResultsContainer}>
-                                {topThreePerformers
-                                    .filter((p: any) => p.rank === 2)
-                                    .map((p: any) => (
-                                        <TopPerformer
-                                            performer={p}
-                                            key={p.userId}
-                                        />
-                                    ))}
-                                {topThreePerformers
-                                    .filter((p: any) => p.rank === 1)
-                                    .map((p: any) => (
-                                        <TopPerformer
-                                            performer={p}
-                                            key={p.userId}
-                                        />
-                                    ))}
-                                {topThreePerformers
-                                    .filter((p: any) => p.rank === 3)
-                                    .map((p: any) => (
-                                        <TopPerformer
-                                            performer={p}
-                                            key={p.userId}
-                                        />
-                                    ))}
+                                {topThreePerformers.filter((p: any) => p.rank === 2).map((p: any) => (
+                                    <TopPerformer performer={p} key={p.userId} />
+                                ))}
+                                {topThreePerformers.filter((p: any) => p.rank === 1).map((p: any) => (
+                                    <TopPerformer performer={p} key={p.userId} />
+                                ))}
+                                {topThreePerformers.filter((p: any) => p.rank === 3).map((p: any) => (
+                                    <TopPerformer performer={p} key={p.userId} />
+                                ))}
                             </View>
                         </View>
                         <TopTenLeaderboard performers={leaderboardPerformers} />
                     </View>
                 )}
 
-                {}
-                {morePastCompetitions.length > 0 && (
+                {morePastComps.length > 0 && (
                     <View style={styles.section}>
-                        <Text style={styles.morePastCompTitle}>
-                            More Past Competitions
-                        </Text>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.pastCompScroll}
-                        >
-                            {morePastCompetitions.map((comp: any) => (
+                        <Text style={styles.morePastCompTitle}>More Past Competitions</Text>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pastCompScroll}>
+                            {morePastComps.map((comp: any) => (
                                 <TouchableOpacity
-                                    key={comp.id}
+                                    key={comp._id || comp.id}
                                     style={styles.compCardNew}
                                     activeOpacity={0.9}
-                                    onPress={() =>
-                                        router.push(
-                                            `/(main)/competition/past/${comp.id}` as any,
-                                        )
-                                    }
+                                    onPress={() => router.push(`/(main)/competition/past/${comp._id || comp.id}` as any)}
                                 >
                                     <SafeImage
-                                        defaultImage={getImageSource(
-                                            comp.image,
-                                        )}
-                                        imageUrl={comp.imageUrl}
+                                        defaultImage={require("@assets/images/trending1.png")}
+                                        imageUrl={comp.image ? `${BASE_URL}${comp.image}` : null}
                                         style={styles.compCardImageNew}
                                         resizeMode="cover"
                                     />
                                     <View style={styles.compCardContentNew}>
-                                        <Text
-                                            style={styles.compCardTitleNew}
-                                            numberOfLines={2}
-                                        >
-                                            {comp.title}
-                                        </Text>
+                                        <Text style={styles.compCardTitleNew} numberOfLines={2}>{comp.title}</Text>
                                         <View style={styles.compCardDetailsNew}>
-                                            <View
-                                                style={styles.compDetailItemNew}
-                                            >
-                                                <Svg
-                                                    width={16}
-                                                    height={16}
-                                                    viewBox="0 0 24 24"
-                                                    fill="none"
-                                                >
-                                                    <Path
-                                                        d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-                                                        fill="#FFD700"
-                                                    />
+                                            <View style={styles.compDetailItemNew}>
+                                                <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+                                                    <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#FFD700" />
                                                 </Svg>
-                                                <Text
-                                                    style={
-                                                        styles.compDetailTextNew
-                                                    }
-                                                >
-                                                    Winner: {comp.winner}
+                                                <Text style={styles.compDetailTextNew}>
+                                                    Winner: {comp.winners && comp.winners.length > 0 ? comp.winners[0].username : "TBD"}
                                                 </Text>
                                             </View>
                                         </View>
                                         <View style={styles.compCardFooterNew}>
                                             <View style={styles.prizeRowNew}>
                                                 <TrophyIcon size={18} />
-                                                <Text
-                                                    style={
-                                                        styles.compPrizeTextNew
-                                                    }
-                                                >
-                                                    {comp.prize}
-                                                </Text>
+                                                <Text style={styles.compPrizeTextNew}>{formatCurrency(comp.prizePool || 0)}</Text>
                                             </View>
                                             <TouchableOpacity
                                                 style={styles.resultsBtnNew}
                                                 onPress={(e) => {
                                                     e.stopPropagation();
-                                                    router.push(
-                                                        `/(main)/competition/past/${comp.id}` as any,
-                                                    );
+                                                    router.push(`/(main)/competition/past/${comp._id || comp.id}` as any);
                                                 }}
                                             >
-                                                <Text
-                                                    style={
-                                                        styles.resultsBtnTextNew
-                                                    }
-                                                >
-                                                    View Results
-                                                </Text>
+                                                <Text style={styles.resultsBtnTextNew}>View Results</Text>
                                             </TouchableOpacity>
                                         </View>
                                     </View>
@@ -736,6 +369,8 @@ export default function PastCompetitionScreen() {
                 )}
                 <View style={{ height: 20 }} />
             </ScrollView>
+
+ 
 
             {}
             <Modal

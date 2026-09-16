@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system';
+import { Directory } from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import type { CameraClip } from '../types/camera.types';
 
@@ -39,16 +40,19 @@ export async function generateVideoThumbnail(
  */
 export async function generateImageThumbnail(imageUri: string): Promise<string | null> {
   try {
-    // Use expo-file-system's cacheDirectory
+    // Use expo-file-system's cacheDirectory with new API
     const cacheBase = (FileSystem as any).cacheDirectory || '';
-    const cacheDir = `${cacheBase}thumbnails/`;
-    const exists = await FileSystem.getInfoAsync(cacheDir);
-    if (!exists.exists) {
-      await FileSystem.makeDirectoryAsync(cacheDir, { intermediates: true });
+    const cacheDirPath = `${cacheBase}thumbnails/`;
+    
+    try {
+      const cacheDir = new Directory(cacheDirPath);
+      await cacheDir.create({ intermediates: true });
+    } catch (error) {
+      console.log("Thumbnail cache directory ready (or already exists)");
     }
     
     const filename = `thumb_${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
-    const outputUri = `${cacheDir}${filename}`;
+    const outputUri = `${cacheDirPath}${filename}`;
     
     const manipulated = await manipulateAsync(
       imageUri,

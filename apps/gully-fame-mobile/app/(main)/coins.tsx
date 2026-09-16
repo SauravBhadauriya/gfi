@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,49 +10,12 @@ import {
   Modal,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Circle } from "react-native-svg";
 import { BackIcon } from "@/icons";
-
-const coinsData = [
-  {
-    id: 1,
-    amount: 50000,
-    description: "Won Competition - Delhi Dance-Off (1st Place)",
-    date: "Oct 15, 2024",
-    type: "earned",
-    status: "completed",
-    competitionId: "comp1",
-  },
-  {
-    id: 2,
-    amount: 30000,
-    description: "Won Competition - Cooking Challenge (2nd Place)",
-    date: "Oct 14, 2024",
-    type: "earned",
-    status: "pending",
-    competitionId: "comp2",
-    pendingTime: "45 minutes",
-  },
-  {
-    id: 3,
-    amount: 200,
-    description: "Tip received from @fan123",
-    date: "Oct 10, 2024",
-    type: "earned",
-    status: "completed",
-  },
-  {
-    id: 4,
-    amount: 150,
-    description: "Competition Entry Fee",
-    date: "Sep 20, 2024",
-    type: "spent",
-    status: "completed",
-  },
-];
 
 export default function CoinsScreen() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -66,11 +29,87 @@ export default function CoinsScreen() {
     amount: "",
   });
 
-  const totalEarned = 80000;
-  const totalSpent = 150;
-  const availableBalance = 50200; 
-  const pendingBalance = 30000; 
-  const currentBalance = totalEarned - totalSpent;
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch wallet balance and transaction history from backend
+  const fetchWalletData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { userService } = await import("@/api/services/userService");
+      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
+      
+      // Fetch wallet balance from user service
+      const balanceResult = await userService.getWalletBalance();
+      if (balanceResult.success && balanceResult.data) {
+        setWalletBalance(balanceResult.data.balance || 0);
+      } else {
+        console.warn("[coins] Failed to fetch wallet balance:", balanceResult.message);
+        setWalletBalance(0);
+      }
+
+      // Fetch transaction/payment history
+      const historyResult = await paymentIntegrationService.getPaymentHistory(50, 0);
+      if (historyResult.success && Array.isArray(historyResult.data)) {
+        const mappedTransactions = historyResult.data.map((tx: any, index: number) => {
+          const txDate = new Date(tx.timestamp || new Date());
+          return {
+            id: tx.transactionId || tx.id || `tx_${index}`,
+            amount: Math.abs(tx.amount || 0),
+            description: tx.description || tx.remark || "Transaction",
+            date: txDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+            type: tx.type === "debit" || tx.amount < 0 ? "spent" : "earned",
+            status: tx.status || "completed",
+            competitionId: tx.competitionId,
+            reelId: tx.reelId,
+            pendingTime: tx.pendingTime,
+          };
+        });
+        setTransactionHistory(mappedTransactions);
+      } else {
+        console.warn("[coins] Failed to fetch transaction history:", historyResult.message);
+        setTransactionHistory([]);
+      }
+    } catch (error) {
+      console.error("[coins] Error fetching wallet data:", error);
+      setWalletBalance(0);
+      setTransactionHistory([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Refetch when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchWalletData();
+    }, [fetchWalletData])
+  );
+
+  // Calculate totals from transactions
+  const totalEarned = transactionHistory
+    .filter(t => t.type === "earned")
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
+  
+  const totalSpent = transactionHistory
+    .filter(t => t.type === "spent")
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
+
+  const availableBalance = walletBalance;
+  const pendingBalance = transactionHistory
+    .filter(t => t.status === "pending")
+    .reduce((sum, t) => sum + (t.amount || 0), 0);
+  
+  const currentBalance = walletBalance + pendingBalance;
+
+  // Handle add money (redirect to add money modal or screen)
+  const handleAddMoney = async () => {
+    router.push({
+      pathname: "/(main)/add-money",
+      params: { fromCoins: "true" }
+    } as any);
+  };
 
   return (
     <View style={styles.container}>
@@ -88,66 +127,72 @@ export default function CoinsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {}
-        <View style={styles.balanceCard}>
-          <LinearGradient
-            colors={["rgba(236, 154, 21, 0.2)", "rgba(236, 154, 21, 0.1)"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.balanceGradient}
-          >
-            <Text style={styles.balanceLabel}>Current Balance</Text>
-            <Text style={styles.balanceAmount}>
-              {currentBalance.toLocaleString()} GFI coins
-            </Text>
-            <View style={styles.balanceStats}>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Available</Text>
-                <Text style={styles.statValue}>
-                  {availableBalance.toLocaleString()} GFI coins
-                </Text>
-              </View>
-              <View style={styles.statItem}>
-                <Text style={styles.statLabel}>Pending</Text>
-                <Text style={[styles.statValue, { color: "#FFA500" }]}>
-                  {pendingBalance.toLocaleString()} GFI coins
-                </Text>
-              </View>
-            </View>
-
-            {}
-            {availableBalance > 0 && (
-              <TouchableOpacity
-                style={styles.withdrawButton}
-                onPress={() => setShowWithdrawModal(true)}
-              >
-                <Text style={styles.withdrawButtonText}>
-                  Withdraw GFI Coins
-                </Text>
-              </TouchableOpacity>
-            )}
-          </LinearGradient>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+          <ActivityIndicator size="large" color="#EC9A15" />
         </View>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {}
+          <View style={styles.balanceCard}>
+            <LinearGradient
+              colors={["rgba(236, 154, 21, 0.2)", "rgba(236, 154, 21, 0.1)"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.balanceGradient}
+            >
+              <Text style={styles.balanceLabel}>Current Balance</Text>
+              <Text style={styles.balanceAmount}>
+                {Math.floor(currentBalance).toLocaleString()} GFI coins
+              </Text>
+              <View style={styles.balanceStats}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Available</Text>
+                  <Text style={styles.statValue}>
+                    {Math.floor(availableBalance).toLocaleString()} GFI coins
+                  </Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statLabel}>Pending</Text>
+                  <Text style={[styles.statValue, { color: "#FFA500" }]}>
+                    {Math.floor(pendingBalance).toLocaleString()} GFI coins
+                  </Text>
+                </View>
+              </View>
 
-        {}
-        <Text style={styles.sectionTitle}>Transaction History</Text>
-        {coinsData.map((item) => (
-          <View key={item.id} style={styles.transactionCard}>
-            <View style={styles.transactionHeader}>
-              <View style={styles.transactionIcon}>
-                <Circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  fill={item.type === "earned" ? "#22C55E" : "#FF6B35"}
-                  opacity="0.2"
-                />
-                <Text style={styles.transactionIconText}>
-                  {item.type === "earned" ? "+" : "-"}
+              {}
+              {availableBalance > 0 && (
+                <TouchableOpacity
+                  style={styles.withdrawButton}
+                  onPress={() => setShowWithdrawModal(true)}
+                >
+                  <Text style={styles.withdrawButtonText}>
+                    Withdraw GFI Coins
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </LinearGradient>
+          </View>
+
+          {}
+          <Text style={styles.sectionTitle}>Transaction History</Text>
+          {transactionHistory.length > 0 ? (
+            transactionHistory.map((item) => (
+              <View key={item.id} style={styles.transactionCard}>
+                <View style={styles.transactionHeader}>
+                  <View style={styles.transactionIcon}>
+                    <Circle
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      fill={item.type === "earned" ? "#22C55E" : "#FF6B35"}
+                      opacity="0.2"
+                    />
+                    <Text style={styles.transactionIconText}>
+                      {item.type === "earned" ? "+" : "-"}
                 </Text>
               </View>
               <View style={styles.transactionInfo}>
@@ -179,20 +224,29 @@ export default function CoinsScreen() {
               </Text>
             </View>
           </View>
-        ))}
+            ))
+          ) : (
+            <View style={{ alignItems: "center", paddingVertical: 40 }}>
+              <Text style={{ color: "#999", fontSize: 16 }}>No transactions yet</Text>
+            </View>
+          )}
 
-        {}
-        <TouchableOpacity style={styles.addCoinsButton}>
-          <LinearGradient
-            colors={["#FF6B35", "#FF8C00"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.addCoinsGradient}
+          {/* Add Coins Button */}
+          <TouchableOpacity 
+            style={styles.addCoinsButton}
+            onPress={handleAddMoney}
           >
-            <Text style={styles.addCoinsText}>Add GFI Coins</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </ScrollView>
+            <LinearGradient
+              colors={["#FF6B35", "#FF8C00"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.addCoinsGradient}
+            >
+              <Text style={styles.addCoinsText}>+ Add GFI Coins</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
 
       {}
       <Modal

@@ -18,6 +18,33 @@ export interface CompetitionWinner {
   [key: string]: any;
 }
 
+export interface LeaderboardEntry {
+  rank: number;
+  user: {
+    _id: string;
+    firstName?: string;
+    lastName?: string;
+    profileImage?: string;
+    is_followed_by_me?: boolean;
+  };
+  reel?: {
+    _id: string;
+    thumbnail_url?: string;
+    stats?: {
+      votes?: number;
+      likes?: number;
+    };
+  };
+  votes?: number; // For backward compatibility
+}
+
+export interface LeaderboardResponse {
+  page: number;
+  limit: number;
+  total: number;
+  leaderboard: LeaderboardEntry[];
+}
+
 export interface Competition {
   _id: string;
   title: string;
@@ -196,11 +223,70 @@ export async function getCompetitionsByStatus(
   }
 }
 
+/**
+ * Get competition leaderboard
+ * Spec: GET competitions/{competitionId}/leaderboard?page=1&limit=20
+ */
+export async function getCompetitionLeaderboard(
+  competitionId: string,
+  params?: { page?: number; limit?: number }
+): Promise<ApiResponse<LeaderboardResponse>> {
+  const page = params?.page || 1;
+  const limit = params?.limit || 20;
+  
+  try {
+    console.log('[competitionService] GET competitions/:id/leaderboard', { competitionId, page, limit });
+    
+    const response = await apiClient.get<any>(
+      `competitions/${competitionId}/leaderboard`,
+      { params: { page, limit } }
+    );
+    const responseData = response.data as any;
+
+    if (responseData.code === 1 && responseData.data) {
+      const data = responseData.data as LeaderboardResponse;
+      
+      console.log('[competitionService] GET leaderboard - Success:', data.leaderboard.length, 'entries');
+      return {
+        success: true,
+        data,
+        message: responseData.message || 'Leaderboard fetched successfully',
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || 'Failed to fetch leaderboard',
+      error: 'API returned unsuccessful response',
+      data: {
+        page: 1,
+        limit: 20,
+        total: 0,
+        leaderboard: [],
+      },
+    };
+  } catch (error: any) {
+    console.error('[competitionService] GET leaderboard error:', error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Network error occurred',
+      error: error.message || 'Network error',
+      data: {
+        page: 1,
+        limit: 20,
+        total: 0,
+        leaderboard: [],
+      },
+    };
+  }
+}
+
 // ==================== Service Export ====================
 
 export const competitionService = {
   getCompetitions,
   getCompetitionById,
   getCompetitionsByStatus,
+  getCompetitionLeaderboard,
 };
 

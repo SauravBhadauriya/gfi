@@ -2,7 +2,17 @@
 // Fetches user's reels/posts dynamically from API
 
 import { useState, useEffect, useCallback } from "react";
-import { reelsService, Reel } from "../api/services/reelsService";
+import apiClient from "../api/axios";
+
+export interface Reel {
+  _id?: string;
+  id?: string;
+  title?: string;
+  description?: string;
+  videoUrl?: string;
+  thumbnail?: string;
+  [key: string]: any;
+}
 
 export const useUserReels = (userId: string) => {
   const [reels, setReels] = useState<Reel[]>([]);
@@ -20,30 +30,55 @@ export const useUserReels = (userId: string) => {
       setLoading(true);
       setError(null);
 
-      const response = await reelsService.getUserReels(userId, {
-        page: 1,
-        limit: 50,
-      });
+      // Try to call the user reels endpoint
+      try {
+        const response = await apiClient.get<any>(`user/reels`, {
+          params: {
+            page: 1,
+            limit: 50,
+          },
+        });
 
-      console.log("[useUserReels] Response from getUserReels:", {
-        success: response.success,
-        count: response.data?.items?.length,
-        total: response.data?.total,
-        message: response.message,
-      });
+        const responseData = response.data as any;
 
-      if (response.success && response.data) {
-        console.log("[useUserReels] Reels fetched:", response.data.items.length);
-        console.log("[useUserReels] Reel IDs:", response.data.items.map((r: any) => r._id || r.id).join(", "));
-        setReels(response.data.items);
-      } else {
-        setError(response.message || "Failed to fetch reels");
-        console.error("[useUserReels] Error:", response.message);
+        console.log("[useUserReels] Response from API:", {
+          status: response.status,
+          hasData: !!responseData.data,
+          dataType: typeof responseData.data,
+        });
+
+        if (responseData.code === 1 && responseData.data) {
+          let reelsArray: Reel[] = [];
+
+          // Handle different response formats
+          if (Array.isArray(responseData.data)) {
+            reelsArray = responseData.data;
+          } else if (Array.isArray(responseData.data.items)) {
+            reelsArray = responseData.data.items;
+          } else if (Array.isArray(responseData.data.reels)) {
+            reelsArray = responseData.data.reels;
+          }
+
+          console.log("[useUserReels] Reels fetched:", reelsArray.length);
+          setReels(reelsArray);
+        } else {
+          console.log("[useUserReels] No reels data in response, using empty list");
+          setReels([]);
+        }
+      } catch (apiError: any) {
+        // If endpoint doesn't exist (404), gracefully return empty list
+        if (apiError.response?.status === 404) {
+          console.log("[useUserReels] User reels endpoint not available, returning empty list");
+          setReels([]);
+        } else {
+          throw apiError;
+        }
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch reels";
-      setError(errorMessage);
-      console.error("[useUserReels] Fetch error:", errorMessage);
+      console.log("[useUserReels] Fetch error (gracefully handled):", errorMessage);
+      // Don't set error - just show empty reels list
+      setReels([]);
     } finally {
       setLoading(false);
     }

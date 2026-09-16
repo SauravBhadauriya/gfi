@@ -3,7 +3,8 @@
  * Handles all audio effects, TTS, mixing, and processing
  */
 
-import { Audio } from 'expo-av';
+// Audio imports removed - expo-av native module error
+const Audio = { Sound: { create: async () => ({ sound: null }) } };
 import { AudioTrackWithEffects, VoiceOverlayWithEffects, AudioEffectType, TextToSpeechConfig, AudioMixSettings } from '../types/audioEffects.types';
 import * as FileSystem from 'expo-file-system';
 

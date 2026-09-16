@@ -1,16 +1,11 @@
-// Created by Kiro
-// Error Boundary - Catch errors and display fallback UI
+/**
+ * Error Boundary Component
+ * Catches component errors and displays user-friendly error UI with recovery options
+ */
 
 import React, { ReactNode } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  SafeAreaView,
-} from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { ErrorResponse } from '@/api/errorHandler';
 
 interface Props {
   children: ReactNode;
@@ -24,13 +19,6 @@ interface State {
   errorInfo: React.ErrorInfo | null;
 }
 
-/**
- * Error Boundary Component - Catches errors in child components
- * Usage:
- * <ErrorBoundary onError={(error, info) => console.log(error, info)}>
- *   <YourComponent />
- * </ErrorBoundary>
- */
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -41,56 +29,19 @@ export class ErrorBoundary extends React.Component<Props, State> {
     };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<State> {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // Log error to console
-    console.error('Error caught by boundary:', error);
-    console.error('Error info:', errorInfo);
+    console.error('[ErrorBoundary] Caught error:', error);
+    console.error('[ErrorBoundary] Error info:', errorInfo);
 
-    // Update state
-    this.setState({
-      error,
-      errorInfo,
-    });
-
-    // Call onError callback if provided
-    if (this.props.onError) {
-      this.props.onError(error, errorInfo);
-    }
-
-    // Log to error tracking service (e.g., Sentry, Firebase)
-    this.logErrorToService(error, errorInfo);
+    this.setState({ errorInfo });
+    this.props.onError?.(error, errorInfo);
   }
 
-  /**
-   * Log error to external service
-   * @param error - Error object
-   * @param errorInfo - Error info
-   */
-  private logErrorToService = (error: Error, errorInfo: React.ErrorInfo) => {
-    try {
-      // Example: Send to error tracking service
-      // Sentry.captureException(error, { contexts: { react: errorInfo } });
-      // Firebase.crashlytics().recordError(error);
-
-      console.log('Error logged to service:', {
-        message: error.message,
-        stack: error.stack,
-        componentStack: errorInfo.componentStack,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error('Failed to log error to service:', err);
-    }
-  };
-
-  /**
-   * Reset error boundary
-   */
-  private resetError = () => {
+  resetError = () => {
     this.setState({
       hasError: false,
       error: null,
@@ -100,217 +51,246 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      // Use custom fallback if provided
-      if (this.props.fallback) {
-        return this.props.fallback;
-      }
-
-      // Default error UI
-      return (
-        <SafeAreaView style={styles.container}>
-          <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
-            {/* Error Icon */}
-            <View style={styles.iconContainer}>
-              <Ionicons name="alert-circle" size={64} color="#d32f2f" />
-            </View>
-
-            {/* Error Title */}
-            <Text style={styles.title}>Oops! Something went wrong</Text>
-
-            {/* Error Message */}
-            <Text style={styles.message}>
-              We encountered an unexpected error. Please try again or contact support if the problem persists.
-            </Text>
-
-            {/* Error Details (Development only) */}
-            {__DEV__ && this.state.error && (
-              <View style={styles.detailsContainer}>
-                <Text style={styles.detailsTitle}>Error Details:</Text>
-
-                {/* Error Message */}
-                <View style={styles.detailItem}>
-                  <Text style={styles.detailLabel}>Message:</Text>
-                  <Text style={styles.detailValue}>{this.state.error.message}</Text>
-                </View>
-
-                {/* Error Stack */}
-                {this.state.error.stack && (
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Stack:</Text>
-                    <Text style={styles.detailValue}>{this.state.error.stack}</Text>
-                  </View>
-                )}
-
-                {/* Component Stack */}
-                {this.state.errorInfo?.componentStack && (
-                  <View style={styles.detailItem}>
-                    <Text style={styles.detailLabel}>Component Stack:</Text>
-                    <Text style={styles.detailValue}>
-                      {this.state.errorInfo.componentStack}
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Action Buttons */}
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.button, styles.resetButton]}
-                onPress={this.resetError}
-              >
-                <Ionicons name="refresh" size={20} color="#fff" />
-                <Text style={styles.buttonText}>Try Again</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.homeButton]}
-                onPress={() => {
-                  this.resetError();
-                  // Navigate to home screen
-                  // navigation.navigate('Home');
-                }}
-              >
-                <Ionicons name="home" size={20} color="#007AFF" />
-                <Text style={[styles.buttonText, styles.homeButtonText]}>Go Home</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Support Info */}
-            <View style={styles.supportContainer}>
-              <Text style={styles.supportText}>
-                If this problem continues, please contact our support team.
-              </Text>
-              <TouchableOpacity style={styles.supportLink}>
-                <Ionicons name="mail" size={16} color="#007AFF" />
-                <Text style={styles.supportLinkText}>support@gullyfame.com</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      );
+      return this.props.fallback || <ErrorFallback error={this.state.error} onReset={this.resetError} />;
     }
 
     return this.props.children;
   }
 }
 
+interface ErrorFallbackProps {
+  error: Error | null;
+  onReset: () => void;
+  onGoHome?: () => void;
+}
+
+export function ErrorFallback({ error, onReset, onGoHome }: ErrorFallbackProps) {
+  return (
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.errorContent}>
+          <Text style={styles.emoji}>⚠️</Text>
+          <Text style={styles.title}>Oops, Something Went Wrong</Text>
+          <Text style={styles.message}>We encountered an unexpected error. Please try again.</Text>
+
+          {error && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorTitle}>Error Details:</Text>
+              <Text style={styles.errorText} numberOfLines={3}>
+                {error.message}
+              </Text>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      <View style={styles.actionContainer}>
+        <TouchableOpacity style={[styles.button, styles.retryButton]} onPress={onReset}>
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+
+        {onGoHome && (
+          <TouchableOpacity style={[styles.button, styles.homeButton]} onPress={onGoHome}>
+            <Text style={styles.homeButtonText}>Go Home</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Error Toast Component
+ * Displays error notifications at the bottom of screen
+ */
+interface ErrorToastProps {
+  error: ErrorResponse | null;
+  visible: boolean;
+  duration?: number;
+  onDismiss?: () => void;
+  onRetry?: () => void;
+}
+
+export function ErrorToast({
+  error,
+  visible,
+  duration = 5000,
+  onDismiss,
+  onRetry,
+}: ErrorToastProps) {
+  const [show, setShow] = React.useState(visible);
+
+  React.useEffect(() => {
+    setShow(visible);
+
+    if (visible && !error?.isRetryable) {
+      const timeout = setTimeout(() => {
+        setShow(false);
+        onDismiss?.();
+      }, duration);
+
+      return () => clearTimeout(timeout);
+    }
+  }, [visible, error, duration, onDismiss]);
+
+  if (!show || !error) return null;
+
+  return (
+    <View style={[styles.toast, { backgroundColor: getToastColor(error.type) }]}>
+      <View style={styles.toastContent}>
+        <Text style={styles.toastMessage}>{error.userMessage}</Text>
+        {error.suggestedAction && error.isRetryable && onRetry && (
+          <TouchableOpacity onPress={onRetry} style={styles.toastRetryButton}>
+            <Text style={styles.toastRetryText}>{error.suggestedAction}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <TouchableOpacity onPress={() => { setShow(false); onDismiss?.(); }} style={styles.toastClose}>
+        <Text style={styles.toastCloseText}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+/**
+ * Get toast color based on error type
+ */
+function getToastColor(type: string): string {
+  const colors: Record<string, string> = {
+    NETWORK_ERROR: '#FF6B6B',
+    TIMEOUT_ERROR: '#FFA500',
+    UNAUTHORIZED_ERROR: '#FF4444',
+    FORBIDDEN_ERROR: '#D32F2F',
+    NOT_FOUND_ERROR: '#FF6B6B',
+    SERVER_ERROR: '#FF6B6B',
+    VALIDATION_ERROR: '#FFA500',
+    RATE_LIMIT_ERROR: '#FFA500',
+  };
+
+  return colors[type] || '#FF6B6B';
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#3C2610',
   },
-  scrollView: {
-    flex: 1,
-  },
-  content: {
+  scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 32,
+    paddingHorizontal: 20,
   },
-  iconContainer: {
-    marginBottom: 24,
+  errorContent: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emoji: {
+    fontSize: 64,
+    marginBottom: 16,
   },
   title: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 12,
+    fontWeight: '700',
+    color: '#FFF',
+    marginBottom: 8,
     textAlign: 'center',
   },
   message: {
     fontSize: 16,
-    color: '#666',
+    color: '#CCC',
     textAlign: 'center',
     marginBottom: 24,
-    lineHeight: 24,
   },
-  detailsContainer: {
-    width: '100%',
-    backgroundColor: '#fff',
+  errorBox: {
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 24,
     borderLeftWidth: 4,
-    borderLeftColor: '#d32f2f',
+    borderLeftColor: '#FF6B6B',
+    marginTop: 16,
+    maxWidth: '100%',
   },
-  detailsTitle: {
+  errorTitle: {
     fontSize: 14,
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 12,
-  },
-  detailItem: {
-    marginBottom: 12,
-  },
-  detailLabel: {
-    fontSize: 12,
     fontWeight: '600',
-    color: '#666',
-    marginBottom: 4,
+    color: '#FF6B6B',
+    marginBottom: 8,
   },
-  detailValue: {
-    fontSize: 12,
-    color: '#333',
-    fontFamily: 'monospace',
-    backgroundColor: '#f5f5f5',
-    padding: 8,
-    borderRadius: 4,
+  errorText: {
+    fontSize: 13,
+    color: '#CCC',
+    lineHeight: 20,
   },
-  buttonContainer: {
-    width: '100%',
+  actionContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
     gap: 12,
-    marginBottom: 24,
   },
   button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 14,
     borderRadius: 8,
-    gap: 8,
+    alignItems: 'center',
   },
-  resetButton: {
-    backgroundColor: '#d32f2f',
+  retryButton: {
+    backgroundColor: '#EC9A15',
   },
-  homeButton: {
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#007AFF',
-  },
-  buttonText: {
+  retryButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#fff',
+    color: '#000',
+  },
+  homeButton: {
+    backgroundColor: 'rgba(236, 154, 21, 0.2)',
+    borderWidth: 1,
+    borderColor: '#EC9A15',
   },
   homeButtonText: {
-    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#EC9A15',
   },
-  supportContainer: {
-    alignItems: 'center',
-    gap: 12,
-  },
-  supportText: {
-    fontSize: 13,
-    color: '#999',
-    textAlign: 'center',
-  },
-  supportLink: {
+  toast: {
+    position: 'absolute',
+    bottom: 20,
+    left: 16,
+    right: 16,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 6,
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
-  supportLinkText: {
+  toastContent: {
+    flex: 1,
+    marginRight: 12,
+  },
+  toastMessage: {
     fontSize: 13,
-    color: '#007AFF',
+    color: '#FFF',
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  toastRetryButton: {
+    marginTop: 8,
+  },
+  toastRetryText: {
+    fontSize: 12,
+    color: '#FFF',
     fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  toastClose: {
+    padding: 8,
+  },
+  toastCloseText: {
+    fontSize: 18,
+    color: '#FFF',
+    fontWeight: 'bold',
   },
 });
-
-export default ErrorBoundary;

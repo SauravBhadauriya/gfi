@@ -160,7 +160,7 @@ export default function SignIn() {
         if (result.data.role === "participants" || result.data.role === "fan") {
           setRole(result.data.role);
         }
-        router.replace("/auth/location");
+        router.replace("location");
       } else {
         
         const isNetworkError = (result as any).isNetworkError;
@@ -595,7 +595,7 @@ export default function SignIn() {
         {}
         <View style={styles.skipContainer}>
           <TouchableOpacity
-            onPress={() => router.replace("/auth/location?skip=true")}
+            onPress={() => router.replace("location?skip=true")}
           >
             <Text style={styles.skipText}>
               Let me have a look!{" "}

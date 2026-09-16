@@ -1,13 +1,21 @@
-import { Video, ResizeMode } from 'expo-video';
 import React from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, ViewStyle, Text } from 'react-native';
 import type { FilterConfig } from '../types/filters';
 import { getFilterOverlayFromProperties } from '../utils/filterOverlays';
+
+// Import Video with graceful fallback
+let Video: any = null;
+try {
+  const videoModule = require('expo-video');
+  Video = videoModule.Video;
+} catch (error) {
+  console.warn('[FilteredVideo] expo-video not available');
+}
 
 interface FilteredVideoProps {
   source: { uri: string };
   style?: ViewStyle;
-  resizeMode?: ResizeMode;
+  resizeMode?: 'contain' | 'cover' | 'fill';
   shouldPlay?: boolean;
   isLooping?: boolean;
   rate?: number;
@@ -29,7 +37,7 @@ interface FilteredVideoProps {
 const FilteredVideo: React.FC<FilteredVideoProps> = ({
   source,
   style,
-  resizeMode = ResizeMode.CONTAIN,
+  resizeMode = 'contain',
   shouldPlay = false,
   isLooping = false,
   rate = 1,
@@ -40,6 +48,16 @@ const FilteredVideo: React.FC<FilteredVideoProps> = ({
   videoRef,
 }) => {
   console.log('🎥 FilteredVideo: Rendering with source:', source?.uri?.substring(0, 50), 'style:', style);
+  
+  // Fallback if Video component is not available
+  if (!Video) {
+    console.warn('[FilteredVideo] Video component not available, showing placeholder');
+    return (
+      <View style={[style, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
+        <Text style={{ color: '#666' }}>Video preview unavailable</Text>
+      </View>
+    );
+  }
   
   const filterOverlayStyle = getFilterOverlayFromProperties(filter || { name: 'Original' });
 

@@ -19,7 +19,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-video';
+import { Video } from 'expo-video';
 import { router } from 'expo-router';
 import Svg, { Path, G, Circle, Rect, Defs, RadialGradient, Stop, Line } from 'react-native-svg';
 import { scale, spacing, getFontSize, wp } from '../../utils/responsive';
@@ -627,7 +627,7 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
                 }}
                 source={reel.video || reel.source}
                 style={styles.reelImage}
-                resizeMode={ResizeMode.COVER}
+                resizeMode="cover"
                 shouldPlay={isVisible}
                 isLooping={true}
                 isMuted={false}
@@ -1012,32 +1012,6 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
                 >
                   {/* Sample Comments with Replies */}
                   {[
-                    { 
-                      id: 1, 
-                      username: "@user1", 
-                      comment: "Amazing! 🔥", 
-                      likes: 12, 
-                      isLiked: false,
-                      replies: []
-                    },
-                    { 
-                      id: 2, 
-                      username: "@user2", 
-                      comment: "Love this! ❤️", 
-                      likes: 8, 
-                      isLiked: true,
-                      replies: [
-                        { id: 4, username: "@user4", comment: "I agree! So good!", likes: 3, isLiked: false }
-                      ]
-                    },
-                    { 
-                      id: 3, 
-                      username: "@user3", 
-                      comment: "So talented! 👏", 
-                      likes: 5, 
-                      isLiked: false,
-                      replies: []
-                    },
                   ].map((comment) => {
                     const commentLikeData = commentLikes.get(comment.id) || { likes: comment.likes, isLiked: comment.isLiked };
                     return (
@@ -1270,10 +1244,6 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
                 <Text style={styles.sectionTitle}>Send to</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendsList}>
                   {[
-                    { id: 1, name: "Friend 1", avatar: require('../../assets/images/user1.png') },
-                    { id: 2, name: "Friend 2", avatar: require('../../assets/images/user2.png') },
-                    { id: 3, name: "Friend 3", avatar: require('../../assets/images/user1.png') },
-                    { id: 4, name: "Friend 4", avatar: require('../../assets/images/user2.png') },
                   ].map((friend) => (
                     <TouchableOpacity key={friend.id} style={styles.friendItem}>
                       <Image source={friend.avatar} style={styles.friendAvatar} />

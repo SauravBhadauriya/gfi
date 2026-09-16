@@ -1,21 +1,6 @@
-/**
- * API Endpoint Constants - Production Ready
- * Base URL: https://gullyfame.com/v1/api/
- * 
- * Centralized location for all API endpoints used across the mobile app.
- * All endpoints are relative to the base URL configured in axios.ts (EXPO_PUBLIC_API_BASE_URL).
- * 
- * PRODUCTION CHECKLIST:
- * ✓ All endpoints use relative URLs (no hardcoded domain)
- * ✓ Base URL configured via environment variable
- * ✓ SSL/HTTPS enforced
- * ✓ API versioning (v1/api) included in base URL
- * ✓ All service methods use these constants
- * ✓ Error handling with proper status codes
- */
 
 export const API_ENDPOINTS = {
-  // ==================== AUTH ENDPOINTS ====================
+
   AUTH: {
     LOGIN: "auth/login",
     REGISTER: "auth/register",
@@ -28,7 +13,7 @@ export const API_ENDPOINTS = {
     RESET_PASSWORD: "auth/reset-password",
   },
 
-  // ==================== USER ENDPOINTS ====================
+
   USER: {
     PROFILE: "user/profile",
     UPDATE_PROFILE: "user/profile",
@@ -60,10 +45,11 @@ export const API_ENDPOINTS = {
     CREATE: "reels/create",
     UPDATE: "reels/:id/update",
     DELETE: "reels/:id/delete",
-    LIKE: "reels/:id/like",
-    UNLIKE: "reels/:id/unlike",
+    ACTION: "reels/:id/action",
+    LIKE: "reels/:id/action",
+    UNLIKE: "reels/:id/action",
     GET_COMMENTS: "reels/:id/comments",
-    ADD_COMMENT: "reels/:id/comments/add",
+    ADD_COMMENT: "reels/:id/comments",
     DELETE_COMMENT: "reels/:id/comments/:commentId/delete",
     GET_UPLOAD_URL: "reels/upload-url",
     PUBLISH: "reels/publish",
@@ -101,8 +87,8 @@ export const API_ENDPOINTS = {
 
   // ==================== FOLLOW ENDPOINTS ====================
   FOLLOW: {
-    FOLLOW_USER: "follow/:userId",
-    UNFOLLOW_USER: "unfollow/:userId",
+    FOLLOW_USER: "user/:userId/follow",
+    UNFOLLOW_USER: "user/:userId/follow",
   },
 
   // ==================== COMMENT ENDPOINTS ====================

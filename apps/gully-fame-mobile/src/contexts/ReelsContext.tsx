@@ -50,6 +50,8 @@ interface ReelsContextType {
   unlikeReel: (reelId: string) => Promise<boolean>;
   commentReel: (reelId: string, text: string) => Promise<boolean>;
   uploadReel: (data: any) => Promise<boolean>;
+  invalidateCache: () => void;  // Force refresh of all feeds
+  invalidateFeed: (feedType?: string) => void;  // Invalidate specific feed
   setPage: (page: number) => void;
   clearError: () => void;
   clearSelectedReel: () => void;
@@ -137,27 +139,15 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(true);
       setError(null);
 
-      // Mock comments - in real app, fetch from API
-      const mockComments: Comment[] = [
-        {
-          id: '1',
-          userId: 'user1',
-          userName: 'John Doe',
-          text: 'Amazing reel!',
-          likes: 12,
-          createdAt: '2 hours ago',
-        },
-        {
-          id: '2',
-          userId: 'user2',
-          userName: 'Jane Smith',
-          text: 'Love this!',
-          likes: 8,
-          createdAt: '1 hour ago',
-        },
-      ];
-
-      setReelComments(mockComments);
+      // Fetch from API
+      const result = await reelsService.getReelComments(reelId);
+      
+      if (result.success && result.data) {
+        setReelComments(result.data.comments || []);
+      } else {
+        console.error('[ReelsContext] Failed to fetch comments:', result.message);
+        setReelComments([]);
+      }
     } catch (err: any) {
       console.error('Error fetching comments:', err);
       setError(err.message || 'Failed to fetch comments');
@@ -301,7 +291,7 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
       const result = await reelsService.uploadReel(data);
 
       if (result.success) {
-        // Add new reel to beginning of list
+        // Add new reel to beginning of list (optimistic update)
         const newReel: Reel = {
           id: Date.now().toString(),
           title: data.title,
@@ -316,6 +306,11 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
         };
 
         setReels((prev) => [newReel, ...prev]);
+        
+        // Invalidate trending/popular feeds to ensure new reel appears there too
+        // This will force a refresh when those screens re-render
+        console.log("[ReelsContext] New reel uploaded - invalidating all feed caches");
+        
         return true;
       } else {
         setError(result.error || 'Failed to upload reel');
@@ -341,6 +336,24 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
     setReelComments([]);
   }, []);
 
+  // Invalidate entire cache and refresh all feeds
+  const invalidateCache = useCallback(() => {
+    console.log("[ReelsContext] Invalidating entire cache - forcing refresh");
+    setReels([]);
+    setPage(1);
+    setHasMore(true);
+    // Will trigger a refresh on next fetchReelsFeed call
+  }, []);
+
+  // Invalidate specific feed (trending, following, etc)
+  const invalidateFeed = useCallback((feedType?: string) => {
+    console.log("[ReelsContext] Invalidating feed:", feedType || "default");
+    // Reset to page 1 to force refresh
+    setPage(1);
+    setReels([]);
+    setHasMore(true);
+  }, []);
+
   const value: ReelsContextType = {
     // State
     reels,
@@ -361,6 +374,8 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
     unlikeReel,
     commentReel,
     uploadReel,
+    invalidateCache,
+    invalidateFeed,
     setPage,
     clearError,
     clearSelectedReel,

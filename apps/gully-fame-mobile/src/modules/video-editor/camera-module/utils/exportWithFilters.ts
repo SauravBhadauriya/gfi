@@ -1,4 +1,6 @@
 import * as FileSystem from 'expo-file-system';
+import * as FileSystemLegacy from 'expo-file-system/legacy';
+import { Directory } from 'expo-file-system';
 import type { CameraClip } from '../types/camera.types';
 import { applyPresetToImage, applyPresetToVideo } from './ffmpegFilters';
 import { clipHasFilter } from './filterHelpers';
@@ -25,9 +27,14 @@ export async function exportClipWithFilter(
       return await applyPresetToVideo(clip.uri, outputPath, clip.filterPreset);
     }
   } else {
-    // No filter - just copy original file
+    // No filter - just copy original file using legacy API
     console.log(`Exporting ${clip.type} without filter (Original)`);
-    await FileSystem.copyAsync({ from: clip.uri, to: outputPath });
+    try {
+      await FileSystemLegacy.copyAsync({ from: clip.uri, to: outputPath });
+    } catch (error) {
+      console.error(`Copy failed:`, error);
+      throw error;
+    }
     return outputPath;
   }
 }
@@ -42,10 +49,12 @@ export async function exportClipsWithFilters(
   clips: CameraClip[],
   outputDir: string
 ): Promise<string[]> {
-  // Ensure output directory exists
-  const dirInfo = await FileSystem.getInfoAsync(outputDir);
-  if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(outputDir, { intermediates: true });
+  // Ensure output directory exists using new API
+  try {
+    const dir = new Directory(outputDir);
+    await dir.create({ intermediates: true });
+  } catch (error) {
+    console.log("Output directory ready (or already exists)");
   }
 
   const outputPaths: string[] = [];

@@ -1,11 +1,10 @@
-
-
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import * as SplashScreen from "expo-splash-screen";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BrandingProvider } from "@contexts/BrandingContext";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import {
     useFonts,
     Rubik_400Regular,
@@ -27,12 +26,11 @@ import {
     Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { UserRoleProvider } from "@/contexts/UserRoleContext";
-import { registerDeviceForNotifications, setupNotificationListeners } from "@/api/services/notificationIntegrationService";
 
+// Keep splash screen visible while fonts load
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-
     const [fontsLoaded, fontError] = useFonts({
         Rubik_400Regular,
         Rubik_500Medium,
@@ -50,101 +48,52 @@ export default function RootLayout() {
     });
 
     useEffect(() => {
-        if (fontsLoaded || fontError) {
-            console.log("✅ Fonts ready");
-            
-            
-            registerDeviceForNotifications();
-            
-            
-            const unsubscribe = setupNotificationListeners(
-                (notification) => {
-                    console.log("[RootLayout] Notification received:", notification);
-                },
-                (notification) => {
-                    console.log("[RootLayout] Notification tapped:", notification);
-                    
-                    handleNotificationNavigation(notification);
-                }
-            );
+        const prepareApp = async () => {
+            if (fontsLoaded || fontError) {
+                console.log("✅ Fonts ready, hiding splash screen...");
+                
+                // Hide Splash Screen immediately so UI is not blocked
+                await SplashScreen.hideAsync().catch(() => {});
 
-            SplashScreen.hideAsync();
-            
-            return unsubscribe;
-        }
+                // NOTE: Notification setup moved to (main)/_layout.tsx
+                // This prevents calling notifications before user is authenticated
+            }
+        };
+
+        prepareApp();
     }, [fontsLoaded, fontError]);
 
-    const handleNotificationNavigation = (notification: any) => {
-        const { type, data } = notification;
-        
-        if (!data) return;
-
-        switch (type) {
-            case "comment":
-                if (data?.reelId) {
-                    
-                    
-                }
-                break;
-            case "like":
-                if (data?.reelId) {
-                    
-                }
-                break;
-            case "follow":
-                if (data?.userId) {
-                    
-                }
-                break;
-            case "competition":
-                if (data?.competitionId) {
-                    
-                }
-                break;
-            default:
-                break;
-        }
-    };
-
-    if (!fontsLoaded && !fontError) {
-        console.log("⏳ Waiting for fonts...");
-        return null;
-    }
+    // if (!fontsLoaded && !fontError) {
+    //     console.log("⏳ Waiting for fonts...");
+    //     return null;
+    // }
 
     return (
-        <UserRoleProvider>
+        <ErrorBoundary
+            onError={(error, errorInfo) => {
+                console.error('[RootLayout] Uncaught error:', error);
+                console.error('[RootLayout] Error info:', errorInfo);
+            }}
+        >
             <BrandingProvider>
-                <GestureHandlerRootView style={{ flex: 1 }}>
-                    <Stack
-                        screenOptions={{
-                            headerShown: false,
-                            
-                            contentStyle: { backgroundColor: "#3C2610" },
-                            
-                            animation: "fade",
-                        }}
-                    >
-                        <Stack.Screen
-                            name="index"
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="auth"
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="onboarding"
-                            options={{ headerShown: false }}
-                        />
-                        <Stack.Screen
-                            name="(main)"
-                            options={{ headerShown: false }}
-                        />
-                    </Stack>
-                    {}
-                    <StatusBar style="light" backgroundColor="#3C2610" translucent={false} />
-                </GestureHandlerRootView>
+                <UserRoleProvider>
+                    <GestureHandlerRootView style={{ flex: 1 }}>
+                        <Stack
+                            screenOptions={{
+                                headerShown: false,
+                                contentStyle: { backgroundColor: "#3C2610" },
+                                animation: "fade",
+                            }}
+                        >
+                            <Stack.Screen name="index" options={{ headerShown: false }} />
+                            <Stack.Screen name="auth" options={{ headerShown: false }} />
+                            <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+                            <Stack.Screen name="(main)" options={{ headerShown: false }} />
+                        </Stack>
+                        <StatusBar style="light" backgroundColor="#3C2610" translucent={false} />
+                    </GestureHandlerRootView>
+                </UserRoleProvider>
             </BrandingProvider>
-        </UserRoleProvider>
+        </ErrorBoundary>
     );
 }
