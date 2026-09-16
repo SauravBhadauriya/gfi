@@ -26,7 +26,7 @@
     "expo-media-library": "18.2.1",
     "expo-router": "^6.0.13",
     "expo-speech": "14.0.8",
-    "expo-splash-screen": "~31.0.12",
+    "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.10",
     "ffmpeg-kit-react-native-community": "6.0.2-fork.1",
