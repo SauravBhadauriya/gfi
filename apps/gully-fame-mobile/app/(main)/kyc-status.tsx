@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import {
   Alert,
   ActivityIndicator,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { Ionicons, FontAwesome5 } from '@expo/vector-icons';
+import { kycService } from "@/api/services/kycService";
 
 
 type KYCStatusType = 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
@@ -25,8 +26,40 @@ export default function KYCStatusScreen() {
   const [panNumber, setPanNumber] = useState('');
   const [aadhaarNumber, setAadhaarNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingStatus, setIsFetchingStatus] = useState(true);
 
-  const handleSubmitKYC = () => {
+  // Load KYC status on screen focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchKYCStatus();
+    }, [])
+  );
+
+  const fetchKYCStatus = async () => {
+    try {
+      setIsFetchingStatus(true);
+      const response = await kycService.getKYCStatus();
+      
+      if (response.success && response.data) {
+        const status = response.data.status;
+        if (status === 'approved') {
+          setKycStatus('APPROVED');
+        } else if (status === 'pending' || status === 'under_review') {
+          setKycStatus('PENDING');
+        } else if (status === 'rejected') {
+          setKycStatus('REJECTED');
+        } else {
+          setKycStatus('NOT_STARTED');
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching KYC status:", error);
+    } finally {
+      setIsFetchingStatus(false);
+    }
+  };
+
+  const handleSubmitKYC = async () => {
     if (!panNumber.trim() || !aadhaarNumber.trim()) {
       Alert.alert("Error", "Please fill all the document details.");
       return;
@@ -39,12 +72,62 @@ export default function KYCStatusScreen() {
 
     setIsLoading(true);
     
-    setTimeout(() => {
+    try {
+      // Submit KYC to real API endpoint
+      const response = await kycService.submitKYC({
+        firstName: '',
+        lastName: '',
+        dateOfBirth: '',
+        gender: 'other',
+        address: '',
+        city: '',
+        state: '',
+        pincode: '',
+        country: 'India',
+        documents: [
+          {
+            type: 'pan',
+            documentNumber: panNumber,
+          },
+          {
+            type: 'aadhar',
+            documentNumber: aadhaarNumber,
+          },
+        ],
+      });
+
+      if (response.success) {
+        setKycStatus('PENDING');
+        Alert.alert("Success", "KYC Documents submitted successfully for review!");
+        setPanNumber('');
+        setAadhaarNumber('');
+      } else {
+        Alert.alert("Error", response.message || "Failed to submit KYC documents.");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "An error occurred while submitting KYC.");
+    } finally {
       setIsLoading(false);
-      setKycStatus('PENDING'); 
-      Alert.alert("Success", "KYC Documents submitted successfully for review!");
-    }, 2000);
+    }
   };
+
+  if (isFetchingStatus) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#3C2610" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="chevron-back" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>KYC Verification</Text>
+          <View style={styles.backButton} />
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color="#EC9A15" />
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>

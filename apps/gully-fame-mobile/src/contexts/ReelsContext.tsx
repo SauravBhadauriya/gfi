@@ -71,24 +71,32 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
 
-  // Fetch reels feed
+  // Fetch reels feed (uses getReels with cursor-based pagination)
   const fetchReelsFeed = useCallback(async (pageNum: number = 1) => {
     try {
       setLoading(true);
       setError(null);
 
-      const result = await reelsService.getReelsFeed();
+      // Get cursor for pagination if not first page
+      let cursor: string | undefined;
+      if (pageNum > 1 && reels.length > 0) {
+        // Use the last reel's backend ID as cursor
+        const lastReel = reels[reels.length - 1];
+        cursor = (lastReel as any)._backendId;
+      }
 
-      if (result.success && result.data) {
+      const result = await reelsService.getReels(10, cursor);
+
+      if (result.success && result.data?.reels) {
         if (pageNum === 1) {
-          setReels(result.data);
+          setReels(result.data.reels);
         } else {
-          setReels((prev) => [...prev, ...result.data]);
+          setReels((prev) => [...prev, ...result.data.reels]);
         }
-        setHasMore(result.data.length > 0);
+        setHasMore(result.data.hasMore || false);
         setPage(pageNum);
       } else {
-        setError(result.error || 'Failed to fetch reels');
+        setError(result.message || 'Failed to fetch reels');
       }
     } catch (err: any) {
       console.error('Error fetching reels feed:', err);
@@ -96,13 +104,13 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reels]);
 
-  // Fetch single reel by ID
+  // Fetch single reel by ID - note: getReelById not implemented in service
+  // This implementation searches in existing reels or returns null
   const fetchReelById = useCallback(
     async (id: string): Promise<Reel | null> => {
       try {
-        setLoading(true);
         setError(null);
 
         // Find in existing reels first
@@ -112,79 +120,73 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
           return existing;
         }
 
-        // If not found, fetch from API
-        const result = await reelsService.getReelById(id);
-
-        if (result.success && result.data) {
-          setSelectedReel(result.data);
-          return result.data;
-        }
-
-        setError('Reel not found');
+        // Service doesn't have getReelById yet, return not found
+        setError('Reel detail endpoint not yet implemented');
         return null;
       } catch (err: any) {
         console.error('Error fetching reel:', err);
         setError(err.message || 'Failed to fetch reel');
         return null;
-      } finally {
-        setLoading(false);
       }
     },
     [reels]
   );
 
-  // Fetch reel comments
+  // Fetch reel comments - note: getReelComments not implemented in reelsService
+  // Comments are fetched from commentService in main screen
   const fetchReelComments = useCallback(async (reelId: string) => {
     try {
-      setLoading(true);
       setError(null);
-
-      // Fetch from API
-      const result = await reelsService.getReelComments(reelId);
-      
-      if (result.success && result.data) {
-        setReelComments(result.data.comments || []);
-      } else {
-        console.error('[ReelsContext] Failed to fetch comments:', result.message);
-        setReelComments([]);
-      }
+      // Note: Comments are fetched directly from commentService in the main reel screen
+      // This method is here for context completeness but not actively used
+      setReelComments([]);
     } catch (err: any) {
       console.error('Error fetching comments:', err);
       setError(err.message || 'Failed to fetch comments');
-    } finally {
-      setLoading(false);
     }
   }, []);
 
-  // Like reel
+  // Like reel - uses toggleLikeReel which handles both like and unlike
   const likeReel = useCallback(async (reelId: string): Promise<boolean> => {
     try {
       setError(null);
 
-      const result = await reelsService.likeReel(reelId);
+      // toggleLikeReel handles the like action (backend toggles state)
+      const result = await reelsService.toggleLikeReel(reelId);
 
       if (result.success) {
-        // Update reel in list
+        // Update reel in list - toggle like state based on current state
         setReels((prev) =>
-          prev.map((reel) =>
-            reel.id === reelId
-              ? { ...reel, isLiked: true, likes: reel.likes + 1 }
-              : reel
-          )
+          prev.map((reel) => {
+            if ((reel as any)._backendId === reelId || reel.id === reelId) {
+              const isCurrentlyLiked = (reel as any).isLiked;
+              return { 
+                ...reel, 
+                isLiked: !isCurrentlyLiked, 
+                likes: isCurrentlyLiked ? Math.max(0, reel.likes - 1) : reel.likes + 1 
+              };
+            }
+            return reel;
+          })
         );
 
         // Update selected reel
-        if (selectedReel?.id === reelId) {
+        if (selectedReel && ((selectedReel as any)._backendId === reelId || selectedReel.id === reelId)) {
+          const isCurrentlyLiked = (selectedReel as any).isLiked;
           setSelectedReel((prev) =>
             prev
-              ? { ...prev, isLiked: true, likes: prev.likes + 1 }
+              ? { 
+                  ...prev, 
+                  isLiked: !isCurrentlyLiked, 
+                  likes: isCurrentlyLiked ? Math.max(0, prev.likes - 1) : prev.likes + 1 
+                }
               : null
           );
         }
 
         return true;
       } else {
-        setError(result.error || 'Failed to like reel');
+        setError(result.message || 'Failed to like reel');
         return false;
       }
     } catch (err: any) {
@@ -194,35 +196,48 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [selectedReel]);
 
-  // Unlike reel
+  // Unlike reel - toggleLikeReel handles both like and unlike
+  // Kept for API compatibility but calls toggleLikeReel
   const unlikeReel = useCallback(async (reelId: string): Promise<boolean> => {
     try {
       setError(null);
 
-      const result = await reelsService.unlikeReel(reelId);
+      // Use toggleLikeReel which handles the unlike action
+      const result = await reelsService.toggleLikeReel(reelId);
 
       if (result.success) {
-        // Update reel in list
+        // Update reel in list - toggle like state
         setReels((prev) =>
-          prev.map((reel) =>
-            reel.id === reelId
-              ? { ...reel, isLiked: false, likes: Math.max(0, reel.likes - 1) }
-              : reel
-          )
+          prev.map((reel) => {
+            if ((reel as any)._backendId === reelId || reel.id === reelId) {
+              const isCurrentlyLiked = (reel as any).isLiked;
+              return { 
+                ...reel, 
+                isLiked: !isCurrentlyLiked, 
+                likes: isCurrentlyLiked ? Math.max(0, reel.likes - 1) : reel.likes + 1 
+              };
+            }
+            return reel;
+          })
         );
 
         // Update selected reel
-        if (selectedReel?.id === reelId) {
+        if (selectedReel && ((selectedReel as any)._backendId === reelId || selectedReel.id === reelId)) {
+          const isCurrentlyLiked = (selectedReel as any).isLiked;
           setSelectedReel((prev) =>
             prev
-              ? { ...prev, isLiked: false, likes: Math.max(0, prev.likes - 1) }
+              ? { 
+                  ...prev, 
+                  isLiked: !isCurrentlyLiked, 
+                  likes: isCurrentlyLiked ? Math.max(0, prev.likes - 1) : prev.likes + 1 
+                }
               : null
           );
         }
 
         return true;
       } else {
-        setError(result.error || 'Failed to unlike reel');
+        setError(result.message || 'Failed to unlike reel');
         return false;
       }
     } catch (err: any) {
@@ -232,90 +247,36 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
     }
   }, [selectedReel]);
 
-  // Comment on reel
+  // Comment on reel - note: commentReel not implemented in reelsService
+  // Comments are posted via commentService directly in main screen
   const commentReel = useCallback(
     async (reelId: string, text: string): Promise<boolean> => {
       try {
         setError(null);
-
-        const result = await reelsService.commentReel(reelId, text);
-
-        if (result.success) {
-          // Add comment to list
-          const newComment: Comment = {
-            id: Date.now().toString(),
-            userId: 'currentUser',
-            userName: 'You',
-            text,
-            likes: 0,
-            createdAt: 'just now',
-          };
-
-          setReelComments((prev) => [newComment, ...prev]);
-
-          // Update comment count
-          setReels((prev) =>
-            prev.map((reel) =>
-              reel.id === reelId
-                ? { ...reel, comments: reel.comments + 1 }
-                : reel
-            )
-          );
-
-          if (selectedReel?.id === reelId) {
-            setSelectedReel((prev) =>
-              prev ? { ...prev, comments: prev.comments + 1 } : null
-            );
-          }
-
-          return true;
-        } else {
-          setError(result.error || 'Failed to comment on reel');
-          return false;
-        }
+        // Comments are handled by commentService in the main screen
+        // This method is here for context API compatibility
+        console.warn('[ReelsContext] commentReel: Use commentService.addComment directly');
+        return false;
       } catch (err: any) {
         console.error('Error commenting on reel:', err);
         setError(err.message || 'Failed to comment on reel');
         return false;
       }
     },
-    [selectedReel]
+    []
   );
 
-  // Upload reel
+  // Upload reel - note: uploadReel not implemented in reelsService
+  // Upload functionality would be added when reel upload feature is implemented
   const uploadReel = useCallback(async (data: any): Promise<boolean> => {
     try {
       setLoading(true);
       setError(null);
 
-      const result = await reelsService.uploadReel(data);
-
-      if (result.success) {
-        // Add new reel to beginning of list (optimistic update)
-        const newReel: Reel = {
-          id: Date.now().toString(),
-          title: data.title,
-          description: data.description,
-          videoUrl: data.videoUrl,
-          creatorId: 'currentUser',
-          creatorName: 'You',
-          likes: 0,
-          comments: 0,
-          shares: 0,
-          createdAt: new Date().toISOString(),
-        };
-
-        setReels((prev) => [newReel, ...prev]);
-        
-        // Invalidate trending/popular feeds to ensure new reel appears there too
-        // This will force a refresh when those screens re-render
-        console.log("[ReelsContext] New reel uploaded - invalidating all feed caches");
-        
-        return true;
-      } else {
-        setError(result.error || 'Failed to upload reel');
-        return false;
-      }
+      // Upload endpoint not yet implemented in reelsService
+      console.warn('[ReelsContext] uploadReel: Not yet implemented in service');
+      setError('Reel upload endpoint not yet implemented');
+      return false;
     } catch (err: any) {
       console.error('Error uploading reel:', err);
       setError(err.message || 'Failed to upload reel');

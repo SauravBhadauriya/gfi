@@ -402,8 +402,10 @@ export default function InstagramReelCamera() {
   const [showAudioModal, setShowAudioModal] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
-  const recordingTimerRef = useRef<NodeJS.Timeout>();
-  const countdownTimerRef = useRef<NodeJS.Timeout>();
+  // @ts-ignore - NodeJS.Timeout not available
+  const recordingTimerRef = useRef<any>();
+  // @ts-ignore - NodeJS.Timeout not available
+  const countdownTimerRef = useRef<any>();
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -485,7 +487,6 @@ export default function InstagramReelCamera() {
 
       const videoData = await cameraRef.current.recordAsync({
         maxDuration: state.maxDuration - (state.segments.reduce((sum, seg) => sum + seg.duration, 0)),
-        quality: '1080p',
       });
 
       if (videoData?.uri) {
@@ -673,7 +674,7 @@ export default function InstagramReelCamera() {
       {/* Camera */}
       <CameraView
         ref={cameraRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         facing={state.cameraFacing}
         enableTorch={state.flash === 'on'}
         zoom={state.zoom - 1}

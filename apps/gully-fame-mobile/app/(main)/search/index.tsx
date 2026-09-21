@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -12,6 +12,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -24,6 +25,7 @@ import {
   getFontSize,
   spacing,
   getResponsiveDimensions,
+  scaleVertical,
 } from "@utils/responsive";
 
 import { useRouter } from "expo-router";
@@ -53,225 +55,6 @@ const COLORS = {
 };
 const THEME_COLOR = COLORS.accent;
 
-
-
-const MOCK_SEARCH_DATA = {
-  users: [
-    {
-      _id: "u1",
-      username: "@BeatBoxKing",
-      first_name: "Raj",
-      last_name: "Kumar",
-      profile_picture_url: "https://i.pravatar.cc/150?u=890",
-      followers_count: 1420,
-      is_followed_by_me: false,
-    },
-    {
-      _id: "u2",
-      username: "@RapperOne",
-      first_name: "Amit",
-      last_name: "Singh",
-      profile_picture_url: "https://i.pravatar.cc/150?u=111",
-      followers_count: 5300,
-      is_followed_by_me: true,
-    },
-    {
-      _id: "u3",
-      username: "@GullyDancer",
-      first_name: "Priya",
-      last_name: "Sharma",
-      profile_picture_url: "https://i.pravatar.cc/150?u=222",
-      followers_count: 890,
-      is_followed_by_me: false,
-    },
-    {
-      _id: "u4",
-      username: "@ChefMaster",
-      first_name: "Rohan",
-      last_name: "Mehra",
-      profile_picture_url: "https://i.pravatar.cc/150?u=444",
-      followers_count: 1200,
-      is_followed_by_me: false,
-    },
-    {
-      _id: "u5",
-      username: "@TravelVlogger",
-      first_name: "Diya",
-      last_name: "Kapoor",
-      profile_picture_url: "https://i.pravatar.cc/150?u=555",
-      followers_count: 3100,
-      is_followed_by_me: true,
-    },
-    {
-      _id: "u6",
-      username: "@FunnyGuy",
-      first_name: "Sumit",
-      last_name: "Pawar",
-      profile_picture_url: "https://i.pravatar.cc/150?u=666",
-      followers_count: 980,
-      is_followed_by_me: false,
-    },
-    {
-      _id: "u7",
-      username: "@ArtisticVibes",
-      first_name: "Neha",
-      last_name: "Joshi",
-      profile_picture_url: "https://i.pravatar.cc/150?u=777",
-      followers_count: 750,
-      is_followed_by_me: false,
-    },
-    {
-      _id: "u8",
-      username: "@MusicProducer",
-      first_name: "Arun",
-      last_name: "Shetty",
-      profile_picture_url: "https://i.pravatar.cc/150?u=888",
-      followers_count: 2300,
-      is_followed_by_me: true,
-    },
-  ],
-  competitions: [
-    {
-      _id: "comp1",
-      title: "Mumbai Rap Cypher",
-      status: "LIVE",
-      prize: 25000,
-      participants: 342,
-      image: "https://picsum.photos/seed/comp1/500/300",
-    },
-    {
-      _id: "comp2",
-      title: "Dance-Off Delhi",
-      status: "UPCOMING",
-      prize: 50000,
-      participants: 120,
-      image: "https://picsum.photos/seed/comp2/500/300",
-    },
-    {
-      _id: "comp3",
-      title: "Gully Chef Wars",
-      status: "ENDED",
-      prize: 15000,
-      participants: 85,
-      image: "https://picsum.photos/seed/comp3/500/300",
-    },
-    {
-      _id: "comp4",
-      title: "Street Art Showdown",
-      status: "LIVE",
-      prize: 30000,
-      participants: 210,
-      image: "https://picsum.photos/seed/comp4/500/300",
-    },
-    {
-      _id: "comp5",
-      title: "Beatbox Battle Royale",
-      status: "UPCOMING",
-      prize: 20000,
-      participants: 95,
-      image: "https://picsum.photos/seed/comp5/500/300",
-    },
-  ],
-  reels: [
-    {
-      _id: "r1",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully1/400/600",
-      caption: "Check out this flow #rap",
-      author: {
-        username: "@RapperOne",
-        profile_picture_url: "...",
-        is_followed_by_me: true,
-      },
-      music: { name: "Original Sound - RapperOne" },
-      stats: { votes: 5000 },
-      user_interactions: { has_voted: true },
-    },
-    {
-      _id: "r2",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully2/400/600",
-      caption: "New routine dropping! 💃",
-      author: {
-        username: "@GullyDancer",
-        profile_picture_url: "...",
-        is_followed_by_me: false,
-      },
-      music: { name: "Trending Beat 1" },
-      stats: { votes: 2100 },
-      user_interactions: { is_saved: true },
-    },
-    {
-      _id: "r3",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully3/400/600",
-      caption: "Beatbox session🚇",
-      author: {
-        username: "@BeatBoxKing",
-        profile_picture_url: "...",
-        is_followed_by_me: false,
-      },
-      music: { name: "Original Sound - BeatBoxKing" },
-      stats: { votes: 8900 },
-      user_interactions: { has_tipped: true },
-    },
-    {
-      _id: "r4",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully4/400/600",
-      caption: "Flow Check🎤",
-      author: { username: "@RapperOne", is_followed_by_me: true },
-      music: { name: "Flow #2" },
-      stats: { votes: 4500 },
-    },
-    {
-      _id: "r5",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully5/400/600",
-      caption: "Gully Grooves💃",
-      author: { username: "@GullyDancer", is_followed_by_me: false },
-      music: { name: "Groove it" },
-      stats: { votes: 1900 },
-    },
-    {
-      _id: "r6",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully6/400/600",
-      caption: "Vocal Beats🚇",
-      author: { username: "@BeatBoxKing", is_followed_by_me: false },
-      music: { name: "Vocal Vibes" },
-      stats: { votes: 7200 },
-    },
-    {
-      _id: "r7",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully7/400/600",
-      caption: "Bars #gullyrap",
-      author: { username: "@RapperOne", is_followed_by_me: true },
-      music: { name: "My Bars" },
-      stats: { votes: 3100 },
-    },
-    {
-      _id: "r8",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully8/400/600",
-      caption: "Dance Vibe🔥",
-      author: { username: "@GullyDancer", is_followed_by_me: false },
-      music: { name: "High Vibe" },
-      stats: { votes: 1500 },
-    },
-    {
-      _id: "r9",
-      video_url: "...",
-      thumbnail_url: "https://picsum.photos/seed/gully9/400/600",
-      caption: "Beat session!🚇",
-      author: { username: "@BeatBoxKing", is_followed_by_me: false },
-      music: { name: "Deep Bass" },
-      stats: { votes: 5900 },
-    },
-  ],
-};
-
 const safeImageSource = (uri: any) => {
   if (!uri || uri.endsWith(".mp4")) {
     return {
@@ -291,6 +74,8 @@ export default function SearchScreen() {
   const [activeSearchType, setActiveSearchType] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [searchHistory, setSearchHistory] = useState<string[]>([]);
   const [searchResults, setSearchResults] = useState<any>({
     top_users: [],
     top_competitions: [],
@@ -305,6 +90,40 @@ export default function SearchScreen() {
     { id: "competitions", label: "Competitions" },
     { id: "reels", label: "Reels" },
   ];
+
+  // Load search history on mount
+  useEffect(() => {
+    const loadSearchHistory = async () => {
+      try {
+        const history = await AsyncStorage.getItem("searchHistory");
+        if (history) {
+          setSearchHistory(JSON.parse(history));
+        }
+      } catch (error) {
+        console.error("[search] Error loading search history:", error);
+      }
+    };
+    loadSearchHistory();
+  }, []);
+
+  // Save search query to history when user performs a search
+  const addToSearchHistory = useCallback(async (query: string) => {
+    if (!query.trim()) return;
+    
+    try {
+      setSearchHistory((prev) => {
+        // Remove if already exists, then add to front
+        const filtered = prev.filter((item) => item !== query);
+        const updated = [query, ...filtered].slice(0, 10); // Keep last 10
+        AsyncStorage.setItem("searchHistory", JSON.stringify(updated)).catch((err) =>
+          console.error("[search] Error saving search history:", err)
+        );
+        return updated;
+      });
+    } catch (error) {
+      console.error("[search] Error adding to search history:", error);
+    }
+  }, []);
 
   const [screenDimensions, setScreenDimensions] = useState(
     getScreenDimensions(),
@@ -328,26 +147,45 @@ export default function SearchScreen() {
     return () => subscription?.remove();
   }, []);
 
-  
+  // Cleanup debounce timer on unmount
   useEffect(() => {
-    const performSearch = async () => {
-      // If search query is empty, show empty state
-      if (!searchQuery.trim()) {
-        setSearchResults({
-          top_users: [],
-          top_competitions: [],
-          top_reels: [],
-          results: [],
-          hasMore: false,
-        });
-        setIsLoading(false);
-        return;
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
       }
+    };
+  }, []);
 
-      setIsLoading(true);
+  // Debounced search handler
+  useEffect(() => {
+    // Clear previous timeout
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // If query is empty, clear results immediately
+    if (!searchQuery.trim()) {
+      setSearchResults({
+        top_users: [],
+        top_competitions: [],
+        top_reels: [],
+        results: [],
+        hasMore: false,
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    // Add to search history when search starts
+    addToSearchHistory(searchQuery);
+
+    // Set loading state immediately
+    setIsLoading(true);
+
+    // Debounce API call by 400ms
+    debounceTimerRef.current = setTimeout(async () => {
       try {
         if (activeSearchType === "all") {
-          // Perform global search
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.globalSearch(searchQuery.trim());
           
@@ -369,7 +207,6 @@ export default function SearchScreen() {
             });
           }
         } else if (activeSearchType === "users") {
-          // Search users
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchUsers(searchQuery.trim());
           
@@ -391,7 +228,6 @@ export default function SearchScreen() {
             });
           }
         } else if (activeSearchType === "competitions") {
-          // Search competitions
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchCompetitions(searchQuery.trim());
           
@@ -413,7 +249,6 @@ export default function SearchScreen() {
             });
           }
         } else if (activeSearchType === "reels") {
-          // Search reels
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchReels(searchQuery.trim());
           
@@ -447,9 +282,7 @@ export default function SearchScreen() {
       } finally {
         setIsLoading(false);
       }
-    };
-
-    performSearch();
+    }, 400);
   }, [searchQuery, activeSearchType]);
 
   const tabs = [
@@ -537,6 +370,48 @@ export default function SearchScreen() {
         >
           <ActivityIndicator size="large" color={THEME_COLOR} />
         </View>
+      ) : searchQuery.trim() === "" && searchHistory.length > 0 ? (
+        // Show search history when no query is entered
+        <ScrollView
+          style={[styles.mainContent, { paddingHorizontal: scale(12) }]}
+          contentContainerStyle={{ paddingBottom: bottomNavHeight }}
+        >
+          <Text style={[styles.sectionTitle, { marginTop: scale(16) }]}>
+            Recent Searches
+          </Text>
+          <View style={{ gap: scaleVertical(8) }}>
+            {searchHistory.map((query, index) => (
+              <TouchableOpacity
+                key={`${query}-${index}`}
+                onPress={() => setSearchQuery(query)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  paddingVertical: scaleVertical(12),
+                  paddingHorizontal: scale(12),
+                  backgroundColor: COLORS.surface,
+                  borderRadius: scale(8),
+                }}
+              >
+                <Text style={{ color: COLORS.text, flex: 1, fontSize: getFontSize(14) }}>
+                  {query}
+                </Text>
+                <TouchableOpacity
+                  onPress={async () => {
+                    const updated = searchHistory.filter((_, i) => i !== index);
+                    setSearchHistory(updated);
+                    await AsyncStorage.setItem("searchHistory", JSON.stringify(updated)).catch(
+                      (err) => console.error("[search] Error updating history:", err)
+                    );
+                  }}
+                  style={{ padding: scale(8) }}
+                >
+                  <Text style={{ color: COLORS.textMuted, fontSize: getFontSize(12) }}>✕</Text>
+                </TouchableOpacity>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
       ) : (
         <View style={styles.mainContent}>
           {}
@@ -555,7 +430,7 @@ export default function SearchScreen() {
                       key={user._id}
                       style={styles.topUserCard}
                       onPress={() => {
-                        router.push("/(main)/profile/[id]");
+                        router.push(`/(main)/profile/${user._id}`);
                       }}
                     >
                       <Image
@@ -591,7 +466,7 @@ export default function SearchScreen() {
                         <TouchableOpacity
                           key={comp._id}
                           onPress={() => {
-                            router.push("/(main)/competition/live/[id]");
+                            router.push(`/(main)/competition/${comp._id}`);
                           }}
                           style={styles.topCompCard}
                         >
@@ -618,7 +493,7 @@ export default function SearchScreen() {
                   <TouchableOpacity
                     style={styles.fullReelCard}
                     onPress={() => {
-                      router.push("/(main)/reel");
+                      router.push(`/(main)/reel/${item._id}`);
                     }}
                   >
                     <Image
@@ -638,7 +513,12 @@ export default function SearchScreen() {
               keyExtractor={(item) => item._id}
               contentContainerStyle={{ paddingBottom: bottomNavHeight }}
               renderItem={({ item }) => (
-                <View style={styles.userListItem}>
+                <TouchableOpacity 
+                  style={styles.userListItem}
+                  onPress={() => {
+                    router.push(`/(main)/profile/${item._id}`);
+                  }}
+                >
                   <Image
                     source={safeImageSource(item.profile_picture_url)}
                     style={styles.userListAvatar}
@@ -650,12 +530,17 @@ export default function SearchScreen() {
                       {item.followers_count} followers
                     </Text>
                   </View>
-                  <TouchableOpacity style={styles.followButtonBox}>
+                  <TouchableOpacity 
+                    style={styles.followButtonBox}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                    }}
+                  >
                     <Text style={styles.followButtonBoxText}>
                       {item.is_followed_by_me ? "Following" : "Follow"}
                     </Text>
                   </TouchableOpacity>
-                </View>
+                </TouchableOpacity>
               )}
             />
           )}
@@ -698,7 +583,12 @@ export default function SearchScreen() {
               keyExtractor={(item) => item._id}
               contentContainerStyle={{ paddingBottom: bottomNavHeight }}
               renderItem={({ item }) => (
-                <TouchableOpacity style={styles.topReelCard}>
+                <TouchableOpacity 
+                  style={styles.topReelCard}
+                  onPress={() => {
+                    router.push(`/(main)/reel/${item._id}`);
+                  }}
+                >
                   <Image
                     source={safeImageSource(item.thumbnail_url)}
                     style={styles.gridMedia}

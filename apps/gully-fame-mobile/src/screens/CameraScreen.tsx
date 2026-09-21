@@ -1,8 +1,9 @@
 /**
  * Complete Camera Screen Implementation with Multi-Segment Support
  * Features:
- * - Fixed blank preview layout (StyleSheet.absoluteFillObject)
- * - Fixed Android recording crash (mute={true})
+ * - Fixed Android black preview: keep CameraView mounted (flex:1) and toggle
+ *   the `active` prop instead of conditionally unmounting on focus change.
+ * - Fixed Android recording crash (mute passed to recordAsync)
  * - Multi-segment recording (stitch multiple clips)
  * - Next button & Delete last segment control
  * - Seamless integration with ReelPreviewScreen FFmpeg merger
@@ -97,6 +98,8 @@ export default function CameraScreen() {
         setIsLoading(false);
       }
     })();
+    // Request permissions once on mount; permission hooks are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -121,24 +124,6 @@ export default function CameraScreen() {
 
   // Total recorded duration across all segments
   const totalRecordedDuration = state.segments.reduce((acc, seg) => acc + seg.duration, 0) + state.recordingTime;
-
-  const startCountdown = useCallback(async () => {
-    if (state.timer === 0) {
-      startRecording();
-      return;
-    }
-
-    let remaining = state.timer;
-    Alert.alert(`Recording starts in ${remaining}s...`);
-
-    countdownTimerRef.current = setInterval(() => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        clearInterval(countdownTimerRef.current);
-        startRecording();
-      }
-    }, 1000);
-  }, [state.timer]);
 
   const startRecording = useCallback(async () => {
     if (!cameraRef.current) {
@@ -182,6 +167,24 @@ export default function CameraScreen() {
       setState(prev => ({ ...prev, isRecording: false, recordingTime: 0 }));
     }
   }, [state.maxDuration, totalRecordedDuration]);
+
+  const startCountdown = useCallback(async () => {
+    if (state.timer === 0) {
+      startRecording();
+      return;
+    }
+
+    let remaining = state.timer;
+    Alert.alert(`Recording starts in ${remaining}s...`);
+
+    countdownTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(countdownTimerRef.current);
+        startRecording();
+      }
+    }, 1000);
+  }, [state.timer, startRecording]);
 
   const stopRecording = useCallback(async () => {
     if (cameraRef.current) {
@@ -320,17 +323,20 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Absolute Positioning fixes Blank Camera Screen */}
-      {isFocused && (
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFillObject}
-          facing={state.cameraFacing}
-          enableTorch={state.flash === 'on'}
-          mode="video"
-          mute={true}
-        />
-      )}
+      {/*
+        Keep CameraView permanently mounted and use `active` to pause/resume.
+        Conditionally unmounting on focus tears down the native camera session
+        and causes a black preview on Android when returning to the screen.
+        Use flex:1 (not absoluteFill) so the preview surface gets a measured size.
+      */}
+      <CameraView
+        ref={cameraRef}
+        style={styles.cameraPreview}
+        facing={state.cameraFacing}
+        enableTorch={state.flash === 'on'}
+        mode="video"
+        active={isFocused}
+      />
 
       {/* Top Bar */}
       <View style={styles.topBar}>
@@ -477,6 +483,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  cameraPreview: {
+    flex: 1,
   },
   permissionContainer: {
     flex: 1,

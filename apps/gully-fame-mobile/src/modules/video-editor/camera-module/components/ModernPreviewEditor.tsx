@@ -26,6 +26,9 @@ import FilteredImage from "./FilteredImage";
 import FilteredVideo from "./FilteredVideo";
 import PreviewActionButtons from "./PreviewActionButtons";
 import TextEditorModal from "./TextEditorModal";
+import MusicLibraryModal from "../../../../components/MusicLibraryModal";
+
+import type { Music } from "../types/music.types";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const FRAME_WIDTH = 40;
@@ -80,20 +83,10 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
   const [trimEnd, setTrimEnd] = useState(0);
   const [showTrimHandles, setShowTrimHandles] = useState(false);
 
-  // 🎵 INSTAGRAM STYLE MUSIC ENGINE STATES
-  const [showMusicPicker, setShowMusicPicker] = useState(false);
-  const [showMusicAdjuster, setShowMusicAdjuster] = useState(false);
   const [musicOffset, setMusicOffset] = useState(0); 
   const [selectedTrackName, setSelectedTrackName] = useState("Braj Ras Ringtone");
-
-  // Premium Custom Curated Tracking Feed Mock Matrix Data
-  const TRENDING_TRACKS = [
-    { id: "1", title: "Millionaire", artist: "Yo Yo Honey Singh", duration: "0:30", views: "2.5M" },
-    { id: "2", title: "Softly", artist: "Karan Aujla", duration: "0:30", views: "4.1M" },
-    { id: "3", title: "Tauba Tauba", artist: "Karan Aujla / Vicky Kaushal", duration: "0:30", views: "1.8M" },
-    { id: "4", title: "Big Dawgs", artist: "Hanumankind", duration: "0:30", views: "5.2M" },
-    { id: "5", title: "Braj Ras Ringtone", artist: "Traditional Devotional", duration: "0:30", views: "900K" },
-  ];
+  const [showMusicPicker, setShowMusicPicker] = useState(false);
+  const [selectedMusic, setSelectedMusic] = useState<Music | undefined>();
 
   React.useEffect(() => {
     setSelectedFilter(clip.filterPreset || null);
@@ -532,13 +525,18 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
     }
   }, []);
 
-  // 🛠️ FIX 2: Correctly mapped from ReferenceError to launch picker window sheet
+  // 🛠️ FIX: Use real MusicLibraryModal instead of hardcoded picker
   const handleMusic = useCallback(() => {
     setShowMusicPicker(true);
     if (videoRef.current) {
-      videoRef.current.pauseAsync();
-      setIsPlaying(false);
+      videoRef.current.pause?.();
     }
+  }, []);
+
+  const handleMusicSelect = useCallback((music: Music) => {
+    setSelectedMusic(music);
+    setSelectedTrackName(music.title);
+    setShowMusicPicker(false);
   }, []);
 
   return (
@@ -560,7 +558,7 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
             videoRef={videoRef}
             source={{ uri: clip.uri }}
             style={styles.mediaFullScreen}
-            resizeMode="cover" 
+            contentFit="cover" 
             shouldPlay={false}
             isLooping={false}
             rate={speedSegments ? currentPlaybackRateRef.current : selectedSpeed}
@@ -904,124 +902,13 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
         </View>
       </View>
 
-      {/* 🎵 INSTAGRAM-STYLE MUSIC PICKER BOTTOM SHEET MODAL */}
-      <Modal
+      {/* 🎵 MUSIC LIBRARY MODAL - Real Backend-Wired Component */}
+      <MusicLibraryModal
         visible={showMusicPicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowMusicPicker(false)}
-      >
-        <View style={styles.musicPickerOverlay}>
-          <TouchableOpacity style={styles.transparentBackdrop} activeOpacity={1} onPress={() => setShowMusicPicker(false)} />
-          
-          <View style={styles.musicPickerContainer}>
-            <View style={styles.sheetNotch} />
-            
-            <View style={styles.pickerHeader}>
-              <Text style={styles.pickerTitle}>Choose Music</Text>
-              <TouchableOpacity onPress={() => setShowMusicPicker(false)}>
-                <Text style={{ color: '#aaa', fontSize: 14, fontWeight: '600' }}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.searchBarWrapper}>
-              <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" style={{ marginRight: 8 }}>
-                <Path d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 0 0 1.48-5.34c-.47-2.78-2.79-5-5.59-5.34a6.505 6.505 0 0 0-7.27 7.27c.34 2.8 2.56 5.12 5.34 5.59a6.5 6.5 0 0 0 5.34-1.48l.27.28v.79l4.25 4.25c.41.41 1.08.41 1.49 0 .41-.41.41-1.08 0-1.49L15.5 14zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z" fill="#888" />
-              </Svg>
-              <Text style={{ color: '#888', fontSize: 13 }}>Search music or artists...</Text>
-            </View>
-
-            <View style={{ flexDirection: 'row', gap: 16, paddingHorizontal: 20, marginBottom: 12 }}>
-              <Text style={{ color: '#ec9a15', fontWeight: '700', fontSize: 13, borderBottomWidth: 2, borderBottomColor: '#ec9a15', paddingBottom: 4 }}>For You</Text>
-              <Text style={{ color: '#888', fontWeight: '600', fontSize: 13 }}>Trending</Text>
-              <Text style={{ color: '#888', fontWeight: '600', fontSize: 13 }}>Saved</Text>
-            </View>
-
-            <ScrollView style={{ flex: 1, paddingHorizontal: 16 }} showsVerticalScrollIndicator={false}>
-              {TRENDING_TRACKS.map((track) => (
-                <TouchableOpacity
-                  key={track.id}
-                  style={styles.trackItemRow}
-                  activeOpacity={0.7}
-                  onPress={() => {
-                    setSelectedTrackName(track.title); 
-                    setShowMusicPicker(false);        
-                    setShowMusicAdjuster(true);       // Automatically triggers Trimmer adjustment pane open
-                  }}
-                >
-                  <View style={styles.albumArtPlaceholder}>
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" fill="#ec9a15" />
-                    </Svg>
-                  </View>
-
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>{track.title}</Text>
-                    <Text style={{ color: '#888', fontSize: 11, marginTop: 2 }}>{track.artist} • {track.views}</Text>
-                  </View>
-
-                  <View style={styles.trackPlayPreviewButton}>
-                    <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-                      <Path d="M8 5v14l11-7z" fill="#fff" />
-                    </Svg>
-                  </View>
-                </TouchableOpacity>
-              ))}
-              <View style={{ height: 40 }} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
-
-      {/* 🎵 INSTAGRAM STYLE MUSIC SLIDER OVERLAY SHEET */}
-      {showMusicAdjuster && (
-        <View style={styles.musicAdjusterModal}>
-          <View style={styles.musicHeader}>
-            <Text style={styles.musicTitle}>Adjust Audio Track</Text>
-            <TouchableOpacity 
-              style={styles.musicDoneButton} 
-              onPress={() => {
-                setShowMusicAdjuster(false);
-                onClipUpdate?.({
-                  ...clip,
-                  musicOffset: musicOffset
-                });
-              }}
-            >
-              <Text style={styles.musicDoneText}>Done</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.trackNameDisplay}>🎵 {selectedTrackName}</Text>
-
-          <View style={styles.waveformWrapper}>
-            <Animated.ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              scrollEventThrottle={16}
-              onScroll={(e) => {
-                const offsetX = e.nativeEvent.contentOffset.x;
-                const calculatedOffset = Math.floor(offsetX / 10); 
-                
-                // Active threshold check protecting performance depth values
-                if(musicOffset !== calculatedOffset) {
-                  setMusicOffset(calculatedOffset);
-                }
-              }}
-              contentContainerStyle={{ paddingHorizontal: SCREEN_WIDTH / 2 - 20 }}
-            >
-              {Array.from({ length: 60 }).map((_, i) => (
-                <View key={i} style={styles.waveContainer}>
-                  <View style={[styles.waveBar, { height: 15 + Math.sin(i) * 20 }]} />
-                  {i % 5 === 0 && <Text style={styles.waveTimeLabel}>0:{i.toString().padStart(2, '0')}</Text>}
-                </View>
-              ))}
-            </Animated.ScrollView>
-            <View style={styles.musicCenterIndicator} />
-          </View>
-          <Text style={styles.musicStatusText}>Music loops from: 0:{musicOffset.toString().padStart(2, '0')}</Text>
-        </View>
-      )}
+        onSelect={handleMusicSelect}
+        onCancel={() => setShowMusicPicker(false)}
+        selectedMusic={selectedMusic}
+      />
 
       <AddClipOverlay visible={showAddClipOverlay} onClose={() => setShowAddClipOverlay(false)} onSelectCamera={handleSelectCamera} onSelectGallery={handleSelectGallery} />
       <DeleteConfirmationModal visible={showDeleteModal} onConfirm={handleDeleteConfirm} onCancel={handleDeleteCancel} clipType={clip.type} />

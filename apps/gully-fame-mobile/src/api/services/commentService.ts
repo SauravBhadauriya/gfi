@@ -41,6 +41,7 @@ export interface AddCommentResponse {
   text: string;
   likeCount: number;
   createdAt: string;
+  level?: number;
 }
 
 //   Add comment to reel

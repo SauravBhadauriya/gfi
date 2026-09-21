@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from "axios";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as SecureStore from "expo-secure-store";
 
 // Retrieve base URL from environment or default to production
 let rawBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL || "https://gullyfame.com/v1/api";
@@ -61,12 +61,12 @@ apiClient.interceptors.request.use(
       }
 
       if (!config.skipAuth) {
-        const token = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+        const token = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
         if (token) {
           config.headers = config.headers || {};
           config.headers.Authorization = `Bearer ${token}`;
         } else if (__DEV__) {
-          console.warn("[axios] 🔐 [VERIFICATION] No token found in AsyncStorage - request will be sent without auth");
+          console.warn("[axios] 🔐 [VERIFICATION] No token found in SecureStore - request will be sent without auth");
         }
       }
       
@@ -159,7 +159,7 @@ apiClient.interceptors.response.use(
       if (__DEV__) console.log("[axios] Received 401 - Attempting token refresh");
       originalRequest._retry = true;
       try {
-        const refreshToken = await AsyncStorage.getItem("refreshToken");
+        const refreshToken = await SecureStore.getItemAsync("refreshToken");
 
         if (refreshToken) {
           const refreshResponse = await axios.post(
@@ -172,7 +172,7 @@ apiClient.interceptors.response.use(
             const newToken = refreshResponse.data.data?.token || refreshResponse.data.token;
 
             if (newToken) {
-              await AsyncStorage.setItem(TOKEN_STORAGE_KEY, newToken);
+              await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, newToken);
               originalRequest.headers.Authorization = `Bearer ${newToken}`;
               return apiClient(originalRequest);
             }
@@ -180,8 +180,8 @@ apiClient.interceptors.response.use(
         }
       } catch (refreshError) {
         console.error("[axios] Token refresh failed:", refreshError);
-        await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
-        await AsyncStorage.removeItem("refreshToken");
+        await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+        await SecureStore.deleteItemAsync("refreshToken");
       }
     }
 
@@ -203,7 +203,7 @@ apiClient.interceptors.response.use(
 
 export const setAuthToken = async (token: string): Promise<void> => {
   try {
-    await AsyncStorage.setItem(TOKEN_STORAGE_KEY, token);
+    await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
   } catch (error) {
     console.error("[axios] Failed to store auth token:", error);
     throw error;
@@ -212,7 +212,7 @@ export const setAuthToken = async (token: string): Promise<void> => {
 
 export const getAuthToken = async (): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+    return await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
   } catch (error) {
     console.error("[axios] Failed to retrieve auth token:", error);
     return null;
@@ -221,7 +221,7 @@ export const getAuthToken = async (): Promise<string | null> => {
 
 export const removeAuthToken = async (): Promise<void> => {
   try {
-    await AsyncStorage.removeItem(TOKEN_STORAGE_KEY);
+    await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
   } catch (error) {
     console.error("[axios] Failed to remove auth token:", error);
     throw error;

@@ -10,7 +10,11 @@ export interface Reel {
   title?: string;
   description?: string;
   videoUrl?: string;
+  video_url?: string;
   thumbnail?: string;
+  thumbnail_url?: string;
+  duration?: number;
+  uri?: string;
   [key: string]: any;
 }
 
@@ -30,9 +34,15 @@ export const useUserReels = (userId: string) => {
       setLoading(true);
       setError(null);
 
+      // Determine endpoint based on userId
+      let endpoint = "user/reels"; // Own reels by default
+      if (userId && userId !== "me") {
+        endpoint = `user/${userId}/reels`; // Public profile reels
+      }
+
       // Try to call the user reels endpoint
       try {
-        const response = await apiClient.get<any>(`user/reels`, {
+        const response = await apiClient.get<any>(endpoint, {
           params: {
             page: 1,
             limit: 50,
@@ -41,7 +51,7 @@ export const useUserReels = (userId: string) => {
 
         const responseData = response.data as any;
 
-        console.log("[useUserReels] Response from API:", {
+        console.log(`[useUserReels] Response from ${endpoint}:`, {
           status: response.status,
           hasData: !!responseData.data,
           dataType: typeof responseData.data,
@@ -68,7 +78,7 @@ export const useUserReels = (userId: string) => {
       } catch (apiError: any) {
         // If endpoint doesn't exist (404), gracefully return empty list
         if (apiError.response?.status === 404) {
-          console.log("[useUserReels] User reels endpoint not available, returning empty list");
+          console.log(`[useUserReels] Reels endpoint not available (${endpoint}), returning empty list`);
           setReels([]);
         } else {
           throw apiError;
@@ -84,13 +94,21 @@ export const useUserReels = (userId: string) => {
     }
   }, [userId]);
 
+  // Normalize reels for grid display
+  const normalizedReels = reels.map((reel) => ({
+    ...reel,
+    uri: reel.uri || reel.videoUrl || reel.video_url,
+    thumbnail: reel.thumbnail || reel.thumbnail_url,
+    id: reel.id || reel._id,
+  }));
+
   // Load reels on mount
   useEffect(() => {
     fetchUserReels();
   }, [userId, fetchUserReels]);
 
   return {
-    reels,
+    reels: normalizedReels,
     loading,
     error,
     refetch: fetchUserReels,

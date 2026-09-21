@@ -19,6 +19,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { competitionService } from '../api/services/competitionService';
 import { bannerService } from '../api/services/bannerService';
 import { categoryService } from '../api/services/categoryService';
+import { leaderboardService, TopPerformer } from '../api/services/leaderboardService';
 
 interface Competition {
   id: string;
@@ -46,6 +47,7 @@ export default function HomeScreen({ navigation }: any) {
   const [competitions, setCompetitions] = useState<Competition[]>([]);
   const [banners, setBanners] = useState<Banner[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [topPerformers, setTopPerformers] = useState<TopPerformer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -58,10 +60,11 @@ export default function HomeScreen({ navigation }: any) {
   const fetchHomeData = async () => {
     try {
       setLoading(true);
-      const [competitionsRes, bannersRes, categoriesRes] = await Promise.all([
+      const [competitionsRes, bannersRes, categoriesRes, topPerformersRes] = await Promise.all([
         competitionService.getCompetitions(),
         bannerService.getActiveBanners(),
         categoryService.getCategories(),
+        leaderboardService.getTopPerformers({ limit: 10 }),
       ]);
 
       if (competitionsRes.success && competitionsRes.data) {
@@ -72,6 +75,9 @@ export default function HomeScreen({ navigation }: any) {
       }
       if (categoriesRes.success && categoriesRes.data) {
         setCategories(((categoriesRes.data as any).items || categoriesRes.data) as any);
+      }
+      if (topPerformersRes.success && topPerformersRes.data) {
+        setTopPerformers(topPerformersRes.data as any);
       }
     } catch (error) {
       console.error('Error fetching home data:', error);
@@ -180,6 +186,44 @@ export default function HomeScreen({ navigation }: any) {
                     <Ionicons name="star" size={24} color="#007AFF" />
                   </View>
                   <Text style={styles.categoryName}>{category.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Top Performers Section */}
+        {topPerformers.length > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Top Performers</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('Leaderboard')}>
+                <Text style={styles.viewAllText}>View All</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.topPerformersContainer}>
+              {topPerformers.slice(0, 5).map((performer, index) => (
+                <TouchableOpacity
+                  key={performer.id || index}
+                  style={styles.performerRow}
+                  onPress={() => navigation.navigate('UserProfile', { userId: performer.userId })}
+                >
+                  <View style={styles.performerRank}>
+                    <Text style={styles.performerRankText}>{performer.badge || performer.rank}</Text>
+                  </View>
+                  <Image
+                    source={{ uri: performer.profileImage || 'https://via.placeholder.com/40' }}
+                    style={styles.performerAvatar}
+                  />
+                  <View style={styles.performerInfo}>
+                    <Text style={styles.performerName}>{performer.name}</Text>
+                    {performer.isVerified && (
+                      <Ionicons name="checkmark-circle" size={12} color="#007AFF" style={styles.verifiedBadge} />
+                    )}
+                  </View>
+                  <View style={styles.performerPoints}>
+                    <Text style={styles.performerPointsText}>{performer.points} pts</Text>
+                  </View>
                 </TouchableOpacity>
               ))}
             </View>
@@ -421,5 +465,66 @@ const styles = StyleSheet.create({
   },
   footerSpacing: {
     height: 20,
+  },
+  topPerformersContainer: {
+    paddingHorizontal: 16,
+  },
+  performerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  performerRank: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  performerRankText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    textAlign: 'center',
+  },
+  performerAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  performerInfo: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  performerName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  verifiedBadge: {
+    marginLeft: 4,
+  },
+  performerPoints: {
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+  },
+  performerPointsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#007AFF',
   },
 });

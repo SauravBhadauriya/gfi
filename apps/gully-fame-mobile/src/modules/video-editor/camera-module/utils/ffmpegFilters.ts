@@ -181,6 +181,55 @@ export function buildAdjustmentFilterChain(settings: AdjustSettings): string {
   return filters.length > 0 ? filters.join(",") : "";
 }
 
+/**
+ * 🎬 Generate FFmpeg filter chain from overlay effects array
+ * Applies blur, vignette, watermark, and gradient effects to video
+ */
+export function buildOverlayEffectFilterChain(effects: any[]): string {
+  if (!effects || effects.length === 0) return "";
+  
+  const filters: string[] = [];
+  
+  // Process each overlay effect
+  effects.forEach((effect) => {
+    switch (effect.type) {
+      case 'blur':
+        // Blur: intensity 0-1 → blur radius 0-20
+        const blurRadius = effect.intensity * 20;
+        if (blurRadius > 0) {
+          filters.push(`boxblur=${blurRadius.toFixed(1)}`);
+        }
+        break;
+        
+      case 'vignette':
+        // Vignette: intensity 0-1 → angle and darkness
+        // Default centered vignette with adjustable intensity
+        const vignetteAngle = 45 * effect.intensity; // 0 to 45 degrees
+        filters.push(`vignette=angle=${vignetteAngle}:x0=0.5:y0=0.5:r=${(0.5 + effect.intensity * 0.3).toFixed(2)}`);
+        break;
+        
+      case 'watermark':
+        // Watermark: typically a text or logo overlay
+        // For simplicity, we'll use a semi-transparent rectangle in corner
+        // In production, this would overlay an actual image file
+        const watermarkOpacity = effect.opacity;
+        // Drawtext filter for watermark text - "© Gully Fame"
+        filters.push(`drawtext=text='© Gully Fame':fontfile=/System/Library/Fonts/Helvetica.ttc:fontsize=20:fontcolor=white@${watermarkOpacity}:box=1:boxcolor=black@${(watermarkOpacity * 0.5).toFixed(2)}:x=10:y=h-30`);
+        break;
+        
+      case 'gradient':
+        // Gradient: overlay a color gradient on the video
+        // Using drawgradient or lutrgb filter
+        const gradientIntensity = effect.intensity;
+        // Create a subtle orange gradient overlay
+        filters.push(`colorchannelmixer=rr=1:gg=${(1 - gradientIntensity * 0.2).toFixed(2)}:bb=${(1 - gradientIntensity * 0.3).toFixed(2)}`);
+        break;
+    }
+  });
+  
+  return filters.length > 0 ? filters.join(",") : "";
+}
+
 export async function applyPresetToImage(
   inputPath: string,
   outputPath: string,

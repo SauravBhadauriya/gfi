@@ -16,6 +16,8 @@ import {
   ScrollView,
 } from "react-native";
 import { useAuth } from "../contexts/AuthContext";
+import { useDispatch } from "react-redux";
+import { setUser } from "../store/slices/userSlice";
 // CHANGE THIS:
 // import * as userApi from '../api/services/userService';
 
@@ -24,6 +26,7 @@ import { authService } from "../api/services/authService";
 
 export default function LoginScreen({ navigation }: any) {
   const { login } = useAuth();
+  const dispatch = useDispatch();
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -72,6 +75,11 @@ export default function LoginScreen({ navigation }: any) {
 
         // Save token and user data
         await login(response.data.token);
+        
+        // Store user data in Redux
+        if (response.data?.user) {
+          dispatch(setUser(response.data.user));
+        }
 
         Alert.alert("Success", "Login successful!");
       } else {

@@ -100,7 +100,7 @@ function ReelVideoPlayer({ reel, isVisible, videoRefs }: ReelVideoPlayerProps) {
   }, [player, reel.id]);
 
   React.useEffect(() => {
-    let timeoutId: NodeJS.Timeout | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     if (isVisible && AppState.currentState === "active") {
       timeoutId = setTimeout(() => {
@@ -122,7 +122,6 @@ function ReelVideoPlayer({ reel, isVisible, videoRefs }: ReelVideoPlayerProps) {
       style={styles.reelImage}
       player={player}
       contentFit="cover"
-      allowsFullscreen
     />
   );
 }
@@ -167,7 +166,7 @@ export default function GullyReelScreen() {
     reelId: number;
     isPlaying: boolean;
   } | null>(null);
-  const playPauseIconTimeout = useRef<NodeJS.Timeout | null>(null);
+  const playPauseIconTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoPlayingStates = useRef<Map<number, boolean>>(new Map());
   const playPauseIconOpacity = useRef(new Animated.Value(0)).current;
   const THEME_COLOR = "#EC9A15";
@@ -176,6 +175,13 @@ export default function GullyReelScreen() {
   
   const [shareModalFollowers, setShareModalFollowers] = useState<any[]>([]);
   const [isLoadingShareFollowers, setIsLoadingShareFollowers] = useState(false);
+
+  // Move these declarations earlier to fix "used before declaration" errors
+  const [commentModalVisible, setCommentModalVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [currentReelBackendId, setCurrentReelBackendId] = useState<string | null>(null);
+  const [comments, setComments] = useState<any[]>([]);
+  const [isLoadingComments, setIsLoadingComments] = useState(false);
 
   const BOTTOM_NAV_HEIGHT = scale(60);
 
@@ -365,18 +371,13 @@ export default function GullyReelScreen() {
     router.push("/(main)" as any);
   };
 
-  const [commentModalVisible, setCommentModalVisible] = useState(false);
-  const [shareModalVisible, setShareModalVisible] = useState(false);
   const [currentReelId, setCurrentReelId] = useState<number | null>(null);
-  const [currentReelBackendId, setCurrentReelBackendId] = useState<string | null>(null);
   const [commentText, setCommentText] = useState("");
   const [replyingToComment, setReplyingToComment] = useState<number | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
   const [commentLikes, setCommentLikes] = useState<
     Map<number, { likes: number; isLiked: boolean }>
   >(new Map());
-  const [comments, setComments] = useState<any[]>([]);
-  const [isLoadingComments, setIsLoadingComments] = useState(false);
   const [reelViewerVisible, setReelViewerVisible] = useState(false);
   const [reelViewerInitialIndex, setReelViewerInitialIndex] = useState(0);
   const slideAnim = useRef(new Animated.Value(height)).current;
@@ -589,6 +590,43 @@ export default function GullyReelScreen() {
     [reels, votePopupAnim]
   );
 
+  const handleSave = useCallback(
+    async (id: number) => {
+      const targetReel = reels.find((r) => r.id === id);
+      if (!targetReel || !targetReel._backendId) {
+        return;
+      }
+
+      const previousReels = reels;
+
+      // Optimistic UI update
+      setReels((prevReels) =>
+        prevReels.map((reel) =>
+          reel.id === id
+            ? {
+              ...reel,
+              isSaved: !reel.isSaved,
+                            saves: reel.isSaved ? Math.max(0, (reel.saves || 0) - 1) : (reel.saves || 0) + 1,
+            }
+            : reel
+        )
+      );
+
+      try {
+        const response = await reelsService.toggleSaveReel(targetReel._backendId);
+
+        if (!response.success) {
+          setReels(previousReels);
+          Alert.alert("Error", response.message || "Failed to save reel");
+        }
+      } catch (error: any) {
+        setReels(previousReels);
+        Alert.alert("Error", "Failed to save reel");
+      }
+    },
+    [reels]
+  );
+
   const handleVideoTap = useCallback(async (id: number) => {
     const videoRef = videoRefs.current.get(id);
     if (!videoRef) return;
@@ -688,41 +726,41 @@ export default function GullyReelScreen() {
     [reels]
   );
 
-  const handleSave = useCallback(
-    async (id: number) => {
-      const targetReel = reels.find((r) => r.id === id);
-      if (!targetReel || !targetReel._backendId) {
-        return;
-      }
+  // const handleSave = useCallback(
+  //   async (id: number) => {
+  //     const targetReel = reels.find((r) => r.id === id);
+  //     if (!targetReel || !targetReel._backendId) {
+  //       return;
+  //     }
 
-      const previousReels = reels;
+  //     const previousReels = reels;
 
-      setReels((prevReels) =>
-        prevReels.map((reel) =>
-          reel.id === id
-            ? {
-              ...reel,
-              isSaved: !reel.isSaved,
-              saves: reel.isSaved ? (reel.saves || 0) - 1 : (reel.saves || 0) + 1,
-            }
-            : reel
-        )
-      );
+  //     setReels((prevReels) =>
+  //       prevReels.map((reel) =>
+  //         reel.id === id
+  //           ? {
+  //             ...reel,
+  //             isSaved: !reel.isSaved,
+  //             saves: reel.isSaved ? (reel.saves || 0) - 1 : (reel.saves || 0) + 1,
+  //           }
+  //           : reel
+  //       )
+  //     );
 
-      try {
-        const response = await reelsService.toggleSaveReel(targetReel._backendId);
+  //     try {
+  //       const response = await reelsService.toggleSaveReel(targetReel._backendId);
 
-        if (!response.success) {
-          setReels(previousReels);
-          Alert.alert("Error", response.message || "Failed to save reel");
-        }
-      } catch (error: any) {
-        setReels(previousReels);
-        Alert.alert("Error", "Failed to save reel");
-      }
-    },
-    [reels]
-  );
+  //       if (!response.success) {
+  //         setReels(previousReels);
+  //         Alert.alert("Error", response.message || "Failed to save reel");
+  //       }
+  //     } catch (error: any) {
+  //       setReels(previousReels);
+  //       Alert.alert("Error", "Failed to save reel");
+  //     }
+  //   },
+  //   [reels]
+  // );
 
   const handleEndReached = useCallback(() => {
     if (isLoadingMore || !hasMoreReels || !currentCursor) {

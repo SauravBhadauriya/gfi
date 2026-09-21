@@ -7,13 +7,20 @@
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Notifications from "expo-notifications";
 
 let Device: any = null;
+let Notifications: any = null;
+
 try {
   Device = require("expo-device");
 } catch (e) {
   console.warn("[notificationIntegrationService] expo-device not available:", (e as any)?.message);
+}
+
+try {
+  Notifications = require("expo-notifications");
+} catch (e) {
+  console.warn("[notificationIntegrationService] expo-notifications not available (requires development build):", (e as any)?.message);
 }
 
 // Emulator detection helper
@@ -35,7 +42,7 @@ const isEmulator = (): boolean => {
 };
 
 // API timeout wrapper
-const API_TIMEOUT_MS = 5000;
+const API_TIMEOUT_MS = 30000; // Extended timeout for production
 const withTimeout = <T,>(promise: Promise<T>, timeoutMs: number = API_TIMEOUT_MS): Promise<T> => {
   return Promise.race([
     promise,
@@ -67,14 +74,20 @@ export interface NotificationPreferences {
   systemNotifications: boolean;
 }
 
-/**
- * Register device for push notifications
- * KIRO: Register device token with backend
- */
 export async function registerDeviceForNotifications(): Promise<
   ApiResponse<{ deviceToken: string }>
 > {
   try {
+    if (!Notifications) {
+      console.warn("[notificationIntegrationService] Notifications not available (requires development build)");
+      return {
+        success: false,
+        message: "Notifications not available - use development build instead of Expo Go",
+        error: "Notifications module not loaded",
+        data: { deviceToken: "" },
+      };
+    }
+
     console.log("[notificationIntegrationService] Registering device for notifications");
 
     // Skip on emulator - notifications not supported
@@ -459,15 +472,20 @@ export function setupNotificationListeners(
   onNotificationReceived?: (notification: Notification) => void,
   onNotificationTapped?: (notification: Notification) => void
 ): () => void {
+  if (!Notifications) {
+    console.warn("[notificationIntegrationService] Notifications module not available, skipping listener setup");
+    return () => {}; // Return no-op cleanup function
+  }
+
   // Handle notification when app is in foreground
-  const foregroundSubscription = Notifications.addNotificationReceivedListener((notification) => {
+  const foregroundSubscription = Notifications.addNotificationReceivedListener((notification: any) => {
     console.log("[notificationIntegrationService] Notification received:", notification);
     onNotificationReceived?.(notification.request.content as any);
   });
 
   // Handle notification tap
   const backgroundSubscription = Notifications.addNotificationResponseReceivedListener(
-    (response) => {
+    (response: any) => {
       console.log("[notificationIntegrationService] Notification tapped:", response);
       onNotificationTapped?.(response.notification.request.content as any);
     }

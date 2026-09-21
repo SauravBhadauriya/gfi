@@ -446,7 +446,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
             <CameraSwitchButton onPress={handleSwitchCamera} />
             {clips.length > 0 && (
               <TouchableOpacity style={cameraStyles.nextButton} onPress={handleNextPress} activeOpacity={0.8}>
-                <Text style={cameraStyles.nextButtonText}>Next ></Text>
+                <Text style={cameraStyles.nextButtonText}>Next {'\u003e'}</Text>
               </TouchableOpacity>
             )}
           </View>

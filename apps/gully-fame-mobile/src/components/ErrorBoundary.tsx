@@ -5,7 +5,7 @@
 
 import React, { ReactNode } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
-import { ErrorResponse } from '@/api/errorHandler';
+import type { ErrorResponse } from '@/api/errorHandler';
 
 interface Props {
   children: ReactNode;
@@ -152,24 +152,6 @@ export function ErrorToast({
   );
 }
 
-/**
- * Get toast color based on error type
- */
-function getToastColor(type: string): string {
-  const colors: Record<string, string> = {
-    NETWORK_ERROR: '#FF6B6B',
-    TIMEOUT_ERROR: '#FFA500',
-    UNAUTHORIZED_ERROR: '#FF4444',
-    FORBIDDEN_ERROR: '#D32F2F',
-    NOT_FOUND_ERROR: '#FF6B6B',
-    SERVER_ERROR: '#FF6B6B',
-    VALIDATION_ERROR: '#FFA500',
-    RATE_LIMIT_ERROR: '#FFA500',
-  };
-
-  return colors[type] || '#FF6B6B';
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -294,3 +276,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
+
+
+export default ErrorBoundary;

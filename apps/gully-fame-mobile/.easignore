@@ -156,3 +156,9 @@ patches/
 *.backup
 *.old
 *.bak
+node_modules/
+.git/
+android/build/
+android/app/build/
+ios/Pods/
+ios/build/

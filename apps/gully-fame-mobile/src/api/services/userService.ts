@@ -90,6 +90,64 @@ export async function getCurrentUser(): Promise<ApiResponse<User>> {
   }
 }
 
+export async function getPublicUserProfile(userId: string): Promise<ApiResponse<User>> {
+  try {
+    console.log('[userService] GET user profile for userId:', userId);
+    
+    // Try multiple endpoint variations for public profile
+    const endpointsToTry = [
+      `users/${userId}/profile`,
+      `user/${userId}/profile`,
+      `users/${userId}`,
+      `user/${userId}`,
+    ];
+
+    for (const endpoint of endpointsToTry) {
+      try {
+        const response = await apiClient.get<any>(endpoint);
+        const responseData = response.data as any;
+
+        if (responseData.code === 1 && responseData.data) {
+          const userData = responseData.data;
+          const user: User = {
+            ...userData,
+            id: userData.id || userData._id,
+          };
+
+          console.log('[userService] GET', endpoint, '- Success:', user);
+          return {
+            success: true,
+            data: user,
+            message: responseData.message || 'User profile fetched successfully',
+          };
+        }
+      } catch (endpointError: any) {
+        if (endpointError.response?.status === 404) {
+          // Try next endpoint
+          continue;
+        }
+        throw endpointError;
+      }
+    }
+
+    // All endpoints failed
+    return {
+      success: false,
+      message: 'User profile not found',
+      error: 'User not found',
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error('[userService] GET public user profile error:', error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Network error occurred',
+      error: error.message || 'Network error',
+      data: undefined,
+    };
+  }
+}
+
 export async function updateUserProfile(data: any): Promise<ApiResponse<User>> {
   try {
     console.log('[userService] PUT user/profile');
@@ -281,6 +339,7 @@ export async function getWalletBalance(): Promise<ApiResponse<WalletBalance>> {
 
 export const userService = {
   getCurrentUser,
+  getPublicUserProfile,
   updateUserProfile,
   getUserKycStatus,
   getUserEarnings,

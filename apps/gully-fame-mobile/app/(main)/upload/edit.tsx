@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -32,8 +32,11 @@ import {
 } from "@/icons";
 import Svg, { Path } from "react-native-svg";
 import { useAudioLibrary } from "@/hooks/useAudioLibrary";
-import { MusicLibraryModal } from "@/components/MusicLibraryModal";
-import { AudioTrimView } from "@/components/AudioTrimView";
+import MusicLibraryModal from "@/components/MusicLibraryModal";
+import AudioTrimView from "@/components/AudioTrimView";
+import MultiTrackTimeline, {
+  type TimelineTrack,
+} from "@/components/MultiTrackTimeline";
 import type { AudioTrimData } from "@/components/AudioTrimView";
 
 const { width, height } = Dimensions.get("window");
@@ -51,10 +54,13 @@ export default function EditScreen() {
   const [selectedMusicForTrim, setSelectedMusicForTrim] = useState<any>(null);
   const [videoDuration, setVideoDuration] = useState(1);
 
-  
+  // Multi-track timeline state
+  const [timelineTracks, setTimelineTracks] = useState<TimelineTrack[]>([]);
+  const [selectedTrackId, setSelectedTrackId] = useState<string | null>(null);
+  const [currentPlayheadTime, setCurrentPlayheadTime] = useState(0);
+
   useEffect(() => {
     if (clips.length > 0 && clips[0]?.uri) {
-      
       setVideoDuration(1);
     }
   }, [clips]);
@@ -64,8 +70,17 @@ export default function EditScreen() {
       try {
         const parsedClips = JSON.parse(params.clips as string);
         setClips(parsedClips);
+
+        // Initialize timeline tracks with video clip as base
+        const videoTrack: TimelineTrack = {
+          id: "video-main",
+          type: "video",
+          label: "Video",
+          startTime: 0,
+          duration: videoDuration,
+        };
+        setTimelineTracks([videoTrack]);
       } catch (e) {
-        
         const clipStrings = String(params.clips).split(",");
         setClips(clipStrings.map((uri, index) => ({ id: index, uri })));
       }
@@ -81,7 +96,6 @@ export default function EditScreen() {
       : null;
     const entryFee = params.entryFee ? String(params.entryFee) : null;
 
-    
     const musicData = selectedMusicForTrim && selectedMusicForTrim.trimData
       ? {
           trackId: selectedMusicForTrim.id,
@@ -92,10 +106,12 @@ export default function EditScreen() {
         }
       : null;
 
+    // Include timeline tracks in export data
     router.push({
       pathname: "/(main)/upload/post",
       params: {
         clips: JSON.stringify(clips),
+        timelineTracks: JSON.stringify(timelineTracks),
         ...(competitionId && { competitionId }),
         ...(competitionName && { competitionName }),
         ...(entryFee && { entryFee }),
@@ -103,6 +119,55 @@ export default function EditScreen() {
       },
     });
   };
+
+  // Track management callbacks
+  const handleTrackUpdate = useCallback(
+    (trackId: string, updates: Partial<TimelineTrack>) => {
+      setTimelineTracks((prevTracks) => {
+        const trackExists = prevTracks.some((t) => t.id === trackId);
+        if (!trackExists) {
+          // New track - add it
+          const newTrack: TimelineTrack = {
+            id: trackId,
+            type: (updates.type || "music") as any,
+            label: updates.label || "Track",
+            startTime: updates.startTime || 0,
+            duration: updates.duration || 1,
+            data: updates.data,
+          };
+          return [...prevTracks, newTrack];
+        }
+        return prevTracks.map((t) =>
+          t.id === trackId ? { ...t, ...updates } : t
+        );
+      });
+    },
+    []
+  );
+
+  const handleTrackDelete = useCallback((trackId: string) => {
+    setTimelineTracks((prevTracks) =>
+      prevTracks.filter((t) => t.id !== trackId)
+    );
+    setSelectedTrackId(null);
+  }, []);
+
+  const handleAddMusicTrack = useCallback(
+    (music: any) => {
+      const trackId = `music-${music.id}-${Date.now()}`;
+      const newTrack: TimelineTrack = {
+        id: trackId,
+        type: "music",
+        label: `${music.title} - ${music.artist}`,
+        startTime: currentPlayheadTime,
+        duration: Math.min(music.duration, videoDuration - currentPlayheadTime),
+        data: music,
+      };
+      handleTrackUpdate(trackId, newTrack);
+      setShowMusicPicker(false);
+    },
+    [currentPlayheadTime, videoDuration, handleTrackUpdate]
+  );
 
   return (
     <View style={styles.container}>
@@ -125,7 +190,7 @@ export default function EditScreen() {
             </TouchableOpacity>
 
             <View style={styles.projectTitleContainer}>
-              <Text style={styles.projectTitle}>New project</Text>
+              <Text style={styles.projectTitle} numberOfLines={1} ellipsizeMode="tail">New project</Text>
               <ArrowDownIcon size={16} color="#fff" />
             </View>
 
@@ -198,66 +263,17 @@ export default function EditScreen() {
               </View>
             </View>
 
-            {}
             <View style={styles.clipTimelineContainer}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.clipTimeline}
-                contentContainerStyle={styles.clipTimelineContent}
-              >
-                {clips.map((clip) => (
-                  <View key={clip.id || clip} style={styles.clipThumbnail}>
-                    {clip.uri ? (
-                      <Image
-                        source={{ uri: clip.uri }}
-                        style={styles.thumbnailImage}
-                        resizeMode="cover"
-                      />
-                    ) : typeof clip === "string" ? (
-                      <Image
-                        source={{ uri: clip }}
-                        style={styles.thumbnailImage}
-                        resizeMode="cover"
-                      />
-                    ) : (
-                      <View style={styles.thumbnailPlaceholder} />
-                    )}
-                    <TouchableOpacity
-                      style={styles.clipDeleteButton}
-                      onPress={() => {
-                        Alert.alert(
-                          "Delete Clip",
-                          "Are you sure you want to delete this clip?",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Delete",
-                              style: "destructive",
-                              onPress: () => {
-                                const newClips = clips.filter(
-                                  (c) => (c.id || c) !== (clip.id || clip),
-                                );
-                                setClips(newClips);
-                              },
-                            },
-                          ],
-                        );
-                      }}
-                      activeOpacity={0.8}
-                    >
-                      <CloseIcon size={14} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                <TouchableOpacity
-                  style={styles.addClipButton}
-                  onPress={() => Alert.alert("Add Clip", "Select video clip")}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.addClipButtonText}>+</Text>
-                </TouchableOpacity>
-              </ScrollView>
+              <MultiTrackTimeline
+                tracks={timelineTracks}
+                videoDuration={videoDuration}
+                currentTime={currentPlayheadTime}
+                onTrackUpdate={handleTrackUpdate}
+                onTrackDelete={handleTrackDelete}
+                onTrackSelect={setSelectedTrackId}
+                selectedTrackId={selectedTrackId}
+                onPlayheadMove={setCurrentPlayheadTime}
+              />
             </View>
           </View>
         </ScrollView>
@@ -459,9 +475,7 @@ export default function EditScreen() {
         visible={showMusicPicker}
         onSelect={(music) => {
           console.log('[EditScreen] Music selected:', music);
-          setSelectedMusicForTrim(music);
-          setShowMusicPicker(false);
-          setShowTrimView(true);
+          handleAddMusicTrack(music);
         }}
         onCancel={() => setShowMusicPicker(false)}
       />
@@ -525,12 +539,15 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   exportButton: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingVertical: 8,
     borderRadius: 20,
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#000",
+    minWidth: 75,
+    justifyContent: "center",
+    alignItems: "center",
   },
   exportButtonText: {
     color: "#000",

@@ -34,10 +34,10 @@ export default function MainLayout() {
 
           // Setup notification listeners
           unsubscribe = setupNotificationListeners(
-            (notification) => {
+            (notification: any) => {
               console.log('[MainLayout] Notification received:', notification);
             },
-            (notification) => {
+            (notification: any) => {
               console.log('[MainLayout] Notification tapped:', notification);
             }
           );
@@ -72,7 +72,6 @@ export default function MainLayout() {
       screenOptions={{
         headerShown: false,
         contentStyle: { backgroundColor: '#3C2610' },
-        animationEnabled: true,
       }}
     >
       <Stack.Screen name="home" options={{ headerShown: false }} />

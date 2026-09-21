@@ -1,12 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/api";
 import { BASE_URL } from "@/api/axios";
-import {
-    fallbackCategories,
-    upcomingCompetitionsMock,
-    pastCompetitionsMock,
-    heroSlides,
-} from "@/data/home/mockData";
 
 export interface HomeScreenData {
     banners: any[];
@@ -19,13 +13,13 @@ export interface HomeScreenData {
 }
 
 const FALLBACK_DATA: HomeScreenData = {
-    banners:              heroSlides,
+    banners:              [],
     trending:             [],
-    liveCompetitions:     upcomingCompetitionsMock,
-    pastCompetitions:     pastCompetitionsMock,
-    upcomingCompetitions: upcomingCompetitionsMock,
+    liveCompetitions:     [],
+    pastCompetitions:     [],
+    upcomingCompetitions: [],
     topCompetitors:       [],
-    categories:           fallbackCategories,
+    categories:           [],
 };
 
 // ✅ Relative image path ko full URL mein convert karo
@@ -58,7 +52,7 @@ async function fetchHomeScreen(): Promise<HomeScreenData> {
             ...c,
             icon: toFullUrl(c.icon),
             image: toFullUrl(c.image),
-        })) ?? fallbackCategories;
+        })) ?? [];
 
         // ✅ Trending — image fix karo
         const trending = data.trending?.map((t: any) => ({
@@ -70,13 +64,13 @@ async function fetchHomeScreen(): Promise<HomeScreenData> {
         const upcomingCompetitions = data.upcomingCompetitions?.map((c: any) => ({
             ...c,
             image: toFullUrl(c.image),
-        })) ?? upcomingCompetitionsMock;
+        })) ?? [];
 
         // ✅ Past competitions
         const pastCompetitions = data.pastCompetitions?.map((c: any) => ({
             ...c,
             image: toFullUrl(c.image),
-        })) ?? pastCompetitionsMock;
+        })) ?? [];
 
         // ✅ Live competitions — API mein nahi hai, upcoming se filter karo
         // Jab backend add kare tab update hoga
@@ -125,13 +119,13 @@ export function useHomeScreen() {
     });
 
     return {
-        banners:              query.data?.banners              ?? heroSlides,
+        banners:              query.data?.banners              ?? [],
         trending:             query.data?.trending             ?? [],
         liveCompetitions:     query.data?.liveCompetitions     ?? [],
-        pastCompetitions:     query.data?.pastCompetitions     ?? pastCompetitionsMock,
-        upcomingCompetitions: query.data?.upcomingCompetitions ?? upcomingCompetitionsMock,
+        pastCompetitions:     query.data?.pastCompetitions     ?? [],
+        upcomingCompetitions: query.data?.upcomingCompetitions ?? [],
         topCompetitors:       query.data?.topCompetitors       ?? [],
-        categories:           query.data?.categories           ?? fallbackCategories,
+        categories:           query.data?.categories           ?? [],
         isLoading:  query.isLoading,
         isFetching: query.isFetching,
         isError:    query.isError,

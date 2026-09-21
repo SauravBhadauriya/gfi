@@ -36,6 +36,7 @@ export interface VideoUploadResponse {
   thumbnailUrl?: string;
   status: "processing" | "completed" | "failed";
   message: string;
+  reel?: any; // Full reel object returned from backend
 }
 
 export interface UploadProgress {
@@ -104,43 +105,63 @@ async function uploadToPresignedUrl(
   uploadUrl: string,
   onProgress?: (progress: UploadProgress) => void
 ): Promise<void> {
-  // Validate file exists
+  // Validate file exists and is accessible
   let fileSize = 0;
   try {
     const fileInfo = await FileSystem.getInfoAsync(videoUri);
     if (!fileInfo.exists) {
-      throw new Error("Video file not found");
+      throw new Error("Video file not found at " + videoUri);
     }
     fileSize = fileInfo.size || 0;
+    console.log('[videoUploadService] 📁 File validation passed - size:', fileSize, 'bytes');
   } catch (error) {
-    console.error(`[videoUploadService] File validation failed:`, error);
-    throw new Error("Video file not found");
+    console.error(`[videoUploadService] ❌ File validation failed:`, error);
+    throw new Error("Video file not found or not accessible at " + videoUri);
   }
 
   const fileSizeInMB = fileSize / (1024 * 1024);
   console.log(`[videoUploadService] 📹 Uploading to presigned URL - size: ${fileSizeInMB.toFixed(2)}MB`);
   console.log(`[videoUploadService] 📹 Using streaming upload (uploadAsync) to avoid memory issues`);
+  console.log(`[videoUploadService] 📹 Upload URL (first 100 chars):`, uploadUrl?.substring(0, 100));
 
-  // Use FileSystem.uploadAsync for streaming upload to presigned URL
-  // This streams the file from disk without loading entire content into memory
-  const result = await FileSystem.uploadAsync(uploadUrl, videoUri, {
-    httpMethod: "PUT",
-    uploadType: FileSystem.FileSystemUploadType.BINARY_CONTENT,
-    headers: {
-      "Content-Type": "video/mp4",
-    },
-  });
+  try {
+    // Use FileSystem.uploadAsync for streaming upload to presigned URL
+    // On Android, use MULTIPART upload which is more reliable
+    const uploadResult = await FileSystem.uploadAsync(
+      uploadUrl,
+      videoUri,
+      {
+        httpMethod: "PUT",
+        uploadType: "binaryContent" as any,
+        headers: {
+          "Content-Type": "video/mp4",
+        },
+      }
+    );
 
-  console.log(`[videoUploadService] 📹 Upload response status:`, result.status);
-  console.log(`[videoUploadService] 📹 Upload body:`, result.body);
+    console.log(`[videoUploadService] 📊 Upload response received`);
+    console.log(`[videoUploadService] 📊 Status: ${uploadResult.status}`);
+    console.log(`[videoUploadService] 📊 Body: ${uploadResult.body?.substring(0, 200)}`);
 
-  // Check for upload success (S3 presigned URLs typically return 200)
-  if (result.status !== 200) {
-    throw new Error(`Upload to storage failed: HTTP ${result.status} - ${result.body}`);
+    // Check for upload success (S3 presigned URLs typically return 200 OK)
+    if (uploadResult.status !== 200 && uploadResult.status !== 204) {
+      console.error(`[videoUploadService] ❌ Upload failed with status ${uploadResult.status}`);
+      console.error(`[videoUploadService] Response body:`, uploadResult.body);
+      throw new Error(`Upload to storage failed: HTTP ${uploadResult.status}`);
+    }
+
+    console.log(`[videoUploadService] ✅ Upload to presigned URL successful`);
+  } catch (error: any) {
+    console.error('[videoUploadService] ❌ Upload attempt failed:', {
+      error: error.message,
+      code: error.code,
+      nativeError: error.nativeError,
+      stack: error.stack,
+    });
+    throw error;
   }
-
-  console.log(`[videoUploadService] ✅ Upload to presigned URL successful`);
 }
+
 
 /**
  * Upload video file to server with retry logic
@@ -334,6 +355,7 @@ export async function createReelFromUpload(
           thumbnailUrl: responseData.data.thumbnailUrl,
           status: responseData.data.status || "completed",
           message: responseData.message || "Reel created successfully",
+          reel: responseData.data, // Include full reel object for prepending to feed
         },
         message: responseData.message || "Reel created successfully",
       };

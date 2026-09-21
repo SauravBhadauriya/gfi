@@ -15,6 +15,7 @@ import {
   TextInput,
   Linking,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import BottomNav from "@components/layout/BottomNav";
 

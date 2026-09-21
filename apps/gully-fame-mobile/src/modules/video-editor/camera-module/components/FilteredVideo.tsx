@@ -1,21 +1,14 @@
-import React from 'react';
-import { StyleSheet, View, ViewStyle, Text } from 'react-native';
+import { VideoView, useVideoPlayer } from "expo-video";
+import React, { useEffect } from 'react';
+import { StyleSheet, View, ViewStyle } from 'react-native';
 import type { FilterConfig } from '../types/filters';
 import { getFilterOverlayFromProperties } from '../utils/filterOverlays';
 
-// Import Video with graceful fallback
-let Video: any = null;
-try {
-  const videoModule = require('expo-video');
-  Video = videoModule.Video;
-} catch (error) {
-  console.warn('[FilteredVideo] expo-video not available');
-}
-
 interface FilteredVideoProps {
   source: { uri: string };
+  videoRef?: React.RefObject<any>;
   style?: ViewStyle;
-  resizeMode?: 'contain' | 'cover' | 'fill';
+  contentFit?: 'contain' | 'cover' | 'fill' | 'none' | 'scale-down';
   shouldPlay?: boolean;
   isLooping?: boolean;
   rate?: number;
@@ -23,21 +16,21 @@ interface FilteredVideoProps {
   onPlaybackStatusUpdate?: (status: any) => void;
   progressUpdateIntervalMillis?: number;
   filter?: FilterConfig;
-  videoRef?: React.RefObject<Video | null>;
 }
 
 /**
  * Video component with filter preview overlay
  * 
- * NOTE: expo-av Video doesn't support native visual filters.
+ * NOTE: expo-video doesn't support native visual filters natively.
  * This component uses View overlays with blend modes and opacity to simulate
  * filter effects for real-time preview. Filters are still applied properly
  * at export time using FFmpeg.
  */
 const FilteredVideo: React.FC<FilteredVideoProps> = ({
   source,
+  videoRef,
   style,
-  resizeMode = 'contain',
+  contentFit = 'contain',
   shouldPlay = false,
   isLooping = false,
   rate = 1,
@@ -45,21 +38,32 @@ const FilteredVideo: React.FC<FilteredVideoProps> = ({
   onPlaybackStatusUpdate,
   progressUpdateIntervalMillis,
   filter,
-  videoRef,
 }) => {
-  console.log('🎥 FilteredVideo: Rendering with source:', source?.uri?.substring(0, 50), 'style:', style);
-  
-  // Fallback if Video component is not available
-  if (!Video) {
-    console.warn('[FilteredVideo] Video component not available, showing placeholder');
-    return (
-      <View style={[style, { justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }]}>
-        <Text style={{ color: '#666' }}>Video preview unavailable</Text>
-      </View>
-    );
-  }
+  console.log('🎥 FilteredVideo: Rendering with source:', source?.uri?.substring(0, 50), 'has videoRef:', !!videoRef);
   
   const filterOverlayStyle = getFilterOverlayFromProperties(filter || { name: 'Original' });
+
+  const player = useVideoPlayer(source, player => ({
+    ...player,
+    playWhenReady: shouldPlay,
+    rate: rate,
+    loop: isLooping,
+  }));
+
+  // Forward player to ref for parent control
+  useEffect(() => {
+    if (videoRef) {
+      videoRef.current = player;
+      console.log('✅ [FilteredVideo] Player forwarded to ref');
+    }
+  }, [player, videoRef]);
+
+  // Emit load callback
+  useEffect(() => {
+    if (onLoad && player?.duration) {
+      onLoad({ isLoaded: true, duration: player.duration });
+    }
+  }, [player?.duration, onLoad]);
 
   // Apply brightness/contrast adjustments using opacity overlay
   const getBrightnessOverlay = (): ViewStyle | null => {
@@ -70,7 +74,7 @@ const FilteredVideo: React.FC<FilteredVideoProps> = ({
     // Brightness adjustment
     if (brightness !== 0) {
       const brightnessOverlay: ViewStyle = {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         pointerEvents: 'none',
       };
 
@@ -93,33 +97,12 @@ const FilteredVideo: React.FC<FilteredVideoProps> = ({
   const brightnessOverlayStyle = getBrightnessOverlay();
 
   return (
-    <View style={style} onLayout={(e) => {
-      const { width, height } = e.nativeEvent.layout;
-      console.log('🎥 FilteredVideo: Container layout:', { width, height });
-    }}>
-      <Video
-        ref={videoRef as React.RefObject<Video>}
+    <View style={style}>
+      <VideoView
         style={StyleSheet.absoluteFill}
-        source={source}
-        useNativeControls={false}
-        resizeMode={resizeMode}
-        shouldPlay={shouldPlay}
-        isLooping={isLooping}
-        rate={rate}
-        onLoad={(status) => {
-          console.log('🎥 FilteredVideo: Video onLoad triggered', status?.isLoaded);
-          onLoad?.(status);
-        }}
-        onPlaybackStatusUpdate={onPlaybackStatusUpdate}
-        progressUpdateIntervalMillis={progressUpdateIntervalMillis || 100}
-        // Performance optimizations
-        usePoster={false}
-        posterSource={undefined}
-        // Reduce memory usage
-        positionMillis={undefined}
-        // Enable hardware acceleration
-        allowsExternalPlayback={false}
-        staysActiveInBackground={false}
+        player={player}
+        contentFit={contentFit}
+        contentPosition="center"
       />
       
       {/* Filter color overlay - simulates filter effect */}

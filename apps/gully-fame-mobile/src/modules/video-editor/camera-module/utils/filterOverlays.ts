@@ -8,7 +8,7 @@ import type { FilterConfig } from '../types/filters';
  */
 export const getFilterOverlayFromProperties = (filter: FilterConfig): ViewStyle | null => {
   const overlayStyle: ViewStyle = {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     pointerEvents: 'none',
   };
 

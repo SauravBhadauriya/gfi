@@ -17,7 +17,9 @@ import {
   Platform,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as ImagePicker from 'expo-image-picker';
 import { authService } from '../api/services/authService';
+import apiClient from '../api/axios';
 
 interface UserProfile {
   id: string;
@@ -45,7 +47,10 @@ export default function EditProfileScreen({ route, navigation }: any) {
     dob: profile?.dob || '',
   });
 
+  const [profileImage, setProfileImage] = useState<string | null>(profile?.profileImage || null);
+  const [selectedImageUri, setSelectedImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Validate form
@@ -71,6 +76,63 @@ export default function EditProfileScreen({ route, navigation }: any) {
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  // Handle image picker
+  const handlePickImage = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled) {
+        setSelectedImageUri(result.assets[0].uri);
+        console.log('[EditProfileScreen] Image selected:', result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('[EditProfileScreen] Image picker error:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  // Upload profile image
+  const uploadProfileImage = async (imageUri: string) => {
+    try {
+      setUploading(true);
+      
+      // Create form data
+      const formDataToSend = new FormData();
+      formDataToSend.append('avatar', {
+        uri: imageUri,
+        type: 'image/jpeg',
+        name: `profile-${Date.now()}.jpg`,
+      } as any);
+
+      // Upload via API
+      const response = await apiClient.post('user/profile/avatar', formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const responseData = response.data as any;
+      if (responseData.code === 1 && responseData.data?.profileImage) {
+        setProfileImage(responseData.data.profileImage);
+        setSelectedImageUri(null);
+        Alert.alert('Success', 'Profile picture updated');
+        return true;
+      }
+      return false;
+    } catch (error: any) {
+      console.error('[EditProfileScreen] Upload error:', error);
+      Alert.alert('Error', 'Failed to upload image');
+      return false;
+    } finally {
+      setUploading(false);
+    }
   };
 
   // Handle input change
@@ -145,9 +207,14 @@ export default function EditProfileScreen({ route, navigation }: any) {
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {/* Profile Image Section */}
           <View style={styles.imageSection}>
-            {profile?.profileImage ? (
+            {selectedImageUri ? (
               <Image
-                source={{ uri: profile.profileImage }}
+                source={{ uri: selectedImageUri }}
+                style={styles.profileImage}
+              />
+            ) : profileImage ? (
+              <Image
+                source={{ uri: profileImage }}
                 style={styles.profileImage}
               />
             ) : (
@@ -155,10 +222,28 @@ export default function EditProfileScreen({ route, navigation }: any) {
                 <Ionicons name="person" size={60} color="#007AFF" />
               </View>
             )}
-            <TouchableOpacity style={styles.changeImageButton}>
-              <Ionicons name="camera" size={20} color="#fff" />
-              <Text style={styles.changeImageText}>Change Photo</Text>
+            <TouchableOpacity 
+              style={styles.changeImageButton}
+              onPress={handlePickImage}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="camera" size={20} color="#fff" />
+                  <Text style={styles.changeImageText}>Change Photo</Text>
+                </>
+              )}
             </TouchableOpacity>
+            {selectedImageUri && !uploading && (
+              <TouchableOpacity 
+                style={styles.uploadImageButton}
+                onPress={() => uploadProfileImage(selectedImageUri)}
+              >
+                <Text style={styles.uploadImageButtonText}>Upload Photo</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* Form Section */}
@@ -386,6 +471,19 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  uploadImageButton: {
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  uploadImageButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   formSection: {
     paddingHorizontal: 16,

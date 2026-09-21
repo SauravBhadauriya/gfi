@@ -16,88 +16,54 @@ import {
   FlatList,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { competitionService, LeaderboardEntry } from '../api/services/competitionService';
 
 interface Competition {
   id: string;
+  _id?: string;
   title: string;
   description: string;
   image?: string;
-  participants?: number;
+  participants?: number | any[];
   prize?: string;
+  prizePool?: number;
   startDate?: string;
   endDate?: string;
   rules?: string;
 }
 
-interface Participant {
-  id: string;
-  name: string;
-  rank: number;
-  score: number;
-  profileImage?: string;
-}
-
 export default function CompetitionDetailScreen({ route, navigation }: any) {
   const competition = route?.params?.competition as Competition;
+  const competitionId = competition?._id || competition?.id;
 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [joined, setJoined] = useState(false);
-  const [participants, setParticipants] = useState<Participant[]>([]);
+  const [joiningInProgress, setJoiningInProgress] = useState(false);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [activeTab, setActiveTab] = useState<'details' | 'leaderboard'>('details');
 
   useEffect(() => {
-    fetchCompetitionData();
-  }, []);
+    if (activeTab === 'leaderboard' && competitionId) {
+      fetchLeaderboard();
+    }
+  }, [activeTab, competitionId]);
 
-  // Fetch competition data
-  const fetchCompetitionData = async () => {
+  // Fetch competition leaderboard
+  const fetchLeaderboard = async () => {
+    if (!competitionId) return;
+
     try {
       setLoading(true);
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const result = await competitionService.getCompetitionLeaderboard(competitionId, { page: 1, limit: 20 });
 
-      // Mock leaderboard data
-      setParticipants([
-        {
-          id: '1',
-          name: 'John Doe',
-          rank: 1,
-          score: 9500,
-          profileImage: undefined,
-        },
-        {
-          id: '2',
-          name: 'Jane Smith',
-          rank: 2,
-          score: 9200,
-          profileImage: undefined,
-        },
-        {
-          id: '3',
-          name: 'Mike Johnson',
-          rank: 3,
-          score: 8900,
-          profileImage: undefined,
-        },
-        {
-          id: '4',
-          name: 'Sarah Williams',
-          rank: 4,
-          score: 8500,
-          profileImage: undefined,
-        },
-        {
-          id: '5',
-          name: 'Tom Brown',
-          rank: 5,
-          score: 8200,
-          profileImage: undefined,
-        },
-      ]);
+      if (result.success && result.data) {
+        setLeaderboard(result.data.leaderboard);
+      } else {
+        console.error('Failed to fetch leaderboard:', result.error);
+      }
     } catch (error) {
-      console.error('Error fetching competition data:', error);
-      Alert.alert('Error', 'Failed to load competition data');
+      console.error('Error fetching leaderboard:', error);
     } finally {
       setLoading(false);
     }
@@ -106,7 +72,7 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
   // Handle refresh
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchCompetitionData();
+    await fetchLeaderboard();
     setRefreshing(false);
   };
 
@@ -119,13 +85,36 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Join',
-          onPress: () => {
-            setJoined(true);
-            Alert.alert('Success', 'You have joined the competition');
+          onPress: async () => {
+            await performJoinCompetition();
           },
         },
       ]
     );
+  };
+
+  // Perform actual join API call
+  const performJoinCompetition = async () => {
+    if (!competitionId) {
+      Alert.alert('Error', 'Competition ID not found');
+      return;
+    }
+
+    try {
+      setJoiningInProgress(true);
+      const result = await competitionService.joinCompetition(competitionId);
+
+      if (result.success) {
+        setJoined(true);
+        Alert.alert('Success', 'You have joined the competition');
+      } else {
+        Alert.alert('Error', result.message || 'Failed to join competition');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to join competition');
+    } finally {
+      setJoiningInProgress(false);
+    }
   };
 
   // Handle leave competition
@@ -137,9 +126,8 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Leave',
-          onPress: () => {
-            setJoined(false);
-            Alert.alert('Success', 'You have left the competition');
+          onPress: async () => {
+            await performLeaveCompetition();
           },
           style: 'destructive',
         },
@@ -147,16 +135,40 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
     );
   };
 
+  // Perform actual leave API call
+  const performLeaveCompetition = async () => {
+    if (!competitionId) {
+      Alert.alert('Error', 'Competition ID not found');
+      return;
+    }
+
+    try {
+      setJoiningInProgress(true);
+      const result = await competitionService.leaveCompetition(competitionId);
+
+      if (result.success) {
+        setJoined(false);
+        Alert.alert('Success', 'You have left the competition');
+      } else {
+        Alert.alert('Error', result.message || 'Failed to leave competition');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to leave competition');
+    } finally {
+      setJoiningInProgress(false);
+    }
+  };
+
   // Render leaderboard item
-  const renderLeaderboardItem = ({ item }: { item: Participant }) => (
+  const renderLeaderboardItem = ({ item }: { item: LeaderboardEntry }) => (
     <View style={styles.leaderboardItem}>
       <View style={styles.rankContainer}>
         <Text style={styles.rankText}>#{item.rank}</Text>
       </View>
 
-      {item.profileImage ? (
+      {item.user?.profileImage ? (
         <Image
-          source={{ uri: item.profileImage }}
+          source={{ uri: item.user.profileImage }}
           style={styles.participantImage}
         />
       ) : (
@@ -166,8 +178,10 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
       )}
 
       <View style={styles.participantInfo}>
-        <Text style={styles.participantName}>{item.name}</Text>
-        <Text style={styles.participantScore}>{item.score} points</Text>
+        <Text style={styles.participantName}>
+          {item.user?.firstName || 'User'} {item.user?.lastName || ''}
+        </Text>
+        <Text style={styles.participantScore}>{item.votes || item.reel?.stats?.votes || 0} votes</Text>
       </View>
 
       {item.rank === 1 && (
@@ -182,12 +196,12 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
     </View>
   );
 
-  if (loading && !competition) {
+  if (loading && leaderboard.length === 0 && activeTab === 'leaderboard') {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading competition...</Text>
+          <Text style={styles.loadingText}>Loading leaderboard...</Text>
         </View>
       </SafeAreaView>
     );
@@ -229,14 +243,18 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
               <View style={styles.metaItem}>
                 <Ionicons name="people" size={18} color="#007AFF" />
                 <Text style={styles.metaText}>
-                  {competition.participants} participants
+                  {typeof competition.participants === 'number' 
+                    ? competition.participants 
+                    : (competition.participants as any[]).length} participants
                 </Text>
               </View>
             )}
-            {competition.prize && (
+            {(competition.prize || competition.prizePool) && (
               <View style={styles.metaItem}>
                 <Ionicons name="gift" size={18} color="#FFB800" />
-                <Text style={styles.metaText}>{competition.prize}</Text>
+                <Text style={styles.metaText}>
+                  {competition.prize || `₹${competition.prizePool}`}
+                </Text>
               </View>
             )}
           </View>
@@ -321,21 +339,23 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
             )}
 
             {/* Prize Info */}
-            {competition.prize && (
+            {(competition.prize || competition.prizePool) && (
               <View style={styles.detailCard}>
                 <Text style={styles.detailTitle}>Prize Pool</Text>
-                <Text style={styles.detailText}>{competition.prize}</Text>
+                <Text style={styles.detailText}>
+                  {competition.prize || `₹${competition.prizePool}`}
+                </Text>
               </View>
             )}
           </View>
         ) : (
           <View style={styles.contentSection}>
             {/* Leaderboard */}
-            {participants.length > 0 ? (
+            {leaderboard.length > 0 ? (
               <FlatList
-                data={participants}
+                data={leaderboard}
                 renderItem={renderLeaderboardItem}
-                keyExtractor={(item) => item.id}
+                keyExtractor={(item, index) => `${item.rank}-${index}`}
                 scrollEnabled={false}
               />
             ) : (
@@ -353,17 +373,31 @@ export default function CompetitionDetailScreen({ route, navigation }: any) {
             <TouchableOpacity
               style={[styles.actionButton, styles.leaveButton]}
               onPress={handleLeaveCompetition}
+              disabled={joiningInProgress}
             >
-              <Ionicons name="exit" size={20} color="#fff" />
-              <Text style={styles.actionButtonText}>Leave Competition</Text>
+              {joiningInProgress ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="exit" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Leave Competition</Text>
+                </>
+              )}
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
               style={[styles.actionButton, styles.joinButton]}
               onPress={handleJoinCompetition}
+              disabled={joiningInProgress}
             >
-              <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.actionButtonText}>Join Competition</Text>
+              {joiningInProgress ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="add-circle" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Join Competition</Text>
+                </>
+              )}
             </TouchableOpacity>
           )}
         </View>

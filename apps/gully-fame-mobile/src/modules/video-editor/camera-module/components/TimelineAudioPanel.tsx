@@ -15,11 +15,20 @@ import AdvancedAudioEditor from './AdvancedAudioEditor';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-import type { AudioTrackWithEffects } from '../types/audioEffects.types';
+interface AudioTrack {
+  id: string;
+  name: string;
+  type: 'music' | 'voiceover' | 'sound_effect' | 'tts';
+  duration: number;
+  volume: number;
+  isMuted: boolean;
+  canCrop: boolean;
+  canFade: boolean;
+}
 
 interface TimelineAudioPanelProps {
-  tracks: AudioTrackWithEffects[];
-  onUpdateTracks: (tracks: AudioTrackWithEffects[]) => void;
+  tracks: AudioTrack[];
+  onUpdateTracks: (tracks: AudioTrack[]) => void;
   maxDuration: number;
   onAddTrack?: () => void;
   onApplyEffects?: (trackId: string) => void;
@@ -35,7 +44,7 @@ const TimelineAudioPanel: React.FC<TimelineAudioPanelProps> = ({
   const [masterVolume, setMasterVolume] = useState(100);
 
   const handleUpdateTrack = useCallback(
-    (trackId: string, updates: Partial<AudioTrackWithEffects>) => {
+    (trackId: string, updates: Partial<AudioTrack>) => {
       const updated = tracks.map((t) =>
         t.id === trackId ? { ...t, ...updates } : t
       );

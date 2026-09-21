@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useRouter } from "expo-router";
 
 interface SupportPackage {
   id: string;
@@ -38,6 +39,7 @@ export default function SupportModal({
   reelId,
   onSupportSent,
 }: SupportModalProps) {
+  const router = useRouter();
   const [selectedPackage, setSelectedPackage] = useState<SupportPackage | null>(null);
   const [customAmount, setCustomAmount] = useState("");
   const [message, setMessage] = useState("");
@@ -103,7 +105,8 @@ export default function SupportModal({
             text: "Buy Coins",
             onPress: () => {
               onClose();
-              // Would navigate to add-money screen
+              // Navigate to add-money screen
+              router.push("/(main)/add-money" as any);
             },
           },
         ]

@@ -19,12 +19,19 @@ export const API_ENDPOINTS = {
     UPDATE_PROFILE: "user/profile",
     CHANGE_PASSWORD: "user/change-password",
     GET_COMPETITIONS: "user/competitions",
-    GET_REELS: "user/reels",
+    GET_CHAMPAIGNS: "user/champaigns",
+    GET_CATEGORIES: "user/categories",
+    HOME_SCREEN: "user/homeScreen",
     GET_FOLLOWERS: "user/followers",
     GET_FOLLOWING: "user/following",
     GET_EARNINGS: "user/earnings",
     GET_WALLET: "user/wallet",
+    RECHARGE_WALLET: "user/wallet/recharge",
     GET_KYC: "user/kyc",
+    GET_PROGRESS: "user/progress",
+    GET_DAILY_MISSION: "user/daily-mission",
+    SAVE_AUDIO: "user/audio/:audioId/save",
+    GET_SAVED_AUDIO: "user/audio/saved",
   },
 
   // ==================== COMPETITION ENDPOINTS ====================
@@ -36,6 +43,8 @@ export const API_ENDPOINTS = {
     LEAVE: "competitions/:id/leave",
     GET_LEADERBOARD: "competitions/:id/leaderboard",
     GET_PARTICIPANTS: "competitions/:id/participants",
+    INVITE: "competitions/:id/invite",
+    GET_REELS: "competitions/:id/reels",
   },
 
   // ==================== REELS/VIDEOS ENDPOINTS ====================
@@ -50,9 +59,14 @@ export const API_ENDPOINTS = {
     UNLIKE: "reels/:id/action",
     GET_COMMENTS: "reels/:id/comments",
     ADD_COMMENT: "reels/:id/comments",
-    DELETE_COMMENT: "reels/:id/comments/:commentId/delete",
+    DELETE_COMMENT: "reels/comments/:commentId",
     GET_UPLOAD_URL: "reels/upload-url",
     PUBLISH: "reels/publish",
+    DRAFT: "reels/draft",
+    AUTO_CAPTION: "reels/auto-caption",
+    TIP: "reels/:id/tip",
+    EXPORT: "reels/:id/export",
+    EXPORT_STATUS: "reels/:id/export/status",
     GET_UPLOAD_STATUS: "reels/upload/:id/status",
     CANCEL_UPLOAD: "reels/upload/:id/cancel",
   },
@@ -89,6 +103,9 @@ export const API_ENDPOINTS = {
   FOLLOW: {
     FOLLOW_USER: "user/:userId/follow",
     UNFOLLOW_USER: "user/:userId/follow",
+    GET_FOLLOWERS: "user/followers",
+    GET_FOLLOWING: "user/following",
+    GET_FOLLOW_STATS: "user/:userId/follow-stats",
   },
 
   // ==================== COMMENT ENDPOINTS ====================
@@ -107,24 +124,26 @@ export const API_ENDPOINTS = {
 
   // ==================== NOTIFICATION ENDPOINTS ====================
   NOTIFICATION: {
-    GET_ALL: "notifications",
-    MARK_READ: "notifications/:id/read",
-    DELETE: "notifications/:id/delete",
-    MARK_ALL_READ: "notifications/read-all",
+    GET_ALL: "notification/notification",
+    MARK_READ: "notification/:id/read",
+    DELETE: "notification/:id/delete",
+    MARK_ALL_READ: "notification/read-all",
   },
 
   // ==================== CHAT ENDPOINTS ====================
   CHAT: {
     GET_CONVERSATIONS: "chat/chatlist",
-    GET_MESSAGES: "chat/conversations/:id/messages",
-    SEND_MESSAGE: "chat/messages/send",
-    DELETE_MESSAGE: "chat/messages/:id/delete",
-    MARK_READ: "chat/conversations/:id/mark-read",
+    SEND_MESSAGE: "chat/sendChat",
+    GET_MESSAGES: "chat/chatDetails",
+    DELETE_MESSAGE: "chat/message/delete",
+    MARK_READ: "chat/read",
+    TOGGLE_REACT: "chat/message/:id/react",
+    ARCHIVE: "chat/archive",
   },
 
   // ==================== FEED ENDPOINTS ====================
   FEED: {
-    GET_HOME_FEED: "feed/home",
+    GET_HOME_FEED: "feed/matrix",
     GET_TRENDING: "feed/trending",
     GET_FOLLOWING_FEED: "feed/following",
   },

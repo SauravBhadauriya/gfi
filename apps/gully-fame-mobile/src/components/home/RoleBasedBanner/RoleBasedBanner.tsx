@@ -1,28 +1,14 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router } from "expo-router";
-import { useState, useEffect } from "react";
 import { View, TouchableOpacity, Image, Text } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { styles } from "./styles";
+import { useUserRole } from "@/contexts/UserRoleContext";
+
 const RoleBasedBanner = ({ onLayout }: { onLayout?: (event: any) => void }) => {
-  const [userRole, setUserRole] = useState<string | null>(null);
+  const { role } = useUserRole();
 
-  useEffect(() => {
-    const loadUserRole = async () => {
-      try {
-        const role = await AsyncStorage.getItem("userRole");
-        setUserRole(role);
-      } catch (error) {
-        console.error("Error loading user role:", error);
-        setUserRole(null);
-      }
-    };
-    loadUserRole();
-  }, []);
-
-  // Backend returns "participants" (plural), but we also check for "participant" (singular) for compatibility
-  const isParticipant =
-    userRole === "participant" || userRole === "participants";
+  // Backend returns "participants" (plural), check for the exact type
+  const isParticipant = role === "participants";
 
   return (
     <View style={styles.communityBannerSection} onLayout={onLayout}>

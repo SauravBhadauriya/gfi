@@ -9,7 +9,7 @@ export interface VideoFilter {
   category: 'filter' | 'effect' | 'transition' | 'sticker';
   thumbnail?: string;
   intensity?: number; // 0-100
-  parameters?: Record<string, number>;
+  parameters?: Record<string, number | string>; // Allow both number and string values
   isPopular?: boolean;
   isPremium?: boolean;
 }

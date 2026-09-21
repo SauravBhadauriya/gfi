@@ -76,7 +76,7 @@ class SocketChatService {
         },
         reconnection: true,
         reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
+        reconnectionDelayMax: 30000, // Extended timeout for production
         reconnectionAttempts: 10,
         transports: ["websocket", "polling"], // Try websocket first, fallback to polling
       });

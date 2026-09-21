@@ -14,10 +14,13 @@ import {
   ScrollView,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { useDispatch } from 'react-redux';
+import { setUser } from '../store/slices/userSlice';
 import { authService } from '../api/services/authService';
 
 export default function RegisterScreen({ navigation }: any) {
   const { login } = useAuth();
+  const dispatch = useDispatch();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -114,6 +117,12 @@ export default function RegisterScreen({ navigation }: any) {
         console.log('[RegisterScreen] Registration successful');
         
         await login(response.data.token);
+        
+        // Store user data in Redux
+        if (response.data?.user) {
+          dispatch(setUser(response.data.user));
+        }
+        
         Alert.alert('Success', 'Registration successful!');
       } else {
         console.error('[RegisterScreen] Registration failed:', response.error);

@@ -110,8 +110,10 @@ export default function ReelPreviewScreen() {
         setIsMerging(true);
         
         // 1. Create a text file listing all segments for FFmpeg
-        const listPath = FileSystem.cacheDirectory + 'segments.txt';
-        const outputPath = FileSystem.cacheDirectory + `merged_${Date.now()}.mp4`;
+        // @ts-ignore - cacheDirectory not properly typed
+        const listPath = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + 'segments.txt';
+        // @ts-ignore - cacheDirectory not properly typed
+        const outputPath = (FileSystem.cacheDirectory || FileSystem.documentDirectory) + `merged_${Date.now()}.mp4`;
 
         // Format required by FFmpeg concat demuxer: file '/path/to/file.mp4'
         const fileContent = segments.map(seg => `file '${seg.uri}'`).join('\n');
@@ -254,7 +256,6 @@ export default function ReelPreviewScreen() {
               <VideoView
                 style={styles.video}
                 player={player}
-                allowsFullscreen={false}
                 nativeControls={true}
               />
               <View style={styles.durationBadge}>

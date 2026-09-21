@@ -1,7 +1,6 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import * as mockVideoFilters from "../../mockData/videoFilters";
 
 export interface VideoClip {
   id: string;
@@ -468,6 +467,53 @@ export async function addTransition(
   }
 }
 
+// ✅ CREATED BY KIRO - Export edited video with multi-track support
+export async function exportVideoWithTracks(
+  sessionId: string,
+  tracks: any[],
+  options: VideoExportOptions
+): Promise<ApiResponse<{ videoUri: string; duration: number }>> {
+  try {
+    console.log("[videoEditorService] Exporting video with multi-track timeline:", { sessionId, trackCount: tracks.length, options });
+
+    const response = await apiClient.post<any>(`video-editor/${sessionId}/export-tracks`, {
+      tracks,
+      options,
+    });
+    const responseData = response.data as any;
+
+    if (responseData.code === 1 && responseData.data) {
+      const exportedVideo = {
+        videoUri: responseData.data.videoUri,
+        duration: responseData.data.duration,
+      };
+
+      console.log("[videoEditorService] Video with tracks exported successfully");
+
+      return {
+        success: true,
+        data: exportedVideo,
+        message: responseData.message || "Video exported successfully with tracks",
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || "Failed to export video with tracks",
+      error: "API returned unsuccessful response",
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error("[videoEditorService] Export video with tracks error:", error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || "Export failed",
+      error: error.message,
+      data: undefined,
+    };
+  }
+}
+
 // ✅ CREATED BY KIRO - Export edited video
 export async function exportVideo(
   sessionId: string,
@@ -594,8 +640,8 @@ export async function deleteEditingSession(sessionId: string): Promise<ApiRespon
   }
 }
 
-// ✅ CREATED BY KIRO - Get all available video filters with mock fallback
-export async function getVideoFilters(): Promise<ApiResponse<mockVideoFilters.VideoFilter[]>> {
+// ✅ CREATED BY KIRO - Get all available video filters with fallback to empty array
+export async function getVideoFilters(): Promise<ApiResponse<VideoFilter[]>> {
   try {
     console.log("[videoEditorService] Fetching video filters");
 
@@ -625,8 +671,8 @@ export async function getVideoFilters(): Promise<ApiResponse<mockVideoFilters.Vi
   }
 }
 
-// ✅ CREATED BY KIRO - Get all available video effects with mock fallback
-export async function getVideoEffects(): Promise<ApiResponse<mockVideoFilters.VideoFilter[]>> {
+// ✅ CREATED BY KIRO - Get all available video effects with fallback to empty array
+export async function getVideoEffects(): Promise<ApiResponse<VideoFilter[]>> {
   try {
     console.log("[videoEditorService] Fetching video effects");
 
@@ -656,8 +702,8 @@ export async function getVideoEffects(): Promise<ApiResponse<mockVideoFilters.Vi
   }
 }
 
-// ✅ CREATED BY KIRO - Get all available transitions with mock fallback
-export async function getVideoTransitions(): Promise<ApiResponse<mockVideoFilters.VideoFilter[]>> {
+// ✅ CREATED BY KIRO - Get all available transitions with fallback to empty array
+export async function getVideoTransitions(): Promise<ApiResponse<VideoFilter[]>> {
   try {
     console.log("[videoEditorService] Fetching video transitions");
 
@@ -687,8 +733,8 @@ export async function getVideoTransitions(): Promise<ApiResponse<mockVideoFilter
   }
 }
 
-// ✅ CREATED BY KIRO - Get all available stickers with mock fallback
-export async function getVideoStickers(): Promise<ApiResponse<mockVideoFilters.VideoFilter[]>> {
+// ✅ CREATED BY KIRO - Get all available stickers with fallback to empty array
+export async function getVideoStickers(): Promise<ApiResponse<VideoFilter[]>> {
   try {
     console.log("[videoEditorService] Fetching video stickers");
 
@@ -718,45 +764,41 @@ export async function getVideoStickers(): Promise<ApiResponse<mockVideoFilters.V
   }
 }
 
-// ✅ Internal helpers for mock data fallback
+// ✅ Internal helpers - return empty data when API is unavailable
 
-function _getMockFilters(): ApiResponse<mockVideoFilters.VideoFilter[]> {
-  const filters = mockVideoFilters.getAllFilters();
-  console.log(`[videoEditorService] Using mock filters - Loaded ${filters.length} filters`);
+function _getMockFilters(): ApiResponse<VideoFilter[]> {
+  console.log(`[videoEditorService] API unavailable - returning empty filters`);
   return {
-    success: true,
-    data: filters,
-    message: "Using mock filters (API unavailable)",
+    success: false,
+    data: [],
+    message: "Unable to load filters (API unavailable)",
   };
 }
 
-function _getMockEffects(): ApiResponse<mockVideoFilters.VideoFilter[]> {
-  const effects = mockVideoFilters.getAllEffects();
-  console.log(`[videoEditorService] Using mock effects - Loaded ${effects.length} effects`);
+function _getMockEffects(): ApiResponse<VideoFilter[]> {
+  console.log(`[videoEditorService] API unavailable - returning empty effects`);
   return {
-    success: true,
-    data: effects,
-    message: "Using mock effects (API unavailable)",
+    success: false,
+    data: [],
+    message: "Unable to load effects (API unavailable)",
   };
 }
 
-function _getMockTransitions(): ApiResponse<mockVideoFilters.VideoFilter[]> {
-  const transitions = mockVideoFilters.getAllTransitions();
-  console.log(`[videoEditorService] Using mock transitions - Loaded ${transitions.length} transitions`);
+function _getMockTransitions(): ApiResponse<VideoFilter[]> {
+  console.log(`[videoEditorService] API unavailable - returning empty transitions`);
   return {
-    success: true,
-    data: transitions,
-    message: "Using mock transitions (API unavailable)",
+    success: false,
+    data: [],
+    message: "Unable to load transitions (API unavailable)",
   };
 }
 
-function _getMockStickers(): ApiResponse<mockVideoFilters.VideoFilter[]> {
-  const stickers = mockVideoFilters.getAllStickers();
-  console.log(`[videoEditorService] Using mock stickers - Loaded ${stickers.length} stickers`);
+function _getMockStickers(): ApiResponse<VideoFilter[]> {
+  console.log(`[videoEditorService] API unavailable - returning empty stickers`);
   return {
-    success: true,
-    data: stickers,
-    message: "Using mock stickers (API unavailable)",
+    success: false,
+    data: [],
+    message: "Unable to load stickers (API unavailable)",
   };
 }
 
@@ -770,6 +812,7 @@ export const videoEditorService = {
   addSoundEffect,
   addTransition,
   exportVideo,
+  exportVideoWithTracks,
   getEditingSession,
   deleteEditingSession,
   getVideoFilters,

@@ -35,7 +35,6 @@ export { default as EnhancedTimelineControls } from './EnhancedTimelineControls'
 // Modals & UI
 export { default as AudioTrackEditor } from './AudioTrackEditor';
 export { default as AudioTracksPanel } from './AudioTracksPanel';
-export { default as MusicLibraryModal } from './MusicLibraryModal';
 export { default as SettingsModal } from './SettingsModal';
 export { default as ExportScreen } from './ExportScreen';
 

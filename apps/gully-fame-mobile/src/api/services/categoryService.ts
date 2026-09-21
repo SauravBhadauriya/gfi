@@ -25,7 +25,7 @@ export async function getCategories(params?: {
     const limit = params?.limit || 50;
 
     try {
-        // Spec: GET user/categories?page=1&limit=50
+        // Postman spec: GET /user/categories?page=1&limit=50
         const response = await apiClient.get<any>('user/categories', {
             skipAuth: false,
             params: { page, limit },

@@ -1,8 +1,9 @@
-// Shared hooks for profile screens - Easy API integration later
+// Shared hooks for profile screens - API integrated
 import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams } from "expo-router";
 import { authService } from "@api/services/authService";
+import { userService } from "@api/services/userService";
 
 export interface ProfileData {
     id?: string;
@@ -18,19 +19,27 @@ export interface ProfileData {
     levelPercentage: number;
     xLink: string;
     instagramLink: string;
+    // Participant-specific fields
+    rank?: number;
+    currentRank?: number;
+    nextRank?: number;
+    competitionsParticipated?: number;
+    competitionsRequiredForNextRank?: number;
+    achievements?: Array<{id: string; name: string}>;
+    email?: string;
 }
 
-// Hook for loading own profile data (with API integration ready)
+// Hook for loading own profile data (with API integration)
 export function useOwnProfile() {
     const [profileData, setProfileData] = useState<ProfileData>({
         firstName: "",
         lastName: "",
-        bio: "Born to perform. Built by the streets.",
+        bio: "",
         profileImage: null,
         role: "",
         isVerified: false,
         competitionCount: 0,
-        levelPercentage: 30,
+        levelPercentage: 0,
         xLink: "",
         instagramLink: "",
     });
@@ -55,8 +64,8 @@ export function useOwnProfile() {
                 AsyncStorage.getItem("userThreeWords"),
                 AsyncStorage.getItem("userProfileImage"),
                 AsyncStorage.getItem("userRole"),
-                AsyncStorage.getItem("userInstagram"), // Fetching Instagram
-                AsyncStorage.getItem("userXLink"), // Fetching X
+                AsyncStorage.getItem("userInstagram"),
+                AsyncStorage.getItem("userXLink"),
             ]);
 
             // Set cached data immediately to prevent flash
@@ -64,12 +73,12 @@ export function useOwnProfile() {
                 ...prev,
                 firstName: userFirstName || "",
                 lastName: userLastName || "",
-                bio: userBio || prev.bio,
+                bio: userBio || "",
                 threeWords: userThreeWords || undefined,
                 profileImage: userProfileImage || null,
                 role: userRole || "",
-                instagramLink: userInstagram || "", // Set Instagram
-                xLink: userXLink || "", // Set X
+                instagramLink: userInstagram || "",
+                xLink: userXLink || "",
             }));
 
             setIsLoading(false);
@@ -81,7 +90,7 @@ export function useOwnProfile() {
                     if (profileResult.success && profileResult.data) {
                         const userData = profileResult.data;
 
-                        // Get userId from backend response (could be id or _id)
+                        // Get userId from backend response
                         const userId =
                             userData.id || (userData as any)._id || "";
 
@@ -97,26 +106,21 @@ export function useOwnProfile() {
                             userData.dob
                         );
 
-                        // Use a functional state update so we can check our existing local data
+                        // Use functional state update
                         setProfileData((prev) => {
-                            // SAFEGUARD: If API has the links, use them. If not, keep our local cached ones!
-                            const apiInstagram =
-                                (userData as any).instagramLink ||
-                                (userData as any).instagram;
+                            // Preserve social links if API doesn't return them
                             const finalInstagram =
-                                apiInstagram || prev.instagramLink;
-
-                            const apiXLink = (userData as any).xLink;
-                            const finalXLink = apiXLink || prev.xLink;
-
-                            // Also safeguarding bio and threeWords just in case the API misses them
+                                (userData as any).instagramLink ||
+                                (userData as any).instagram ||
+                                prev.instagramLink;
+                            const finalXLink = (userData as any).xLink || prev.xLink;
                             const finalBio = userData.bio || prev.bio;
                             const finalThreeWords =
                                 (userData as any).threeWords ||
                                 prev.threeWords ||
                                 "";
 
-                            // Update cache with fresh API data + preserved local data
+                            // Update cache with fresh API data
                             const cacheUpdates: Array<[string, string]> = [
                                 ["userFirstName", userData.firstName || ""],
                                 ["userLastName", userData.lastName || ""],
@@ -127,8 +131,8 @@ export function useOwnProfile() {
                                 ["userBio", finalBio],
                                 ["userThreeWords", finalThreeWords],
                                 ["userRole", userData.role || ""],
-                                ["userInstagram", finalInstagram], // Preserved!
-                                ["userXLink", finalXLink], // Preserved!
+                                ["userInstagram", finalInstagram],
+                                ["userXLink", finalXLink],
                             ];
                             
                             if (userId) {
@@ -140,8 +144,8 @@ export function useOwnProfile() {
                             );
 
                             return {
-                                id: userId,  // ✅ FIX: Store userId in profileData
-                                _id: userId, // ✅ FIX: Also store as _id for compatibility
+                                id: userId,
+                                _id: userId,
                                 firstName: userData.firstName || "",
                                 lastName: userData.lastName || "",
                                 bio: finalBio,
@@ -154,9 +158,9 @@ export function useOwnProfile() {
                                 competitionCount:
                                     (userData as any).competitionCount || 0,
                                 levelPercentage:
-                                    (userData as any).levelPercentage || 30,
-                                xLink: finalXLink, // Preserved!
-                                instagramLink: finalInstagram, // Preserved!
+                                    (userData as any).levelPercentage || 0,
+                                xLink: finalXLink,
+                                instagramLink: finalInstagram,
                             };
                         });
                     }
@@ -168,12 +172,11 @@ export function useOwnProfile() {
             console.error("Error loading user data:", error);
             setIsLoading(false);
         }
-    }, []); // Empty dependency array - only create once
+    }, []);
 
     useEffect(() => {
-        // Load data on mount
         loadUserData();
-    }, []); // Empty dependency array - only run once on mount
+    }, []);
 
     return {
         profileData,
@@ -183,60 +186,78 @@ export function useOwnProfile() {
     };
 }
 
-// Hook for loading other user's profile data (with API integration ready)
+// Hook for loading other user's profile data (with API integration)
 export function useOtherUserProfile() {
     const params = useLocalSearchParams();
 
-    // Extract stable values from params to avoid infinite loops
+    // Extract stable values from params
     const userId = (params.userId as string) || (params.id as string) || "";
-    const firstName = (params.firstName as string) || "";
-    const lastName = (params.lastName as string) || "";
-    const bio = (params.bio as string) || "";
-    const role = (params.role as string) || "participants";
-    const instagramLink =
-        (params.instagramLink as string) || (params.instagram as string) || "";
-    const xLink = (params.xLink as string) || "";
 
     const [profileData, setProfileData] = useState<ProfileData>({
-        firstName: firstName,
-        lastName: lastName,
-        bio: bio,
+        firstName: "",
+        lastName: "",
+        bio: "",
         profileImage: null,
-        role: role,
+        role: "",
         isVerified: false,
         competitionCount: 0,
-        levelPercentage: 30,
-        xLink: xLink,
-        instagramLink: instagramLink,
+        levelPercentage: 0,
+        xLink: "",
+        instagramLink: "",
     });
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(!!userId);
 
     useEffect(() => {
-        if (userId) {
-            // TODO: Replace with actual API call when ready
-            // const fetchUserProfile = async () => {
-            //   const result = await userService.getUserProfile(userId);
-            //   if (result.success) {
-            //     setProfileData(result.data);
-            //   }
-            // };
-            // fetchUserProfile();
-
-            // For now, use params data
-            setProfileData({
-                firstName: firstName,
-                lastName: lastName,
-                bio: bio,
-                profileImage: null, // Will come from API
-                role: role,
-                isVerified: false, // Will come from API
-                competitionCount: 0, // Will come from API
-                levelPercentage: 30, // Will come from API
-                instagramLink: instagramLink,
-                xLink: xLink,
-            });
+        if (!userId) {
+            setIsLoading(false);
+            return;
         }
-    }, [userId, firstName, lastName, bio, role, instagramLink, xLink]); // Depend on specific values
+
+        // Fetch from API
+        const fetchUserProfile = async () => {
+            try {
+                setIsLoading(true);
+                const result = await userService.getPublicUserProfile(userId);
+                
+                if (result.success && result.data) {
+                    const userData = result.data;
+                    
+                    // Check if user is verified
+                    const hasAllRequiredFields = !!(
+                        userData.firstName &&
+                        userData.lastName &&
+                        userData.email &&
+                        userData.mobile &&
+                        userData.profileImage &&
+                        userData.role &&
+                        userData.gender &&
+                        userData.dob
+                    );
+
+                    setProfileData({
+                        id: userData.id || (userData as any)._id,
+                        _id: userData.id || (userData as any)._id,
+                        firstName: userData.firstName || "",
+                        lastName: userData.lastName || "",
+                        bio: userData.bio || "",
+                        profileImage: userData.profileImage || null,
+                        role: userData.role || "",
+                        isVerified: hasAllRequiredFields || (userData as any).isVerified === true,
+                        competitionCount: (userData as any).competitionCount || 0,
+                        levelPercentage: (userData as any).levelPercentage || 0,
+                        xLink: (userData as any).xLink || "",
+                        instagramLink: (userData as any).instagramLink || (userData as any).instagram || "",
+                    });
+                }
+            } catch (error) {
+                console.error("Error fetching public profile:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchUserProfile();
+    }, [userId]);
 
     return { profileData, setProfileData, isLoading };
 }

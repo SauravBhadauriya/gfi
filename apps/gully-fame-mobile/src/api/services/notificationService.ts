@@ -49,7 +49,7 @@ export interface UpdateNotificationStatusResponse {
 
 /**
  * Get notifications for the current user with pagination
- * Spec: GET notification/notification?time=1&page=1&limit=10 (typo in spec, actually notifications)
+ * Spec: GET notification/notification?time=1&page=1&limit=10
  */
 export async function getNotifications(
   time: number = 1,
@@ -59,8 +59,8 @@ export async function getNotifications(
   try {
     console.log('[notificationService] GET notifications', { time, page, limit });
     
-    // Spec endpoint: notification/notification (has typo, but use notifications)
-    const response = await apiClient.get<any>('notifications', {
+    // Spec endpoint: notification/notification
+    const response = await apiClient.get<any>('notification/notification', {
       params: {
         time: time,
         page: page,
@@ -192,7 +192,7 @@ export async function updateNotificationStatus(
     };
 
     // Spec: PUT notification/:id/read
-    const endpoint = `notifications/${notificationId}/read`;
+    const endpoint = `notification/${notificationId}/read`;
     const response = await apiClient.put<any>(endpoint, requestBody);
     const responseData = response.data as any;
 

@@ -29,17 +29,20 @@ export interface BannersResponse {
 export async function getBanners(params?: {
   page?: number;
   limit?: number;
+  type?: string;
 }): Promise<ApiResponse<BannersResponse>> {
   const page = params?.page || 1;
   const limit = params?.limit || 50;
-  const endpoint = `admin/banners?page=${page}&limit=${limit}`;
+  const type = params?.type || 'hero';
+  // Use public banners endpoint instead of admin endpoint
+  const endpoint = `/banners?page=${page}&limit=${limit}&type=${type}`;
 
   try {
-    console.log('[bannerService] GET Banners', { page, limit });
+    console.log('[bannerService] GET Banners', { page, limit, type });
     
     // Banners should be publicly accessible - skip authentication
     const response = await apiClient.get<any>(endpoint, {
-      skipAuth: true,
+      skipAuth: false,
     });
     const responseData = response.data as any;
 

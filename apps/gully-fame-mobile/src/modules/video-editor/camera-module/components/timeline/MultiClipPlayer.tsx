@@ -83,7 +83,7 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
         // Pause all other clips
         videoRefs.current.forEach((ref, id) => {
           if (id !== clip.id && ref?.current) {
-            ref.current.pauseAsync().catch(console.warn);
+            ref.current.pause?.();
           }
         });
       } else {
@@ -108,12 +108,15 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
         return;
       }
       
+      // 🛠️ FIX: Use expo-video synchronous API
       isSeekingRef.current = true;
-      videoRef.current.setPositionAsync(localTime * 1000).then(() => {
+      try {
+        videoRef.current.currentTime = localTime;
         isSeekingRef.current = false;
-      }).catch(() => {
+      } catch (err) {
+        console.warn('Seek error:', err);
         isSeekingRef.current = false;
-      });
+      }
     }
   }, [currentTime, currentClipData, isDraggingTimeline]);
 
@@ -144,11 +147,12 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
     
     if (videoRef?.current && clip.type === 'video') {
       if (isPlaying) {
-        // Enforce active hardware rate mapping alongside async pipeline trigger
-        videoRef.current.setRateAsync(currentSpeed, true).catch(console.warn);
-        videoRef.current.playAsync().catch(console.warn);
+        // 🛠️ FIX: Use expo-video API (synchronous) not expo-av (async)
+        // expo-video uses .play()/.pause() (sync), not .playAsync()/.pauseAsync() (async)
+        videoRef.current.play?.();
+        // Rate is set via prop, not method call
       } else {
-        videoRef.current.pauseAsync().catch(console.warn);
+        videoRef.current.pause?.();
       }
     }
   }, [isPlaying, currentClipData, clips, onTimeUpdate, onEnd, currentSpeed]);
@@ -171,40 +175,42 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
       const videoRef = videoRefs.current.get(clip.id);
       
       if (videoRef?.current) {
-        videoRef.current.getStatusAsync().then((status: any) => {
-          if (status.isLoaded && status.positionMillis !== undefined) {
-            const localTime = status.positionMillis / 1000;
-            setCurrentClipLocalTime(localTime);
-            
-            // Throttle timeline updates to reduce lag
-            const now = Date.now();
-            if (now - lastUpdateTimeRef.current < 100) return; // Update max every 100ms
-            lastUpdateTimeRef.current = now;
-            
-            // ⚡ Reverse Matrix Map: Convert native video time back to timeline duration format factoring speed rate
-            const timelineStart = clip.timelineStart ?? 0;
-            const trimStart = clip.trimStart ?? 0;
-            const timelineTime = timelineStart + (localTime - trimStart) / currentSpeed;
-            
-            // Update timeline time
-            onTimeUpdate?.(Math.max(0, timelineTime));
-            
-            // Check if clip ended
-            if (status.didJustFinish || (localTime >= (clip.trimEnd ?? clip.duration))) {
-              // Move to next clip or end
-              const currentIndex = clips.findIndex((c) => c.id === clip.id);
-              if (currentIndex < clips.length - 1) {
-                // Switch to next clip
-                const nextClip = clips[currentIndex + 1];
-                const nextClipStart = nextClip.timelineStart ?? 0;
-                onTimeUpdate?.(nextClipStart);
-              } else {
-                // End of timeline
-                onEnd?.();
-              }
+        // 🛠️ FIX: expo-video uses currentTime property directly, not getStatusAsync()
+        try {
+          const localTime = videoRef.current.currentTime ?? 0;
+          setCurrentClipLocalTime(localTime);
+          
+          // Throttle timeline updates to reduce lag
+          const now = Date.now();
+          if (now - lastUpdateTimeRef.current < 100) return; // Update max every 100ms
+          lastUpdateTimeRef.current = now;
+          
+          // ⚡ Reverse Matrix Map: Convert native video time back to timeline duration format factoring speed rate
+          const timelineStart = clip.timelineStart ?? 0;
+          const trimStart = clip.trimStart ?? 0;
+          const timelineTime = timelineStart + (localTime - trimStart) / currentSpeed;
+          
+          // Update timeline time
+          onTimeUpdate?.(Math.max(0, timelineTime));
+          
+          // Check if clip ended
+          const duration = clip.trimEnd ?? clip.duration;
+          if (localTime >= duration) {
+            // Move to next clip or end
+            const currentIndex = clips.findIndex((c) => c.id === clip.id);
+            if (currentIndex < clips.length - 1) {
+              // Switch to next clip
+              const nextClip = clips[currentIndex + 1];
+              const nextClipStart = nextClip.timelineStart ?? 0;
+              onTimeUpdate?.(nextClipStart);
+            } else {
+              // End of timeline
+              onEnd?.();
             }
           }
-        }).catch(console.warn);
+        } catch (err) {
+          console.warn('Status check error:', err);
+        }
       }
     }, 100); // Reduced to 10fps for better performance
 
@@ -223,11 +229,12 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
       const localTime = currentClipLocalTime;
       const videoRef = videoRefs.current.get(clipId);
       if (videoRef?.current) {
-        videoRef.current.setPositionAsync(localTime * 1000).catch(console.warn);
-        videoRef.current.setRateAsync(currentSpeed, true).catch(console.warn);
+        // 🛠️ FIX: Use expo-video API (synchronous methods)
+        videoRef.current.currentTime = localTime;
+        // Rate is set via prop, not method
         
         if (isPlaying) {
-          videoRef.current.playAsync().catch(console.warn);
+          videoRef.current.play?.();
         }
       }
       
@@ -263,14 +270,14 @@ const MultiClipPlayer: React.FC<MultiClipPlayerProps> = ({
         <FilteredVideo
           videoRef={videoRef as React.RefObject<Video | null>}
           source={{ uri: clip.uri }}
-          style={[styles.media, { width: '100%', height: '100%' }] as any}
-          filter={filter as any}
+          style={[styles.media, { width: '100%', height: '100%' }]}
           resizeMode="contain"
           shouldPlay={false}
           isLooping={false}
           rate={currentSpeed}
           shouldCorrectPitch={true}
           onLoad={(status) => handleVideoLoad(clip.id, status)}
+          filter={filter}
         />
       </View>
     );

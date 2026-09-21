@@ -83,7 +83,7 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
       (clip.voiceOverlays || []).forEach((voice, idx) => {
         voices.push({
           id: voice.id || `voice-${clip.id}-${idx}`,
-          name: `Voiceover ${idx + 1}`,
+          name: voice.name || `Voiceover ${idx + 1}`,
           start: clipStart,
           duration: voice.duration || clipDuration,
         });

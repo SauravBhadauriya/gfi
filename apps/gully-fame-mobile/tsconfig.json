@@ -1,7 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
+    "types": ["jest"],
+    "skipLibCheck": true,
     "paths": {
       "@/*": ["src/*"],
       "@api/*": ["src/api/*"],
@@ -19,5 +22,7 @@
       "@constants/*": ["constants/*"],
       "@modules/*": ["src/modules/*"]
     }
-  }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["node_modules", "dist", "build", ".expo"]
 }

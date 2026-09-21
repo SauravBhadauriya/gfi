@@ -97,3 +97,9 @@ yarn-error.*
 *.tsbuildinfo
 
 # @end expo-cli
+.env.local
+
+# Sentry auth tokens - never commit
+android/sentry.properties
+ios/sentry.properties
+

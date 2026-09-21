@@ -20,12 +20,36 @@ import { BackIcon } from "@/icons";
 import {
   getNotifications,
   markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification,
   getUnreadNotificationCount,
   type Notification,
 } from "@/api/services/notificationIntegrationService";
 
 
 const getDimensions = () => Dimensions.get("window");
+
+const formatRelativeTime = (dateString: string): string => {
+  try {
+    const date = new Date(dateString);
+    const now = new Date();
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    const weeks = Math.floor(days / 7);
+    if (weeks < 4) return `${weeks}w ago`;
+    const months = Math.floor(days / 30);
+    return `${months}mo ago`;
+  } catch {
+    return "";
+  }
+};
 
 export default function NotificationsScreen() {
   const [activeTab, setActiveTab] = useState<"Today" | "Past">("Today");
@@ -36,6 +60,8 @@ export default function NotificationsScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [markingAll, setMarkingAll] = useState(false);
 
   
   useEffect(() => {
@@ -104,6 +130,54 @@ export default function NotificationsScreen() {
       Alert.alert("Error", "Failed to process notification");
     } finally {
       setMarking(null);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      setMarkingAll(true);
+      const response = await markAllNotificationsAsRead();
+      if (response.success) {
+        
+        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+        
+        
+        const countResponse = await getUnreadNotificationCount();
+        if (countResponse.success) {
+          setUnreadCount(countResponse.data?.count || 0);
+        }
+      } else {
+        Alert.alert("Error", response.message || "Failed to mark all as read");
+      }
+    } catch (error: any) {
+      console.error("Error marking all notifications as read:", error);
+      Alert.alert("Error", "Failed to mark all as read");
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const handleDeleteNotification = async (notificationId: string) => {
+    try {
+      setDeleting(notificationId);
+      const response = await deleteNotification(notificationId);
+      if (response.success) {
+        
+        setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
+        
+        
+        const countResponse = await getUnreadNotificationCount();
+        if (countResponse.success) {
+          setUnreadCount(countResponse.data?.count || 0);
+        }
+      } else {
+        Alert.alert("Error", response.message || "Failed to delete notification");
+      }
+    } catch (error: any) {
+      console.error("Error deleting notification:", error);
+      Alert.alert("Error", "Failed to delete notification");
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -309,7 +383,15 @@ export default function NotificationsScreen() {
           >
             Notifications
           </Text>
-          <View style={responsiveStyles.headerButton} />
+          <TouchableOpacity
+            onPress={handleMarkAllAsRead}
+            disabled={markingAll || notifications.length === 0}
+            style={[responsiveStyles.headerButton, { opacity: markingAll ? 0.5 : 1 }]}
+          >
+            <Text style={{ color: "#EC9A15", fontSize: 12, fontWeight: "600" }}>
+              {markingAll ? "..." : "All"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {}
@@ -397,58 +479,89 @@ export default function NotificationsScreen() {
             </Text>
             <View style={responsiveStyles.notificationsList}>
               {currentNotifications.map((notification) => (
-                <TouchableOpacity
-                  key={notification.id}
-                  style={[
-                    responsiveStyles.notificationCard,
-                    !notification.read && styles.notificationCardHighlighted,
-                  ]}
-                  activeOpacity={0.7}
-                  disabled={marking === notification.id}
-                  onPress={() => handleMarkAsRead(notification.id)}
-                >
-                  <View style={responsiveStyles.bellIconContainer}>
-                    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                      <Path
-                        d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
-                        stroke="#000"
-                        strokeWidth={2}
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </Svg>
-                    {unreadCount > 0 && (
-                      <View style={responsiveStyles.bellBadge}>
-                        <Text style={responsiveStyles.bellBadgeText}>
-                          {unreadCount > 99 ? "99+" : unreadCount}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <View style={responsiveStyles.notificationContent}>
-                    <Text
-                      style={[
-                        responsiveStyles.notificationTitle,
-                        notification.read && { opacity: 0.6 },
-                      ]}
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
+                <View key={notification.id} style={{ position: "relative" }}>
+                  <TouchableOpacity
+                    style={[
+                      responsiveStyles.notificationCard,
+                      !notification.read && styles.notificationCardHighlighted,
+                    ]}
+                    activeOpacity={0.7}
+                    disabled={marking === notification.id}
+                    onPress={() => handleMarkAsRead(notification.id)}
+                    onLongPress={() => handleDeleteNotification(notification.id)}
+                  >
+                    <View style={responsiveStyles.bellIconContainer}>
+                      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+                        <Path
+                          d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"
+                          stroke="#000"
+                          strokeWidth={2}
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </Svg>
+                      {unreadCount > 0 && (
+                        <View style={responsiveStyles.bellBadge}>
+                          <Text style={responsiveStyles.bellBadgeText}>
+                            {unreadCount > 99 ? "99+" : unreadCount}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={responsiveStyles.notificationContent}>
+                      <Text
+                        style={[
+                          responsiveStyles.notificationTitle,
+                          notification.read && { opacity: 0.6 },
+                        ]}
+                        numberOfLines={2}
+                        ellipsizeMode="tail"
+                      >
+                        {notification.title}
+                        {marking === notification.id && " ..."}
+                      </Text>
+                      <Text
+                        style={[
+                          responsiveStyles.notificationDescription,
+                          notification.read && { opacity: 0.5 },
+                        ]}
+                        numberOfLines={2}
+                        ellipsizeMode="tail"
+                      >
+                        {notification.message}
+                      </Text>
+                      <Text
+                        style={[
+                          {
+                            fontSize: getFontSize(10),
+                            color: "#999",
+                            marginTop: scaleVertical(3),
+                          },
+                          notification.read && { opacity: 0.4 },
+                        ]}
+                      >
+                        {formatRelativeTime(notification.createdAt)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  {deleting === notification.id && (
+                    <View
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        backgroundColor: "rgba(0, 0, 0, 0.5)",
+                        borderRadius: scale(12),
+                        justifyContent: "center",
+                        alignItems: "center",
+                      }}
                     >
-                      {notification.title}
-                      {marking === notification.id && " ..."}
-                    </Text>
-                    <Text
-                      style={[
-                        responsiveStyles.notificationDescription,
-                        notification.read && { opacity: 0.5 },
-                      ]}
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
-                    >
-                      {notification.message}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
+                      <ActivityIndicator size="small" color="#EC9A15" />
+                    </View>
+                  )}
+                </View>
               ))}
             </View>
           </>

@@ -74,7 +74,7 @@ export interface CompetitionsResponse {
 
 /**
  * Get all competitions
- * Spec: GET user/competitions?page=1&limit=20
+ * Spec: GET /competitions?page=1&limit=20
  */
 export async function getCompetitions(params?: {
   page?: number;
@@ -84,9 +84,9 @@ export async function getCompetitions(params?: {
   const limit = params?.limit || 20;
   
   try {
-    console.log('[competitionService] GET user/competitions', { page, limit });
+    console.log('[competitionService] GET /competitions', { page, limit });
     
-    const response = await apiClient.get<any>('user/competitions', {
+    const response = await apiClient.get<any>('competitions', {
       params: { page, limit },
     });
     const responseData = response.data as any;
@@ -109,7 +109,7 @@ export async function getCompetitions(params?: {
         limit,
       };
 
-      console.log('[competitionService] GET user/competitions - Success:', competitions.length, 'competitions');
+      console.log('[competitionService] GET /competitions - Success:', competitions.length, 'competitions');
       return {
         success: true,
         data: result,
@@ -127,7 +127,7 @@ export async function getCompetitions(params?: {
       },
     };
   } catch (error: any) {
-    console.error('[competitionService] GET user/competitions error:', error.message);
+    console.error('[competitionService] GET /competitions error:', error.message);
     return {
       success: false,
       message: error.response?.data?.message || error.message || 'Network error occurred',
@@ -281,6 +281,80 @@ export async function getCompetitionLeaderboard(
   }
 }
 
+/**
+ * Join a competition
+ * Spec: POST /competitions/{competitionId}/join
+ */
+export async function joinCompetition(competitionId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  try {
+    console.log('[competitionService] POST competitions/:id/join', { competitionId });
+    
+    const response = await apiClient.post<any>(`competitions/${competitionId}/join`);
+    const responseData = response.data as any;
+
+    if (responseData.code === 1) {
+      console.log('[competitionService] JOIN competition - Success');
+      return {
+        success: true,
+        data: { success: true, message: responseData.message || 'Successfully joined competition' },
+        message: responseData.message || 'Successfully joined competition',
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || 'Failed to join competition',
+      error: 'API returned unsuccessful response',
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error('[competitionService] JOIN competition error:', error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Network error occurred',
+      error: error.message || 'Network error',
+      data: undefined,
+    };
+  }
+}
+
+/**
+ * Leave a competition
+ * Spec: POST /competitions/{competitionId}/leave
+ */
+export async function leaveCompetition(competitionId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
+  try {
+    console.log('[competitionService] POST competitions/:id/leave', { competitionId });
+    
+    const response = await apiClient.post<any>(`competitions/${competitionId}/leave`);
+    const responseData = response.data as any;
+
+    if (responseData.code === 1) {
+      console.log('[competitionService] LEAVE competition - Success');
+      return {
+        success: true,
+        data: { success: true, message: responseData.message || 'Successfully left competition' },
+        message: responseData.message || 'Successfully left competition',
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || 'Failed to leave competition',
+      error: 'API returned unsuccessful response',
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error('[competitionService] LEAVE competition error:', error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Network error occurred',
+      error: error.message || 'Network error',
+      data: undefined,
+    };
+  }
+}
+
 // ==================== Service Export ====================
 
 export const competitionService = {
@@ -288,5 +362,7 @@ export const competitionService = {
   getCompetitionById,
   getCompetitionsByStatus,
   getCompetitionLeaderboard,
+  joinCompetition,
+  leaveCompetition,
 };
 

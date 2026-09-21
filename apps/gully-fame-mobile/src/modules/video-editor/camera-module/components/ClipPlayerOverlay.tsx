@@ -7,7 +7,7 @@ import {
   View,
   Image,
 } from 'react-native';
-import { Video } from 'expo-video';
+import { VideoView, useVideoPlayer } from "expo-video";
 import type { CameraClip } from '../types/camera.types';
 
 interface ClipPlayerOverlayProps {

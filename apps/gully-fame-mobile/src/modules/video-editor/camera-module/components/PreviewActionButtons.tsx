@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { StyleSheet, View, ScrollView, Alert } from "react-native";
 import FilterButton from "./preview-actions/FilterButton";
 import MusicButton from "./preview-actions/MusicButton";
@@ -15,6 +15,7 @@ import LinksButton from "./preview-actions/LinksButton";
 import PasteButton from "./preview-actions/PasteButton";
 import TextToSpeechButton from "./preview-actions/TextToSpeechButton";
 import AudioEditorButton from "./preview-actions/AudioEditorButton";
+import MusicLibraryModal from "../../../../components/MusicLibraryModal";
 
 import type { FilterConfig } from "../types/filters";
 import type {
@@ -27,6 +28,7 @@ import type {
   OverlayEffect,
 } from "../types/voiceOverlay.types";
 import type { TextToSpeechConfig, AudioTrackWithEffects, AudioMixSettings } from "../types/audioEffects.types";
+import type { Music } from "../types/music.types";
 
 interface PreviewActionButtonsProps {
   displayUri?: string;
@@ -79,78 +81,74 @@ const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
   masterVolume = 1,
   startTime = 0,
 }) => {
-  
-  // 🛠️ Music Library Handler - Opens device file picker for AUDIO ONLY
-  const handleMusicPress = async () => {
-    try {
-      // Use ImageLibraryOptions with explicit Audio type for iOS/Android compatibility
-      const imagePicker = require('expo-image-picker');
-      
-      // Request permissions first (required on newer Android)
-      const { status } = await imagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('⚠️ Permission Denied', 'We need access to your media library to select music');
-        return;
-      }
+  const [showMusicLibrary, setShowMusicLibrary] = useState(false);
+  const [selectedMusic, setSelectedMusic] = useState<Music | undefined>();
 
-      const result = await imagePicker.launchImageLibraryAsync({
-        mediaTypes: imagePicker.MediaTypeOptions.Audio, // AUDIO ONLY
-        allowsMultipleSelection: false,
-        allowsEditing: false,
-        quality: 1,
-      });
+  // 🛠️ BUG FIX #2: Music Library Handler - Opens in-app Music Library modal
+  const handleMusicPress = () => {
+    setShowMusicLibrary(true);
+  };
 
-      if (!result.canceled && result.assets?.length > 0) {
-        const musicFile = result.assets[0];
-        const fileName = musicFile.uri?.split('/').pop() || 'Music';
-        
-        // Log for debugging
-        console.log('🎵 Music selected:', {
-          uri: musicFile.uri?.substring(0, 80),
-          fileName,
-          duration: musicFile.duration,
-        });
-        
-        Alert.alert('✅ Music Added', `File: ${fileName}`);
-        if (onMusic) onMusic();
-      }
-    } catch (error) {
-      console.error('🎵 Music error:', error);
-      Alert.alert('⚠️ Error', 'Could not open music library. Make sure you have permissions enabled.');
-    }
+  // Handle music selection from library
+  const handleMusicSelect = (music: Music) => {
+    setSelectedMusic(music);
+    console.log('🎵 Music selected from library:', {
+      title: music.title,
+      artist: music.artist,
+      duration: music.duration,
+      audioUrl: music.audioUrl,
+    });
+    Alert.alert('✅ Music Added', `${music.title} by ${music.artist}`);
+    setShowMusicLibrary(false);
+    if (onMusic) onMusic();
+  };
+
+  // Handle music library modal close
+  const handleMusicLibraryClose = () => {
+    setShowMusicLibrary(false);
   };
 
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.container}
-      contentContainerStyle={styles.contentContainer}
-    >
-      {/* 🛠️ FIX: Forced handler pass kiya taaki component hide na ho */}
-      <MusicButton onPress={handleMusicPress} />
-      
-      <TextButton onPress={onText} />
-      <TextToSpeechButton onPress={() => {}} onTTSGenerate={onTTSGenerate} startTime={startTime} />
-      <VoiceButton onPress={() => {}} onVoiceAdd={onVoiceAdd} startTime={startTime} />
-      <LinksButton onPress={() => {}} onLinkAdd={onLinkAdd} />
-      <CaptionsButton onPress={() => {}} onCaptionAdd={onCaptionAdd} />
-      <AdjustButton onPress={() => {}} onAdjustChange={onAdjustChange} />
-      <FilterButton mediaUri={displayUri || ""} onFilterApply={onFilter || (() => {})} />
-      <OverlayButton onPress={onOverlay} onApplyOverlay={onOverlayEffectAdd} />
-      <SoundFXButton onPress={() => {}} onSoundSelect={onSoundFXAdd} />
-      <AudioEditorButton 
-        onPress={() => {}} 
-        onUpdateTracks={onUpdateAudioTracks}
-        onUpdateMixSettings={onUpdateAudioMix}
-        tracks={audioTracks}
-        masterVolume={masterVolume}
+    <>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.container}
+        contentContainerStyle={styles.contentContainer}
+      >
+        {/* 🛠️ FIX: Forced handler pass kiya taaki component hide na ho */}
+        <MusicButton onPress={handleMusicPress} />
+        
+        <TextButton onPress={onText} />
+        <TextToSpeechButton onPress={() => {}} onTTSGenerate={onTTSGenerate} startTime={startTime} />
+        <VoiceButton onPress={onVoiceAdd} onVoiceAdd={onVoiceAdd} startTime={startTime} />
+        <LinksButton onPress={onLinkAdd} onLinkAdd={onLinkAdd} />
+        <CaptionsButton onPress={onCaptionAdd} onCaptionAdd={onCaptionAdd} />
+        <AdjustButton onPress={onAdjustChange} onAdjustChange={onAdjustChange} />
+        <FilterButton mediaUri={displayUri || ""} onFilterApply={onFilter || (() => {})} />
+        <OverlayButton onPress={onOverlay} onApplyOverlay={onOverlayEffectAdd} />
+        <SoundFXButton onPress={onSoundFXAdd} onSoundSelect={onSoundFXAdd} />
+        <AudioEditorButton 
+          onPress={() => {}} 
+          onUpdateTracks={onUpdateAudioTracks}
+          onUpdateMixSettings={onUpdateAudioMix}
+          tracks={audioTracks}
+          masterVolume={masterVolume}
+        />
+        <CutoutButton onPress={onCutoutAdd} onCutoutAdd={onCutoutAdd} />
+        <StickerButton onPress={onSticker} onStickerSelect={onSticker} />
+        <PasteButton onPress={onPaste} onPaste={onPaste} />
+        <TransitionButton onPress={onTransition} />
+      </ScrollView>
+
+      {/* 🛠️ BUG FIX #2: Music Library Modal */}
+      <MusicLibraryModal
+        visible={showMusicLibrary}
+        onSelect={handleMusicSelect}
+        onCancel={handleMusicLibraryClose}
+        selectedMusic={selectedMusic}
       />
-      <CutoutButton onPress={() => {}} onCutoutAdd={onCutoutAdd} />
-      <StickerButton onPress={onSticker} onStickerSelect={onSticker} />
-      <PasteButton onPress={() => {}} onPaste={onPaste} />
-      <TransitionButton onPress={onTransition} />
-    </ScrollView>
+    </>
   );
 };
 

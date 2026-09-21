@@ -111,11 +111,30 @@ export async function listStickers(
     };
   } catch (error: any) {
     console.error("[stickerEmojiService] listStickers error:", error.message);
+    
+    // Fallback stickers for offline/Android support
+    const fallbackStickers: Sticker[] = [
+      { id: "heart-1", name: "Red Heart", type: "emoji", url: "❤️", category: "love" },
+      { id: "heart-2", name: "Fire", type: "emoji", url: "🔥", category: "love" },
+      { id: "star-1", name: "Star", type: "emoji", url: "⭐", category: "popular" },
+      { id: "party-1", name: "Party", type: "emoji", url: "🎉", category: "party" },
+      { id: "party-2", name: "Confetti", type: "emoji", url: "🎊", category: "party" },
+      { id: "music-1", name: "Music", type: "emoji", url: "🎵", category: "music" },
+      { id: "music-2", name: "Musical Note", type: "emoji", url: "🎶", category: "music" },
+      { id: "cool-1", name: "Cool Face", type: "emoji", url: "😎", category: "faces" },
+      { id: "laugh-1", name: "Laugh", type: "emoji", url: "😂", category: "faces" },
+      { id: "love-1", name: "Love Eyes", type: "emoji", url: "😍", category: "faces" },
+    ];
+
     return {
-      success: false,
-      message: error.message ?? "Network error",
-      error: error.message,
-      data: undefined,
+      success: true,
+      data: {
+        page: 1,
+        limit,
+        total: fallbackStickers.length,
+        stickers: fallbackStickers,
+      },
+      message: "Using fallback stickers (offline mode)",
     };
   }
 }

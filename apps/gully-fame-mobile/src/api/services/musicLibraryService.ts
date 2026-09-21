@@ -11,8 +11,6 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import { mockDataManager } from "../../mockData/mockDataManager";
-import * as mockMusicTracks from "../../mockData/musicTracks";
 
 // ─────────────────────────────────────────────
 // Types
@@ -155,8 +153,8 @@ export async function listAudio(
 }
 
 /**
- * Internal helper - Get audio list from mock data
- * Supports sorting, pagination, and search
+ * Internal helper - Get audio list when API is unavailable
+ * Returns empty list instead of mock data
  */
 function _getMockAudioList(
   sort: AudioSortOption = "trending",
@@ -164,62 +162,19 @@ function _getMockAudioList(
   limit = 20,
   search?: string
 ): ApiResponse<AudioListData> {
-  let tracks: mockMusicTracks.MusicTrack[] = [];
-
-  // Get tracks based on sort option
-  switch (sort) {
-    case "trending":
-      tracks = mockMusicTracks.getTrendingTracks();
-      break;
-    case "popular":
-      tracks = mockMusicTracks.getPopularTracks();
-      break;
-    case "newest":
-      tracks = mockMusicTracks.getNewTracks();
-      break;
-    default:
-      tracks = mockMusicTracks.mockMusicTracks;
-  }
-
-  // Apply search filter if provided
-  if (search && search.trim()) {
-    tracks = mockMusicTracks.searchMusicTracks(search);
-  }
-
-  // Convert mock tracks to MusicTrack format
-  const convertedTracks: MusicTrack[] = tracks.map((mockTrack) => ({
-    _id: mockTrack.id,
-    title: mockTrack.title,
-    artist: mockTrack.artist,
-    duration: mockTrack.duration,
-    audioUrl: mockTrack.audioUrl ?? `mock://audio/${mockTrack.id}`,
-    coverImage: mockTrack.thumbnail,
-    usageCount: mockTrack.usageCount,
-    isSaved: false,
-    isActive: true,
-  }));
-
-  // Apply pagination
-  const start = (page - 1) * limit;
-  const paginatedTracks = convertedTracks.slice(start, start + limit);
+  console.log(`[musicLibraryService] ❌ API unavailable - returning empty audio list`);
 
   const listData: AudioListData = {
     page,
     limit,
-    total: convertedTracks.length,
-    tracks: paginatedTracks,
+    total: 0,
+    tracks: [],
   };
 
-  console.log(`[musicLibraryService] ✅ [VERIFICATION] Using mock data - Loaded ${paginatedTracks.length} tracks (sort: ${sort}, page: ${page})`);
-  console.log('[musicLibraryService] 🎵 [VERIFICATION] Sample mock tracks:');
-  paginatedTracks.slice(0, 3).forEach((t, i) => {
-    console.log(`  [${i}] title: ${t.title}, artist: ${t.artist}, audioUrl: ${t.audioUrl?.substring(0, 50)}...`);
-  });
-
   return {
-    success: true,
+    success: false,
     data: listData,
-    message: "Using mock audio library (API unavailable)",
+    message: "Unable to load audio library (API unavailable)",
   };
 }
 
@@ -349,42 +304,23 @@ export async function getSavedAudio(
 }
 
 /**
- * Internal helper - Get saved audio list from mock data
+ * Internal helper - Get saved audio list when API is unavailable
+ * Returns empty list instead of mock data
  */
 function _getMockSavedAudioList(page = 1, limit = 20): ApiResponse<AudioListData> {
-  // Return a subset of popular/trending tracks as "saved"
-  let tracks = mockMusicTracks.getPopularTracks().slice(0, 5);
-
-  // Convert to MusicTrack format
-  const convertedTracks: MusicTrack[] = tracks.map((mockTrack) => ({
-    _id: mockTrack.id,
-    title: mockTrack.title,
-    artist: mockTrack.artist,
-    duration: mockTrack.duration,
-    audioUrl: mockTrack.audioUrl ?? `mock://audio/${mockTrack.id}`,
-    coverImage: mockTrack.thumbnail,
-    usageCount: mockTrack.usageCount,
-    isSaved: true,
-    isActive: true,
-  }));
-
-  // Apply pagination
-  const start = (page - 1) * limit;
-  const paginatedTracks = convertedTracks.slice(start, start + limit);
+  console.log(`[musicLibraryService] ❌ API unavailable - returning empty saved audio list`);
 
   const listData: AudioListData = {
     page,
     limit,
-    total: convertedTracks.length,
-    tracks: paginatedTracks,
+    total: 0,
+    tracks: [],
   };
 
-  console.log(`[musicLibraryService] Using mock saved audio - Loaded ${paginatedTracks.length} tracks`);
-
   return {
-    success: true,
+    success: false,
     data: listData,
-    message: "Using mock saved audio library (API unavailable)",
+    message: "Unable to load saved audio (API unavailable)",
   };
 }
 

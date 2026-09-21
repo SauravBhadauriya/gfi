@@ -1,7 +1,7 @@
 /**
  * Optimized Camera Screen
  * 
- * This is a ready-to-use screen that integrates OptimizedReelRecorder
+ * This is a ready-to-use screen that integrates CameraScreen
  * into your Expo Router navigation.
  * 
  * Usage:
@@ -11,16 +11,8 @@
 
 import React, { useCallback } from 'react';
 import { useRouter } from 'expo-router';
-import { Alert } from 'react-native';
-import OptimizedReelRecorder from '@modules/video-editor/camera-module/screens/OptimizedReelRecorder';
-
-interface RecordedClip {
-  id: string;
-  uri: string;
-  duration: number;
-  speed: 0.5 | 1 | 1.5 | 2;
-  timestamp: number;
-}
+import CameraScreen from '@modules/video-editor/camera-module/screens/CameraScreen';
+import type { CameraClipArray } from '@modules/video-editor/camera-module/types/camera.types';
 
 /**
  * Main camera screen with OptimizedReelRecorder
@@ -36,15 +28,15 @@ export default function OptimizedCameraScreen() {
    * When user finishes recording (taps "Finish")
    */
   const handleRecordingComplete = useCallback(
-    (clips: RecordedClip[]) => {
+    (clips: CameraClipArray) => {
       console.log('[OptimizedCameraScreen] Recording complete', {
         clipsCount: clips.length,
-        totalDuration: clips.reduce((sum, c) => sum + c.duration, 0),
+        totalDuration: clips.reduce((sum: number, c: any) => sum + c.duration, 0),
       });
 
-      // Navigate to preview screen with clips
+      // Navigate to preview screen with clips (use full path with main group)
       router.push({
-        pathname: '/reels/preview',
+        pathname: '/(main)/reels/preview',
         params: {
           clips: JSON.stringify(clips),
           source: 'optimized-camera',
@@ -53,31 +45,6 @@ export default function OptimizedCameraScreen() {
     },
     [router]
   );
-
-  /**
-   * When recording encounters an error
-   */
-  const handleRecordingError = useCallback((error: Error) => {
-    console.error('[OptimizedCameraScreen] Recording error:', error);
-
-    Alert.alert(
-      'Recording Error',
-      error.message || 'Failed to record video. Please try again.',
-      [
-        {
-          text: 'OK',
-          onPress: () => {
-            // User can retry
-          },
-        },
-        {
-          text: 'Go Back',
-          onPress: () => router.back(),
-          style: 'cancel',
-        },
-      ]
-    );
-  }, [router]);
 
   /**
    * When user presses back/close button
@@ -92,11 +59,9 @@ export default function OptimizedCameraScreen() {
   // ─────────────────────────────────────────────────────────────
 
   return (
-    <OptimizedReelRecorder
-      maxDuration={60}
-      onRecordingComplete={handleRecordingComplete}
-      onError={handleRecordingError}
+    <CameraScreen
       onBack={handleBack}
+      onNext={handleRecordingComplete}
     />
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   Image,
   Modal,
@@ -8,12 +8,10 @@ import {
   TouchableOpacity,
   View,
   Dimensions,
-  ActivityIndicator,
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { FILTERS, FilterConfig } from "./../../types/filters";
 import FilterThumbnail from "./FilterThumbnail";
-import { videoEditorService } from "../../../../api/services/videoEditorService";
 
 interface Props {
   mediaUri?: string;
@@ -23,50 +21,6 @@ interface Props {
 export default function FilterButton({ mediaUri, onFilterApply }: Props) {
   const [visible, setVisible] = useState(false);
   const [selected, setSelected] = useState("Original");
-  const [availableFilters, setAvailableFilters] = useState<FilterConfig[]>(FILTERS);
-  const [loading, setLoading] = useState(false);
-
-  // Load available filters from videoEditorService when modal opens
-  useEffect(() => {
-    if (visible) {
-      loadFilters();
-    }
-  }, [visible]);
-
-  const loadFilters = async () => {
-    setLoading(true);
-    try {
-      const result = await videoEditorService.getVideoFilters();
-      if (result.success && result.data) {
-        // Convert mock VideoFilter to FilterConfig format
-        const convertedFilters: FilterConfig[] = result.data
-          .filter(f => f.category === 'filter')
-          .map((mockFilter, idx) => ({
-            name: mockFilter.name,
-            brightness: mockFilter.parameters?.brightness ?? 0,
-            contrast: mockFilter.parameters?.contrast ?? 0,
-            saturation: mockFilter.parameters?.saturation ?? 0,
-            temperature: mockFilter.parameters?.warmth ?? 0,
-            // Add to available list
-          }));
-
-        // Add "Original" filter first
-        const filtersWithOriginal: FilterConfig[] = [
-          { name: 'Original' },
-          ...convertedFilters,
-          ...FILTERS.slice(1), // Include preset filters as fallback
-        ];
-
-        setAvailableFilters(filtersWithOriginal);
-        console.log(`[FilterButton] Loaded ${convertedFilters.length} filters (${result.message})`);
-      }
-    } catch (error) {
-      console.warn("[FilterButton] Failed to load filters, using defaults:", error);
-      setAvailableFilters(FILTERS);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSelect = (filter: FilterConfig) => {
     setSelected(filter.name);
@@ -86,7 +40,7 @@ export default function FilterButton({ mediaUri, onFilterApply }: Props) {
   const itemWidth = (availableWidth - (columnsPerView * itemSpacing)) / columnsPerView;
   
   // Organize filters into columns (each column has 3 items for 3 rows)
-  const totalColumns = Math.ceil(availableFilters.length / rows);
+  const totalColumns = Math.ceil(FILTERS.length / rows);
   const totalWidth = (totalColumns * itemWidth) + ((totalColumns + 1) * itemSpacing);
 
   // Create columns array: each column contains filters for all 3 rows
@@ -95,8 +49,8 @@ export default function FilterButton({ mediaUri, onFilterApply }: Props) {
     const columnFilters: FilterConfig[] = [];
     for (let row = 0; row < rows; row++) {
       const index = col * rows + row;
-      if (index < availableFilters.length) {
-        columnFilters.push(availableFilters[index]);
+      if (index < FILTERS.length) {
+        columnFilters.push(FILTERS[index]);
       }
     }
     columns.push(columnFilters);
@@ -122,74 +76,57 @@ export default function FilterButton({ mediaUri, onFilterApply }: Props) {
       <Modal visible={visible} transparent animationType="slide">
         <View style={styles.overlay}>
           <View style={styles.panel}>
-            <View style={styles.headerRow}>
-              <View>
-                <Text style={styles.title}>Choose Filter</Text>
-                <Text style={styles.subtitle}>
-                  {availableFilters.length} filter{availableFilters.length !== 1 ? 's' : ''} available
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setVisible(false)}>
-                <Text style={{ color: '#FFF', fontSize: 24 }}>✕</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.title}>Choose Filter</Text>
 
-            {loading ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#ec9a15" />
-                <Text style={styles.loadingText}>Loading filters...</Text>
-              </View>
-            ) : (
-              <View style={styles.scrollContainer}>
-                <ScrollView 
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  pagingEnabled={false}
-                  decelerationRate="fast"
-                  contentContainerStyle={[
-                    styles.filtersContainer,
-                    { width: totalWidth }
-                  ]}
-                >
-                  {columns.map((columnFilters, colIndex) => (
-                    <View 
-                      key={colIndex} 
-                      style={[
-                        styles.column,
-                        { 
-                          width: itemWidth,
-                          marginRight: colIndex < totalColumns - 1 ? itemSpacing : 0,
-                        }
-                      ]}
-                    >
-                      {columnFilters.map((filter, rowIndex) => (
-                        <TouchableOpacity
-                          key={filter.name}
-                          onPress={() => handleSelect(filter)}
-                          style={[
-                            styles.item,
-                            selected === filter.name && styles.active,
-                            { marginBottom: rowIndex < rows - 1 ? 12 : 0 },
-                          ]}
-                        >
-                          {mediaUri ? (
-                            <FilterThumbnail
-                              source={{ uri: mediaUri }}
-                              filter={filter}
-                              style={[styles.thumb, { width: itemWidth - 8, height: itemWidth - 8 }] as any}
-                              resizeMode="cover"
-                            />
-                          ) : (
-                            <View style={[styles.thumb, styles.placeholderThumb, { width: itemWidth - 8, height: itemWidth - 8 }]} />
-                          )}
-                          <Text style={styles.name} numberOfLines={1}>{filter.name}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
+            <View style={styles.scrollContainer}>
+              <ScrollView 
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                pagingEnabled={false}
+                decelerationRate="fast"
+                contentContainerStyle={[
+                  styles.filtersContainer,
+                  { width: totalWidth }
+                ]}
+              >
+                {columns.map((columnFilters, colIndex) => (
+                  <View 
+                    key={colIndex} 
+                    style={[
+                      styles.column,
+                      { 
+                        width: itemWidth,
+                        marginRight: colIndex < totalColumns - 1 ? itemSpacing : 0,
+                      }
+                    ]}
+                  >
+                    {columnFilters.map((filter, rowIndex) => (
+                      <TouchableOpacity
+                        key={filter.name}
+                        onPress={() => handleSelect(filter)}
+                        style={[
+                          styles.item,
+                          selected === filter.name && styles.active,
+                          { marginBottom: rowIndex < rows - 1 ? 12 : 0 },
+                        ]}
+                      >
+                        {mediaUri ? (
+                          <FilterThumbnail
+                            source={{ uri: mediaUri }}
+                            filter={filter}
+                            style={[styles.thumb, { width: itemWidth - 8, height: itemWidth - 8 }] as any}
+                            resizeMode="cover"
+                          />
+                        ) : (
+                          <View style={[styles.thumb, styles.placeholderThumb, { width: itemWidth - 8, height: itemWidth - 8 }]} />
+                        )}
+                        <Text style={styles.name} numberOfLines={1}>{filter.name}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ))}
+              </ScrollView>
+            </View>
 
             <TouchableOpacity onPress={() => setVisible(false)}>
               <Text style={styles.close}>Close</Text>
@@ -231,34 +168,14 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     maxHeight: "80%",
   },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
   title: {
     color: "#ffffff",
     fontSize: 18,
     fontWeight: "600",
-  },
-  subtitle: {
-    color: "#999",
-    fontSize: 12,
-    marginTop: 4,
+    marginBottom: 16,
   },
   scrollContainer: {
     height: 300, // Fixed height for 3 rows
-  },
-  loadingContainer: {
-    height: 300,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#999',
-    marginTop: 12,
-    fontSize: 14,
   },
   filtersContainer: {
     paddingVertical: 8,

@@ -1,6 +1,4 @@
-import * as FileSystem from "expo-file-system";
-import * as FileSystemLegacy from "expo-file-system/legacy";
-import { Directory, Paths } from "expo-file-system";
+import { Directory, File, Paths } from "expo-file-system";
 import type { CameraClip, CameraClipArray } from "../types/camera.types";
 import type { AdjustSettings } from "../types/voiceOverlay.types";
 import { applyPresetToVideo, applyPresetToImage, applyOverlaysToVideo, buildAdjustmentFilterChain, buildOverlayEffectFilterChain } from "./ffmpegFilters";
@@ -21,46 +19,6 @@ try {
   isFFmpegAvailable = false;
 }
 
-
-// Helper to get safe exports directory
-async function getExportsDir(): Promise<string> {
-  const baseDir = FileSystem.cacheDirectory;
-  if (!baseDir) {
-    throw new Error('FileSystem.cacheDirectory is undefined');
-  }
-  
-  const exportsDir = baseDir.endsWith('/') ? `${baseDir}exports` : `${baseDir}/exports`;
-  
-  try {
-    const dir = new Directory(exportsDir);
-    await dir.create({ intermediates: true });
-  } catch (error) {
-    console.log('Exports directory ready or already exists');
-  }
-  
-  return exportsDir;
-}
-
-// Helper function to copy files - using legacy API
-async function copyFileNew(fromPath: string, toPath: string): Promise<void> {
-  try {
-    await FileSystemLegacy.copyAsync({ from: fromPath, to: toPath });
-  } catch (error) {
-    console.log(`Copy operation - error:`, error);
-    throw error;
-  }
-}
-
-// Helper function to delete files - using legacy API
-async function deleteFileNew(filePath: string): Promise<void> {
-  try {
-    await FileSystemLegacy.deleteAsync(filePath);
-  } catch (error) {
-    // File may not exist, silently continue
-    console.log(`File delete - file may not exist`);
-  }
-}
-
 /**
  * Export and combine multiple clips into a single video
  * 🔥 Added `overlays` array to bake stickers onto final export
@@ -79,9 +37,12 @@ export async function exportAndCombineClips(
   if (!isFFmpegAvailable) {
     onProgress?.(0.1, "Running in Expo Go mode (simplified export)...");
     
-    const exportsDir = await getExportsDir();
+    const exportsDir = new Directory(Paths.cache, "exports");
+    if (!exportsDir.exists) {
+      exportsDir.create();
+    }
 
-    const baseUri = exportsDir.endsWith("/") ? exportsDir : `${exportsDir}/`;
+    const baseUri = exportsDir.uri.endsWith("/") ? exportsDir.uri : `${exportsDir.uri}/`;
     
     // In Expo Go, just copy the first clip as fallback
     // In a dev build, you'd have full FFmpeg processing
@@ -91,7 +52,8 @@ export async function exportAndCombineClips(
       
       if (clip.type === "video") {
         onProgress?.(0.5, "Preparing video...");
-        await copyFileNew(clip.uri, outputPath);
+        const sourceVideo = new File(clip.uri);
+        sourceVideo.copy(outputPath);
         onProgress?.(1.0, "Export complete!");
         return outputPath;
       } else {
@@ -106,8 +68,12 @@ export async function exportAndCombineClips(
   }
 
   // Full FFmpeg mode (development build)
-  const exportsDir = await getExportsDir();
-  const baseUri = exportsDir.endsWith("/") ? exportsDir : `${exportsDir}/`;
+  const exportsDir = new Directory(Paths.cache, "exports");
+  if (!exportsDir.exists) {
+    exportsDir.create();
+  }
+
+  const baseUri = exportsDir.uri.endsWith("/") ? exportsDir.uri : `${exportsDir.uri}/`;
   onProgress?.(0.1, "Preparing clips...");
 
   const processedClips: string[] = [];
@@ -176,7 +142,8 @@ export async function exportAndCombineClips(
               // Clean up intermediate filter path if different
               if (filterAppliedPath !== trimmedPath) {
                 try {
-                  await deleteFileNew(filterAppliedPath);
+                  const filterFile = new File(filterAppliedPath);
+                  if (filterFile.exists) filterFile.delete();
                 } catch (e) {}
               }
             } else {
@@ -210,7 +177,8 @@ export async function exportAndCombineClips(
               // Clean up intermediate adjust path if different
               if (adjustAppliedPath !== filterAppliedPath) {
                 try {
-                  await deleteFileNew(adjustAppliedPath);
+                  const adjustFile = new File(adjustAppliedPath);
+                  if (adjustFile.exists) adjustFile.delete();
                 } catch (e) {}
               }
             } else {
@@ -227,9 +195,11 @@ export async function exportAndCombineClips(
 
       // If no filters or adjustments applied, copy from trimmed
       if (overlayEffectsAppliedPath === trimmedPath && !filterAppliedPath) {
-        await copyFileNew(trimmedPath, processedPath);
+        const sourceVideo = new File(trimmedPath);
+        sourceVideo.copy(processedPath);
       } else if (overlayEffectsAppliedPath !== processedPath) {
-        await copyFileNew(overlayEffectsAppliedPath, processedPath);
+        const sourceVideo = new File(overlayEffectsAppliedPath);
+        sourceVideo.copy(processedPath);
       }
 
       if (clip.speed && clip.speed !== 1) {
@@ -241,7 +211,8 @@ export async function exportAndCombineClips(
           const returnCode = await session.getReturnCode();
 
           if (ReturnCode.isSuccess(returnCode)) {
-            await deleteFileNew(processedPath);
+            const tempVideo = new File(processedPath);
+            if (tempVideo.exists) tempVideo.delete();
             processedClips.push(spedUpPath);
           } else {
             processedClips.push(processedPath);
@@ -288,12 +259,8 @@ export async function exportAndCombineClips(
     .map((path) => `file '${path.replace(/'/g, "'\\''")}'`)
     .join("\n");
 
-  try {
-    await FileSystemLegacy.writeAsStringAsync(concatListPath, concatList);
-  } catch (error) {
-    console.error("Write failed:", error);
-    throw error;
-  }
+  const concatFile = new File(concatListPath);
+  concatFile.writeAsString(concatList);
 
   const concatOutputPath = `${baseUri}concat_final_${Date.now()}.mp4`;
   const concatCommand = `-f concat -safe 0 -i "${concatListPath}" -c copy -y "${concatOutputPath}"`;
@@ -305,7 +272,7 @@ export async function exportAndCombineClips(
     const returnCode = await session.getReturnCode();
 
     try {
-      await deleteFileNew(concatListPath);
+      if (concatFile.exists) concatFile.delete();
     } catch (error) {
       console.warn("Cleanup error:", error);
     }
@@ -330,7 +297,8 @@ export async function exportAndCombineClips(
       
       // Purani concat video delete maro space bachane ke liye
       try {
-        await deleteFileNew(concatOutputPath);
+        const tempVideo = new File(concatOutputPath);
+        if (tempVideo.exists) tempVideo.delete();
       } catch (e) {}
     } catch (error) {
       console.warn("Overlay application failed, using video without overlays:", error);
@@ -356,7 +324,8 @@ export async function exportSingleClip(
       return await applyPresetToVideo(clip.uri, outputPath, clip.filterPreset);
     } else {
       onProgress?.(0.5, "Copying video...");
-      await copyFileNew(clip.uri, outputPath);
+      const sourceVideo = new File(clip.uri);
+      sourceVideo.copy(outputPath);
       return outputPath;
     }
   } else {
@@ -365,7 +334,8 @@ export async function exportSingleClip(
       return await applyPresetToImage(clip.uri, outputPath, clip.filterPreset);
     } else {
       onProgress?.(0.5, "Copying image...");
-      await copyFileNew(clip.uri, outputPath);
+      const sourceImage = new File(clip.uri);
+      sourceImage.copy(outputPath);
       return outputPath;
     }
   }

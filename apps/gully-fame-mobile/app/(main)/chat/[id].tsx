@@ -772,7 +772,7 @@ export default function ChatDetailScreen() {
           {}
           {selectedMessage && !isMultiSelectMode && (
             <TouchableOpacity
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               activeOpacity={1}
               onPress={hideActionBar}
             />

@@ -82,7 +82,15 @@
       "expo-status-bar",
       "expo-video",
       "expo-web-browser",
-      "./plugins/withFFMPEGResolution"
+      "./plugins/withFFMPEGResolution",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "gully-fame-india",
+          "organization": "gully-fame-india"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false,

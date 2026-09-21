@@ -86,11 +86,11 @@ const TextOverlayWithDone: React.FC<TextOverlayWithDoneProps> = ({
               fontWeight: overlay.fontWeight,
               color: overlay.color,
               textAlign: overlay.textAlign,
-              ...(overlay.strokeColor && (overlay.strokeWidth ?? 0) > 0
+              ...(overlay.strokeColor && overlay.strokeWidth > 0
                 ? {
                     textShadowColor: overlay.strokeColor,
                     textShadowOffset: { width: 0, height: 0 },
-                    textShadowRadius: overlay.strokeWidth ?? 0,
+                    textShadowRadius: overlay.strokeWidth,
                   }
                 : {}),
             },

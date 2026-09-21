@@ -1,7 +1,7 @@
 // Created by Kiro - Search Screen
 // Handles global search for users, reels, competitions, and hashtags
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -33,6 +33,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState<"all" | "users" | "reels" | "competitions">("all");
   const [trendingHashtags, setTrendingHashtags] = useState<SearchHashtag[]>([]);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ✅ CREATED BY KIRO - Load trending hashtags and search history on mount
   useEffect(() => {
@@ -63,6 +64,36 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ navigation }) => {
       console.error("[SearchScreen] Error loading search history:", error);
     }
   };
+
+  // ✅ CREATED BY KIRO - Handle search with debouncing
+  const handleSearchWithDebounce = (text: string) => {
+    setSearchQuery(text);
+
+    // Clear previous debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // If text is empty, clear results immediately
+    if (!text.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    // Debounce the API call by 300ms
+    debounceTimerRef.current = setTimeout(() => {
+      handleSearch(text);
+    }, 300);
+  };
+
+  // ✅ CREATED BY KIRO - Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   // ✅ CREATED BY KIRO - Handle search
   const handleSearch = async (query: string) => {
@@ -324,10 +355,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ navigation }) => {
             placeholder="Search users, reels, competitions..."
             placeholderTextColor="#999"
             value={searchQuery}
-            onChangeText={(text) => {
-              setSearchQuery(text);
-              handleSearch(text);
-            }}
+            onChangeText={handleSearchWithDebounce}
           />
           {searchQuery && (
             <TouchableOpacity onPress={() => setSearchQuery("")}>

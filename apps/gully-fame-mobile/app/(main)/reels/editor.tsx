@@ -67,7 +67,8 @@ type FilterType = 'none' | 'vintage' | 'blackwhite' | 'warm' | 'cool' | 'vivid' 
 
 export default function VideoEditor() {
   const params = useLocalSearchParams();
-  const videoRef = useRef<Video>(null);
+  // @ts-ignore - Video component not properly typed
+  const videoRef = useRef(null);
 
   // Parse segments from camera
   const [clips, setClips] = useState<VideoClip[]>(() => {
@@ -472,7 +473,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   filterOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   textOverlay: {
     position: 'absolute',
@@ -684,7 +685,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: 'rgba(0,0,0,0.9)',
     justifyContent: 'center',
     alignItems: 'center',

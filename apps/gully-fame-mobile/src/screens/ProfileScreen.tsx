@@ -1,6 +1,6 @@
 // creta by kiro
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,9 +12,14 @@ import {
   StyleSheet,
   SafeAreaView,
   RefreshControl,
+  useFocusEffect,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { authService } from '../api/services/authService';
+import { userService } from '../api/services/userService';
+import { useFollowStats } from '../hooks/useFollowStats';
+import { useUserReels } from '../hooks/useUserReels';
+import InstagramStyleVideoGrid from '../components/profile/InstagramStyleVideoGrid';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 interface UserProfile {
@@ -30,25 +35,55 @@ interface UserProfile {
   bio?: string;
 }
 
-export default function ProfileScreen({ navigation }: any) {
+export default function ProfileScreen({ navigation, route }: any) {
   const { logout } = useAuth();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Get user ID from route or use own profile
+  const isPublicProfile = !!route?.params?.userId;
+  const userId = route?.params?.userId || 'me';
+  
+  // Fetch reels for current user
+  const { reels, loading: reelsLoading, refetch: refetchReels } = useUserReels(userId);
+  
+  // Fetch follow stats for current user
+  const { stats: followStats, loading: statsLoading, refetch: refetchStats } = useFollowStats(userId);
 
   useEffect(() => {
     fetchUserProfile();
-  }, []);
+  }, [userId]);
+
+  // Refetch profile when screen regains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchUserProfile();
+      refetchReels();
+      refetchStats();
+    }, [userId, refetchReels, refetchStats])
+  );
 
   const fetchUserProfile = async () => {
     try {
       setLoading(true);
-      const result = await authService.getUserProfile();
-
-      if (result.success && result.data) {
-        setProfile(result.data as UserProfile);
+      
+      // For own profile, use authService
+      if (!isPublicProfile) {
+        const result = await authService.getUserProfile();
+        if (result.success && result.data) {
+          setProfile(result.data as UserProfile);
+        } else {
+          Alert.alert('Error', result.error || 'Failed to load profile');
+        }
       } else {
-        Alert.alert('Error', result.error || 'Failed to load profile');
+        // For public profile, use userService
+        const result = await userService.getPublicUserProfile(userId);
+        if (result.success && result.data) {
+          setProfile(result.data as UserProfile);
+        } else {
+          Alert.alert('Error', result.error || 'Failed to load user profile');
+        }
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -60,11 +95,14 @@ export default function ProfileScreen({ navigation }: any) {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchUserProfile();
+    await Promise.all([fetchUserProfile(), refetchReels(), refetchStats()]);
     setRefreshing(false);
   };
 
   const handleLogout = () => {
+    // Only show logout on own profile
+    if (isPublicProfile) return;
+    
     Alert.alert('Logout', 'Are you sure you want to logout?', [
       {
         text: 'Cancel',
@@ -87,7 +125,8 @@ export default function ProfileScreen({ navigation }: any) {
   };
 
   const handleEditProfile = () => {
-    if (profile) {
+    // Only allow edit on own profile
+    if (!isPublicProfile && profile) {
       navigation.navigate('EditProfile', { profile });
     }
   };
@@ -149,6 +188,41 @@ export default function ProfileScreen({ navigation }: any) {
             {profile.role === 'participants' ? 'Participant' : 'Fan'}
           </Text>
         </View>
+
+        {/* Profile Stats Header */}
+        {statsLoading ? (
+          <View style={styles.statsSection}>
+            <ActivityIndicator size="small" color="#007AFF" />
+          </View>
+        ) : (
+          <View style={styles.statsSection}>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{reels.length}</Text>
+              <Text style={styles.statLabel}>Reels</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{followStats.followers}</Text>
+              <Text style={styles.statLabel}>Followers</Text>
+            </View>
+            <View style={styles.statBox}>
+              <Text style={styles.statValue}>{followStats.following}</Text>
+              <Text style={styles.statLabel}>Following</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Reels Grid Section */}
+        {reels.length > 0 && (
+          <View style={styles.reelsSection}>
+            <Text style={styles.reelsSectionTitle}>Videos</Text>
+            <InstagramStyleVideoGrid 
+              reels={reels} 
+              loading={reelsLoading}
+              userId={userId}
+              onRefresh={refetchReels}
+            />
+          </View>
+        )}
 
         {/* Profile Info Cards */}
         <View style={styles.infoSection}>
@@ -221,29 +295,35 @@ export default function ProfileScreen({ navigation }: any) {
 
         {/* Action Buttons */}
         <View style={styles.actionSection}>
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={handleEditProfile}
-          >
-            <Ionicons name="pencil" size={20} color="#fff" />
-            <Text style={styles.editButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
+          {!isPublicProfile && (
+            <>
+              <TouchableOpacity
+                style={styles.editButton}
+                onPress={handleEditProfile}
+              >
+                <Ionicons name="pencil" size={20} color="#fff" />
+                <Text style={styles.editButtonText}>Edit Profile</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.settingsButton}
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Ionicons name="settings" size={20} color="#007AFF" />
-            <Text style={styles.settingsButtonText}>Settings</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.settingsButton}
+                onPress={() => navigation.navigate('Settings')}
+              >
+                <Ionicons name="settings" size={20} color="#007AFF" />
+                <Text style={styles.settingsButtonText}>Settings</Text>
+              </TouchableOpacity>
+            </>
+          )}
 
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={handleLogout}
-          >
-            <Ionicons name="log-out" size={20} color="#fff" />
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
+          {!isPublicProfile && (
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+            >
+              <Ionicons name="log-out" size={20} color="#fff" />
+              <Text style={styles.logoutButtonText}>Logout</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Footer Spacing */}
@@ -327,6 +407,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     fontWeight: '500',
+  },
+  statsSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: '#fff',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  statBox: {
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  statLabel: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  reelsSection: {
+    marginVertical: 16,
+  },
+  reelsSectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#000',
+    paddingHorizontal: 16,
+    marginBottom: 12,
   },
   infoSection: {
     paddingHorizontal: 16,

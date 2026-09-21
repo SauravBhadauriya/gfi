@@ -23,7 +23,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path, Circle, Rect, G } from "react-native-svg";
 
 let VideoEditorModule: any = null;
-import { MusicLibraryModal } from "@/components/MusicLibraryModal";
+import MusicLibraryModal from "@/components/MusicLibraryModal";
 import { listAudio } from "@api/services/musicLibraryService";
 import { listFilters, FilterPreset } from "@api/services/filterLibraryService";
 import {
@@ -39,31 +39,7 @@ import {
 
 const { width } = Dimensions.get("window");
 
-
-  useEffect(() => {
-    const requestPermissions = async () => {
-      console.log("[CAMERA] Mounted - requesting permissions");
-      try {
-        if (!cameraPermission?.granted) {
-          console.log("[CAMERA] Requesting camera permission");
-          if (requestCameraPermission) {
-            await requestCameraPermission();
-          }
-        }
-        if (!microphonePermission?.granted) {
-          console.log("[CAMERA] Requesting microphone permission");
-          if (requestMicrophonePermission) {
-            await requestMicrophonePermission();
-          }
-        }
-      } catch (error) {
-        console.error("[CAMERA] Permission error:", error);
-      }
-    };
-    requestPermissions();
-  }, [requestCameraPermission, requestMicrophonePermission]);
-
-type RecordingMode = "video";
+type RecordingMode = "video" | "photo";
 type CameraFacing = "front" | "back";
 type FlashMode = "off" | "on" | "auto";
 type SpeedOption = 0.5 | 1 | 1.5 | 2;
@@ -211,7 +187,7 @@ export default function TikTokCameraScreen() {
   const musicButtonRef = useRef<View>(null);
   const filterButtonRef = useRef<View>(null);
   const cameraViewRef = useRef<View>(null);
-  const filterLabelTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const filterLabelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   
   const handleCameraReady = () => {
@@ -840,7 +816,7 @@ export default function TikTokCameraScreen() {
       <StatusBar barStyle="light-content" />
 
       <CameraView
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         facing={facing}
         flash={flashEnabled}
         ref={cameraRef}
@@ -1408,7 +1384,7 @@ export default function TikTokCameraScreen() {
       <MusicLibraryModal
         visible={showMusicPickerModal}
         onCancel={() => setShowMusicPickerModal(false)}
-        onSelect={(music) => {
+        onSelect={(music: any) => {
           setSelectedMusicTrack(music);
           console.log("[MUSIC] Selected from picker:", music.title);
         }}
@@ -1648,7 +1624,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 100,
     pointerEvents: 'box-none',
   },
@@ -2001,7 +1977,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   popupOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1000,
   },
   hdPopup: {
@@ -2123,7 +2099,7 @@ const styles = StyleSheet.create({
     color: "#EC9A15",
   },
   fullOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.85)",
     justifyContent: "flex-end",
     zIndex: 1001,
