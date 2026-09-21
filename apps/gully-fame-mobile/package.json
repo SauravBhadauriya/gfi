@@ -74,7 +74,7 @@
     "react-hook-form": "^7.65.0",
     "react-native": "0.86.3",
     "react-native-color-matrix-image-filters": "^8.0.2",
-    "react-native-gesture-handler": "~2.32.0",
+    "react-native-gesture-handler": "~3.3.0",
     "react-native-nitro-image": "0.14.0",
     "react-native-nitro-modules": "0.35.6",
     "react-native-razorpay": "^2.3.1",
