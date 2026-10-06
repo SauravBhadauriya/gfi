@@ -11,6 +11,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
+import { getCategories as fetchCategories } from "./categoryService";
 
 // ─────────────────────────────────────────────
 // Types
@@ -372,6 +373,20 @@ export function filterTracksBySearch(
   );
 }
 
+async function getAudioList(
+  sort?: AudioSortOption,
+  category?: string,
+  search?: string
+): Promise<ApiResponse<MusicTrack[]>> {
+  const response = await listAudio(sort ?? "trending", 1, 50, search ?? category);
+  return { ...response, data: response.data?.tracks };
+}
+
+async function getCategories(): Promise<ApiResponse<import("./categoryService").Category[]>> {
+  const response = await fetchCategories({ page: 1, limit: 50 });
+  return { ...response, data: response.data?.items };
+}
+
 // ─────────────────────────────────────────────
 // Default export – namespaced service object
 // ─────────────────────────────────────────────
@@ -379,6 +394,8 @@ export function filterTracksBySearch(
 export const musicLibraryService = {
   /** Fetch public audio library (trending / newest / popular) */
   listAudio,
+  getAudioList,
+  getCategories,
   /** Toggle save / unsave an audio track for the logged-in user */
   toggleSaveAudio,
   /** Get all audio tracks saved by the logged-in user */

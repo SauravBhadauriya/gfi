@@ -377,3 +377,13 @@ export async function getWalletBalance(): Promise<
     };
   }
 }
+
+export const paymentIntegrationService = {
+  getCoinPackages,
+  initiatePayment,
+  processRazorpayPayment,
+  verifyPayment,
+  sendSupportPayment,
+  getPaymentHistory,
+  getWalletBalance,
+};

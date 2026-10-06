@@ -38,7 +38,10 @@ import ProfileBurgerMenuModal from "@/components/modals/ProfileBurgerMenuModal/P
 import Svg, { Path } from "react-native-svg";
 import { useFollowStats } from "@/hooks/useFollowStats";
 import { useUserReels } from "@/hooks/useUserReels";
+
+// 🛠️ FIX: Default import without curly braces
 import InstagramStyleVideoGrid from "@/components/profile/InstagramStyleVideoGrid";
+
 import { BASE_URL } from "@/api/axios";
 
 const { width } = Dimensions.get("window");
@@ -76,7 +79,10 @@ const formatHandle = (input: string) => {
 export default function OwnParticipantProfile() {
     const { profileData, setProfileData, isLoading, reloadProfile } = useOwnProfile();
     const [activeTab, setActiveTab] = useState("MyFame");
-    const [selectedTab, setSelectedTab] = useState("Photos");
+    
+    // 🛠️ FIX: Default to "Videos" so uploaded reels are visible immediately
+    const [selectedTab, setSelectedTab] = useState("Videos");
+    
     const pulseAnim = useRef(new Animated.Value(1)).current;
     const [menuVisible, setMenuVisible] = useState(false);
     const [editBioVisible, setEditBioVisible] = useState(false);
@@ -400,12 +406,18 @@ export default function OwnParticipantProfile() {
                     </View>
 
                     <View style={{ flex: 1, height: "auto", minHeight: 400 }}>
-                        <InstagramStyleVideoGrid
-                            reels={userReels}
-                            loading={reelsLoading}
-                            userId={profileData.id || profileData._id}
-                            onRefresh={reloadProfile}
-                        />
+                        {selectedTab === "Videos" ? (
+                            <InstagramStyleVideoGrid
+                                reels={userReels}
+                                loading={reelsLoading}
+                                userId={profileData.id || profileData._id}
+                                onRefresh={reloadProfile}
+                            />
+                        ) : (
+                            <View style={{ padding: 20, alignItems: "center" }}>
+                                <Text style={{ color: "#999" }}>No photos uploaded yet.</Text>
+                            </View>
+                        )}
                     </View>
                 </LinearGradient>
             </ScrollView>

@@ -2,7 +2,7 @@
 // Competition Context - Manage competitions state globally
 
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { competitionService } from '../api/services/competitionService';
+import { competitionService, type Competition as ApiCompetition } from '../api/services/competitionService';
 
 export interface Competition {
   id: string;
@@ -16,6 +16,21 @@ export interface Competition {
   endDate?: string;
   rules?: string;
 }
+
+const mapCompetition = (competition: ApiCompetition): Competition => ({
+  id: competition._id,
+  title: competition.title,
+  description: competition.description,
+  participants: competition.participants?.length ?? 0,
+  prize: String(competition.prizePool ?? 0),
+  status: competition.status === 'live' || competition.status === 'APPROVED'
+    ? 'active'
+    : competition.status === 'CREATED'
+      ? 'upcoming'
+      : 'ended',
+  startDate: competition.startDate,
+  endDate: competition.endDate,
+});
 
 interface CompetitionContextType {
   // State
@@ -62,7 +77,7 @@ export const CompetitionProvider = ({ children }: { children: React.ReactNode })
       const result = await competitionService.getCompetitions();
 
       if (result.success && result.data) {
-        setCompetitions(result.data);
+        setCompetitions(result.data.items.map(mapCompetition));
         filterCompetitions();
       } else {
         setError(result.error || 'Failed to fetch competitions');
@@ -92,10 +107,11 @@ export const CompetitionProvider = ({ children }: { children: React.ReactNode })
         // If not found, fetch from API
         const result = await competitionService.getCompetitions();
         if (result.success && result.data) {
-          const competition = result.data.find((c) => c.id === id);
+          const competition = result.data.items.find((c) => c._id === id);
           if (competition) {
-            setSelectedCompetition(competition);
-            return competition;
+            const mappedCompetition = mapCompetition(competition);
+            setSelectedCompetition(mappedCompetition);
+            return mappedCompetition;
           }
         }
 

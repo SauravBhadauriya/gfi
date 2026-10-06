@@ -12,8 +12,8 @@ import {
   StyleSheet,
   SafeAreaView,
   RefreshControl,
-  useFocusEffect,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { authService } from '../api/services/authService';
 import { userService } from '../api/services/userService';

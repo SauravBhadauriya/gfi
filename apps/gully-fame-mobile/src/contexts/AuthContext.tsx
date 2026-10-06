@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import * as SecureStore from "expo-secure-store";
-import { setAuthToken, removeAuthToken } from "../api/axios";
+import { getAuthToken, setAuthToken, removeAuthToken } from "../api/axios";
 
 type AuthContextType = {
   token: string | null;
@@ -19,8 +19,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // App launch: read token from SecureStore
     const initializeAuth = async () => {
       try {
-        const storedToken = await SecureStore.getItemAsync("authToken");
-        setToken(storedToken || null);
+        setToken(await getAuthToken());
       } catch (error) {
         console.error("[AuthContext] Failed to read token from SecureStore:", error);
         setToken(null);
@@ -48,7 +47,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       await removeAuthToken();
       await SecureStore.deleteItemAsync("refreshToken");
-      await setAuthToken(""); // Also clear axios header
       setToken(null); // AuthGate trigger → /auth/signin redirect
     } catch (error) {
       console.error("[AuthContext] Failed to clear auth data:", error);

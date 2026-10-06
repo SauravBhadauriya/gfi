@@ -45,7 +45,7 @@ export const useFetch = <T,>(
   } = options;
 
   const [retryCount, setRetryCount] = useState(0);
-  const retryTimeoutRef = useRef<NodeJS.Timeout>();
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Check cache
   const getCachedData = useCallback((): T | null => {

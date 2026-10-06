@@ -474,7 +474,7 @@ export const TipPopup = ({
         // Call real backend to send support/tip
         const response = await sendSupportPayment({
           recipientId: creatorId, // Use actual creator ID from reel data
-          reelId: reelId,
+          reelId: String(reelId),
           amount: selectedAmount,
           coins: selectedAmount,
           message: '',
@@ -531,7 +531,7 @@ export const TipPopup = ({
       // Call real backend to send support/tip payment
       const response = await sendSupportPayment({
         recipientId: creatorId, // Use actual creator ID from reel data
-        reelId: reelId,
+        reelId: String(reelId),
         amount: selectedAmount,
         coins: 0, // Fan users pay in INR, not coins
         message: '',

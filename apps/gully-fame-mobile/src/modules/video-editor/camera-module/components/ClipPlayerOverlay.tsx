@@ -23,6 +23,11 @@ interface ClipPlayerOverlayProps {
  */
 const ClipPlayerOverlay: React.FC<ClipPlayerOverlayProps> = ({ clip, onClose }) => {
   const isVideo = clip.type === 'video';
+  const player = useVideoPlayer({ uri: clip.uri }, (instance) => {
+    instance.loop = false;
+    instance.playbackRate = clip.speed ?? 1;
+    instance.play();
+  });
 
   return (
     <SafeAreaView style={styles.overlayContainer}>
@@ -35,14 +40,11 @@ const ClipPlayerOverlay: React.FC<ClipPlayerOverlayProps> = ({ clip, onClose }) 
 
       <View style={styles.content}>
         {isVideo ? (
-          <Video
+          <VideoView
+            player={player}
             style={styles.media}
-            source={{ uri: clip.uri }}
-            useNativeControls
-            resizeMode="contain"
-            shouldPlay
-            isLooping={false}
-            rate={clip.speed ?? 1.0}
+            contentFit="contain"
+            nativeControls
           />
         ) : (
           <Image
@@ -58,7 +60,7 @@ const ClipPlayerOverlay: React.FC<ClipPlayerOverlayProps> = ({ clip, onClose }) 
 
 const styles = StyleSheet.create({
   overlayContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
     justifyContent: 'flex-start',
   },
@@ -100,5 +102,3 @@ const styles = StyleSheet.create({
 });
 
 export default ClipPlayerOverlay;
-
-

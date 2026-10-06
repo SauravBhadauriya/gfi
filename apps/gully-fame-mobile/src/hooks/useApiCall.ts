@@ -190,11 +190,13 @@ export function useFormSubmit<T = any>(
   apiFunction: (formData: any) => Promise<T>,
   options: UseFormSubmitOptions = {}
 ) {
-  const debounceTimerRef = useRef<NodeJS.Timeout>();
-  const { data, loading, error, execute, retry, reset } = useApiCall(apiFunction, options);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const formDataRef = useRef<any>(null);
+  const { data, loading, error, execute, retry, reset } = useApiCall(() => apiFunction(formDataRef.current), options);
 
   const submit = useCallback(
     (formData: any) => {
+      formDataRef.current = formData;
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }

@@ -88,7 +88,7 @@ export interface Reel {
  * API response wrapper for reels list
  */
 export interface ReelsResponse {
-  reels: BackendReel[];
+  reels: Reel[];
   nextCursor?: string;
   hasMore: boolean;
   page?: number;
@@ -156,7 +156,8 @@ const REELS_ENDPOINT = "reels";
  */
 export async function getReels(
   limit: number = 10,
-  cursor?: string
+  cursor?: string,
+  userId?: string
 ): Promise<ApiResponse<ReelsResponse>> {
   try {
     if (__DEV__) {
@@ -166,6 +167,9 @@ export async function getReels(
     const params: any = { limit };
     if (cursor) {
       params.cursor = cursor;
+    }
+    if (userId) {
+      params.userId = userId;
     }
 
     const response = await apiClient.get<any>(REELS_ENDPOINT, { params });

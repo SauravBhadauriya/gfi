@@ -90,7 +90,7 @@ export async function testUrlConnectivity(url: string): Promise<{
   try {
     const response = await fetch(url, {
       method: 'HEAD',
-      timeout: 10000, // 10 second timeout
+      signal: AbortSignal.timeout(30000),
     });
 
     const duration = Date.now() - startTime;

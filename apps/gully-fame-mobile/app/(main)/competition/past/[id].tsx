@@ -82,7 +82,7 @@ export default function PastCompetitionScreen() {
                 ]);
 
                 let compData = compRes.success ? compRes.data : null;
-                let leadData = [];
+                let leadData: Array<Record<string, unknown>> = [];
 
                 if (leadRes.success && leadRes.data?.leaderboard) {
                     leadData = leadRes.data.leaderboard.map((entry: any) => ({
@@ -330,7 +330,7 @@ export default function PastCompetitionScreen() {
                                 >
                                     <SafeImage
                                         defaultImage={require("@assets/images/trending1.png")}
-                                        imageUrl={comp.image ? `${BASE_URL}${comp.image}` : null}
+                                        imageUrl={comp.image ? `${BASE_URL}${comp.image}` : undefined}
                                         style={styles.compCardImageNew}
                                         resizeMode="cover"
                                     />

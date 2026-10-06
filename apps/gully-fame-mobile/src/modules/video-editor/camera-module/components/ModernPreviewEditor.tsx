@@ -1,4 +1,4 @@
-import { Video } from "expo-video";
+import type { LegacyVideoHandle } from "../../../../components/LegacyVideo";
 import React, { useCallback, useRef, useState } from "react";
 import {
   Dimensions,
@@ -92,7 +92,7 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
     setSelectedFilter(clip.filterPreset || null);
   }, [clip.filterPreset]);
 
-  const videoRef = useRef<Video>(null);
+  const videoRef = useRef<LegacyVideoHandle>(null);
   const scrollViewRef = useRef<Animated.ScrollView>(null);
   const isDragging = useRef(false);
   const wasPlaying = useRef(false);
@@ -882,7 +882,7 @@ const ModernPreviewEditor: React.FC<ModernPreviewEditorProps> = ({
                 onClipUpdate?.(updatedClip);
               }}
               onPaste={(content) => {
-                const textOverlay = {
+                const textOverlay: TextOverlay = {
                   id: `text-${Date.now()}`,
                   text: content,
                   x: 0.5,
@@ -924,7 +924,7 @@ const styles = StyleSheet.create({
   },
   /* 🎥 MAXIMUM IMMERSIVE PREVIEW VIEW STYLES BOUNDS */
   fullScreenPreviewContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 1,
     backgroundColor: "#000000",
     justifyContent: "center",
@@ -936,7 +936,7 @@ const styles = StyleSheet.create({
   },
   /* 🎛️ FLOATING LAYER PACKETS */
   floatingControlsContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 10,
     justifyContent: "space-between",
   },
@@ -997,7 +997,7 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   playOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0, 0, 0, 0.15)",

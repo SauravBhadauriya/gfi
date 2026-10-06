@@ -68,6 +68,8 @@ export interface Competition {
 export interface CompetitionsResponse {
   items: Competition[];
   total?: number;
+  page?: number;
+  limit?: number;
 }
 
 // ==================== API Functions ====================
@@ -365,4 +367,3 @@ export const competitionService = {
   joinCompetition,
   leaveCompetition,
 };
-

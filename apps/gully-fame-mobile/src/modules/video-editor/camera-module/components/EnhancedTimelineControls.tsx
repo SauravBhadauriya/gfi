@@ -6,15 +6,17 @@ import {
   StyleSheet,
   ScrollView,
   Dimensions,
+  Platform,
+  Alert,
 } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import Slider from '@react-native-community/slider';
+import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import ScriptEditorModal from './ScriptEditorModal';
 import VoiceEffectsModal from './VoiceEffectsModal';
 import TextToSpeechModal from './TextToSpeechModal';
 import TimelineAudioPanel from './TimelineAudioPanel';
+import type { TextToSpeechConfig } from '../types/audioEffects.types';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface TimelineControlsProps {
   currentTime: number;
@@ -22,6 +24,18 @@ interface TimelineControlsProps {
   onTimeChange: (time: number) => void;
   onPlayPause: () => void;
   isPlaying: boolean;
+  onSplit?: () => void;
+  onDelete?: () => void;
+  onDuplicate?: () => void;
+  onCrop?: () => void;
+  onSlip?: () => void;
+  onVolume?: () => void;
+  onFade?: () => void;
+  onCopy?: () => void;
+  onVoiceEnhance?: () => void;
+  onAudioFX?: () => void;
+  onFilterPress?: () => void;
+  onTextPress?: () => void;
 }
 
 interface AudioTrack {
@@ -41,6 +55,18 @@ const EnhancedTimelineControls: React.FC<TimelineControlsProps> = ({
   onTimeChange,
   onPlayPause,
   isPlaying,
+  onSplit,
+  onDelete,
+  onDuplicate,
+  onCrop,
+  onSlip,
+  onVolume,
+  onFade,
+  onCopy,
+  onVoiceEnhance,
+  onAudioFX,
+  onFilterPress,
+  onTextPress,
 }) => {
   const [showScriptEditor, setShowScriptEditor] = useState(false);
   const [showVoiceEffects, setShowVoiceEffects] = useState(false);
@@ -48,144 +74,79 @@ const EnhancedTimelineControls: React.FC<TimelineControlsProps> = ({
   const [showAudioPanel, setShowAudioPanel] = useState(false);
   const [audioTracks, setAudioTracks] = useState<AudioTrack[]>([]);
 
-  const formatTime = useCallback((seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 100);
-    return `${mins}:${secs.toString().padStart(2, '0')}:${ms.toString().padStart(2, '0')}`;
-  }, []);
-
-  const handleAddAudio = useCallback((text: string, voice: string, pitch: number, rate: number) => {
+  const handleAddAudio = useCallback((config: TextToSpeechConfig) => {
+    const { text, voice, rate } = config;
     const newTrack: AudioTrack = {
       id: `audio_${Date.now()}`,
       name: `TTS - ${voice}`,
       type: 'tts',
-      duration: Math.ceil(text.length / 5) * (2 - rate), // Estimate based on text and rate
+      duration: Math.ceil(text.length / 5) * (2 - rate),
       volume: 80,
       isMuted: false,
       canCrop: true,
       canFade: true,
     };
-    setAudioTracks([...audioTracks, newTrack]);
-  }, [audioTracks]);
+    setAudioTracks(prev => [...prev, newTrack]);
+  }, []);
 
   const handleUpdateTracks = useCallback((tracks: AudioTrack[]) => {
     setAudioTracks(tracks);
   }, []);
 
+  const tools = [
+    { id: 'split', label: 'Split', icon: 'content-cut', type: 'material', action: onSplit || onCrop },
+    { id: 'volume', label: 'Volume', icon: 'volume-medium-outline', type: 'ion', action: onVolume },
+    { id: 'audioFx', label: 'Audio FX', icon: 'options-outline', type: 'ion', action: onAudioFX || (() => setShowAudioPanel(true)) },
+    { id: 'voiceEnhance', label: 'Voice enhance', icon: 'microphone-outline', type: 'material', action: onVoiceEnhance || (() => setShowVoiceEffects(true)) },
+    { id: 'delete', label: 'Delete', icon: 'trash-can-outline', type: 'material', action: onDelete, danger: true },
+    { id: 'fade', label: 'Fade audio', icon: 'chart-bell-curve-cumulative', type: 'material', action: onFade },
+    { id: 'copy', label: 'Copy', icon: 'content-copy', type: 'material', action: onCopy },
+    { id: 'duplicate', label: 'Duplicate', icon: 'content-duplicate', type: 'material', action: onDuplicate },
+    { id: 'slip', label: 'Slip', icon: 'arrow-all', type: 'material', action: onSlip },
+    { id: 'text', label: 'Text', icon: 'format-text', type: 'material', action: onTextPress },
+    { id: 'tts', label: 'TTS', icon: 'text-to-speech', type: 'material', action: () => setShowTextToSpeech(true) },
+    { id: 'script', label: 'Script', icon: 'pencil-outline', type: 'material', action: () => setShowScriptEditor(true) },
+    { id: 'filter', label: 'Filter', icon: 'color-filter-outline', type: 'ion', action: onFilterPress },
+  ];
+
   return (
     <View style={styles.container}>
-      {/* Timeline Slider */}
-      <View style={styles.timelineSection}>
-        <View style={styles.timeDisplay}>
-          <Text style={styles.timeLabel}>{formatTime(currentTime)}</Text>
-          <Text style={styles.timeSeparator}>/</Text>
-          <Text style={styles.timeLabel}>{formatTime(duration)}</Text>
-        </View>
-
-        <Slider
-          style={styles.timelineSlider}
-          minimumValue={0}
-          maximumValue={duration || 1}
-          value={currentTime}
-          onValueChange={onTimeChange}
-          minimumTrackTintColor="#3b82f6"
-          maximumTrackTintColor="#374151"
-        />
-
-        <View style={styles.timelineMarkers}>
-          {Array.from({ length: Math.ceil(duration / 5) }).map((_, i) => (
-            <View key={i} style={styles.marker}>
-              <Text style={styles.markerText}>{i * 5}s</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-
-      {/* Control Buttons */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.controlsScroll}
         contentContainerStyle={styles.controlsContainer}
       >
-        {/* Play/Pause */}
-        <TouchableOpacity
-          style={[styles.controlButton, styles.playButton]}
-          onPress={onPlayPause}
-        >
-          <MaterialCommunityIcons
-            name={isPlaying ? 'pause-circle' : 'play-circle'}
-            size={24}
-            color="#fff"
-          />
-          <Text style={styles.controlButtonText}>{isPlaying ? 'Pause' : 'Play'}</Text>
-        </TouchableOpacity>
-
-        {/* Script Editor */}
-        <TouchableOpacity
-          style={styles.controlButton}
-          onPress={() => setShowScriptEditor(true)}
-        >
-          <MaterialCommunityIcons name="pencil-outline" size={24} color="#fbbf24" />
-          <Text style={styles.controlButtonText}>Script</Text>
-        </TouchableOpacity>
-
-        {/* Text to Speech */}
-        <TouchableOpacity
-          style={styles.controlButton}
-          onPress={() => setShowTextToSpeech(true)}
-        >
-          <MaterialCommunityIcons name="text-to-speech" size={24} color="#f87171" />
-          <Text style={styles.controlButtonText}>TTS</Text>
-        </TouchableOpacity>
-
-        {/* Voice Effects */}
-        <TouchableOpacity
-          style={styles.controlButton}
-          onPress={() => setShowVoiceEffects(true)}
-        >
-          <MaterialCommunityIcons name="waveform" size={24} color="#a78bfa" />
-          <Text style={styles.controlButtonText}>Effects</Text>
-        </TouchableOpacity>
-
-        {/* Audio Panel */}
-        <TouchableOpacity
-          style={[styles.controlButton, audioTracks.length > 0 && styles.controlButtonActive]}
-          onPress={() => setShowAudioPanel(true)}
-        >
-          <MaterialCommunityIcons name="music" size={24} color="#60a5fa" />
-          <Text style={styles.controlButtonText}>Audio</Text>
-          {audioTracks.length > 0 && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{audioTracks.length}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-
-        {/* Duplicate Clip */}
-        <TouchableOpacity style={styles.controlButton}>
-          <MaterialCommunityIcons name="content-duplicate" size={24} color="#10b981" />
-          <Text style={styles.controlButtonText}>Duplicate</Text>
-        </TouchableOpacity>
-
-        {/* Delete Clip */}
-        <TouchableOpacity style={styles.controlButton}>
-          <MaterialCommunityIcons name="trash-can-outline" size={24} color="#ef4444" />
-          <Text style={styles.controlButtonText}>Delete</Text>
-        </TouchableOpacity>
-
-        {/* Crop */}
-        <TouchableOpacity style={styles.controlButton}>
-          <MaterialCommunityIcons name="content-cut" size={24} color="#06b6d4" />
-          <Text style={styles.controlButtonText}>Crop</Text>
-        </TouchableOpacity>
-
-        {/* Slip (Move) */}
-        <TouchableOpacity style={styles.controlButton}>
-          <MaterialCommunityIcons name="arrow-all" size={24} color="#8b5cf6" />
-          <Text style={styles.controlButtonText}>Slip</Text>
-        </TouchableOpacity>
+        {tools.map((tool) => (
+          <TouchableOpacity
+            key={tool.id}
+            style={styles.toolBtn}
+            onPress={tool.action}
+            activeOpacity={0.7}
+          >
+            {tool.type === 'material' ? (
+              <MaterialCommunityIcons
+                name={tool.icon as any}
+                size={22}
+                color={tool.danger ? '#FF3B30' : '#EC9A15'}
+              />
+            ) : (
+              <Ionicons
+                name={tool.icon as any}
+                size={22}
+                color={tool.danger ? '#FF3B30' : '#EC9A15'}
+              />
+            )}
+            <Text style={[styles.toolLabel, tool.danger && { color: '#FF3B30' }]}>
+              {tool.label}
+            </Text>
+            {tool.id === 'audioFx' && audioTracks.length > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{audioTracks.length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
       </ScrollView>
 
       {/* Modals */}
@@ -240,97 +201,52 @@ const EnhancedTimelineControls: React.FC<TimelineControlsProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#111827',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  timelineSection: {
-    marginBottom: 12,
-  },
-  timeDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  timeLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#3b82f6',
-  },
-  timeSeparator: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginHorizontal: 4,
-  },
-  timelineSlider: {
-    width: '100%',
-    height: 36,
-  },
-  timelineMarkers: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 4,
-    paddingHorizontal: 4,
-  },
-  marker: {
-    alignItems: 'center',
-  },
-  markerText: {
-    fontSize: 9,
-    color: '#6b7280',
+    backgroundColor: '#000000',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 10,
   },
   controlsScroll: {
-    maxHeight: 90,
+    maxHeight: 70,
   },
   controlsContainer: {
-    gap: 8,
-    paddingHorizontal: 4,
-  },
-  controlButton: {
+    gap: 18,
+    paddingHorizontal: 16,
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#1f2937',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#374151',
-    minWidth: 70,
   },
-  controlButtonActive: {
-    borderColor: '#60a5fa',
-    backgroundColor: 'rgba(96, 165, 250, 0.1)',
+  toolBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 54,
+    position: 'relative',
   },
-  playButton: {
-    backgroundColor: '#3b82f6',
-    borderColor: '#3b82f6',
-  },
-  controlButtonText: {
+  toolLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#d1d5db',
+    fontWeight: '500',
+    color: '#D1D5DB',
     marginTop: 4,
   },
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    backgroundColor: '#ef4444',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
+    top: -4,
+    right: -2,
+    backgroundColor: '#EC9A15',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
     justifyContent: 'center',
     alignItems: 'center',
   },
   badgeText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
-    color: '#fff',
+    color: '#000',
   },
   modalOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
     justifyContent: 'flex-end',
+    zIndex: 1000,
   },
   modal: {
     backgroundColor: '#111827',

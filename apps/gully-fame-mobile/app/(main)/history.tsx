@@ -56,7 +56,7 @@ export default function HistoryScreen() {
             title: tx.description || getTransactionTitle(tx.type),
             description: tx.notes || tx.remark || getTransactionDescription(tx),
             amount: Math.abs(tx.amount || 0),
-            type: tx.type === "debit" || tx.amount < 0 ? "debit" : "credit",
+            type: (tx.type === "debit" || tx.amount < 0 ? "debit" : "credit") as Transaction["type"],
             date: txDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
             time: txDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
             icon: getTransactionIcon(tx.type, tx.description),

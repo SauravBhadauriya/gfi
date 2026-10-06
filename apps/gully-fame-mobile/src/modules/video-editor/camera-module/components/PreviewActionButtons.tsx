@@ -36,7 +36,7 @@ interface PreviewActionButtonsProps {
   onOverlay?: () => void;
   onText?: () => void;
   onSticker?: (sticker?: string | number) => void;
-  onMusic?: () => void;
+  onMusic?: (music?: any) => void; // 🛠️ FIX: Passes music object back to parent
   onTransition?: () => void;
   onVoiceAdd?: (voice: VoiceOverlay) => void;
   onSoundFXAdd?: (sound: SoundEffect) => void;
@@ -54,10 +54,6 @@ interface PreviewActionButtonsProps {
   startTime?: number;
 }
 
-/**
- * Bottom action buttons bar for preview editor
- * Contains all editing tools: filters, text, voice, captions, effects, etc.
- */
 const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
   displayUri,
   onFilter,
@@ -84,26 +80,19 @@ const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
   const [showMusicLibrary, setShowMusicLibrary] = useState(false);
   const [selectedMusic, setSelectedMusic] = useState<Music | undefined>();
 
-  // 🛠️ BUG FIX #2: Music Library Handler - Opens in-app Music Library modal
   const handleMusicPress = () => {
     setShowMusicLibrary(true);
   };
 
-  // Handle music selection from library
+  // 🛠️ FIX: Passes music object up to TimelineEditor so state updates
   const handleMusicSelect = (music: Music) => {
     setSelectedMusic(music);
-    console.log('🎵 Music selected from library:', {
-      title: music.title,
-      artist: music.artist,
-      duration: music.duration,
-      audioUrl: music.audioUrl,
-    });
-    Alert.alert('✅ Music Added', `${music.title} by ${music.artist}`);
     setShowMusicLibrary(false);
-    if (onMusic) onMusic();
+    if (onMusic) {
+      onMusic(music);
+    }
   };
 
-  // Handle music library modal close
   const handleMusicLibraryClose = () => {
     setShowMusicLibrary(false);
   };
@@ -116,18 +105,16 @@ const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
       >
-        {/* 🛠️ FIX: Forced handler pass kiya taaki component hide na ho */}
         <MusicButton onPress={handleMusicPress} />
-        
         <TextButton onPress={onText} />
         <TextToSpeechButton onPress={() => {}} onTTSGenerate={onTTSGenerate} startTime={startTime} />
-        <VoiceButton onPress={onVoiceAdd} onVoiceAdd={onVoiceAdd} startTime={startTime} />
-        <LinksButton onPress={onLinkAdd} onLinkAdd={onLinkAdd} />
-        <CaptionsButton onPress={onCaptionAdd} onCaptionAdd={onCaptionAdd} />
-        <AdjustButton onPress={onAdjustChange} onAdjustChange={onAdjustChange} />
+        <VoiceButton onVoiceAdd={onVoiceAdd} startTime={startTime} />
+        <LinksButton onLinkAdd={onLinkAdd} />
+        <CaptionsButton onCaptionAdd={onCaptionAdd} />
+        <AdjustButton onAdjustChange={onAdjustChange} />
         <FilterButton mediaUri={displayUri || ""} onFilterApply={onFilter || (() => {})} />
         <OverlayButton onPress={onOverlay} onApplyOverlay={onOverlayEffectAdd} />
-        <SoundFXButton onPress={onSoundFXAdd} onSoundSelect={onSoundFXAdd} />
+        <SoundFXButton onSoundSelect={onSoundFXAdd} />
         <AudioEditorButton 
           onPress={() => {}} 
           onUpdateTracks={onUpdateAudioTracks}
@@ -135,13 +122,12 @@ const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
           tracks={audioTracks}
           masterVolume={masterVolume}
         />
-        <CutoutButton onPress={onCutoutAdd} onCutoutAdd={onCutoutAdd} />
+        <CutoutButton onCutoutAdd={onCutoutAdd} />
         <StickerButton onPress={onSticker} onStickerSelect={onSticker} />
-        <PasteButton onPress={onPaste} onPaste={onPaste} />
+        <PasteButton onPaste={onPaste} />
         <TransitionButton onPress={onTransition} />
       </ScrollView>
 
-      {/* 🛠️ BUG FIX #2: Music Library Modal */}
       <MusicLibraryModal
         visible={showMusicLibrary}
         onSelect={handleMusicSelect}
@@ -158,13 +144,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
     borderTopColor: "rgba(255, 255, 255, 0.08)",
     paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   contentContainer: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    paddingHorizontal: 8,
+    gap: 16,
+    paddingHorizontal: 12,
   },
 });
 

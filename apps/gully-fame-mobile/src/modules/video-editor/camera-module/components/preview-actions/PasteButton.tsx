@@ -8,8 +8,8 @@ import {
   SafeAreaView,
   ScrollView,
   Alert,
-  Clipboard,
 } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import Svg, { Path } from "react-native-svg";
 
 interface PasteButtonProps {

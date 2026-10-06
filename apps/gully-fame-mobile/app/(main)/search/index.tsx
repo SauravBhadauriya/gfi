@@ -210,12 +210,12 @@ export default function SearchScreen() {
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchUsers(searchQuery.trim());
           
-          if (result.success && result.data?.users) {
+          if (result.success && result.data) {
             setSearchResults({
               top_users: [],
               top_competitions: [],
               top_reels: [],
-              results: result.data.users,
+              results: result.data,
               hasMore: false,
             });
           } else {
@@ -231,12 +231,12 @@ export default function SearchScreen() {
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchCompetitions(searchQuery.trim());
           
-          if (result.success && result.data?.competitions) {
+          if (result.success && result.data) {
             setSearchResults({
               top_users: [],
               top_competitions: [],
               top_reels: [],
-              results: result.data.competitions,
+              results: result.data,
               hasMore: false,
             });
           } else {
@@ -252,12 +252,12 @@ export default function SearchScreen() {
           const { searchService } = await import("@/api/services/searchService");
           const result = await searchService.searchReels(searchQuery.trim());
           
-          if (result.success && result.data?.reels) {
+          if (result.success && result.data) {
             setSearchResults({
               top_users: [],
               top_competitions: [],
               top_reels: [],
-              results: result.data.reels,
+              results: result.data,
               hasMore: false,
             });
           } else {

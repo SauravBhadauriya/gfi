@@ -2,19 +2,22 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import PreviewScreen from '@modules/video-editor/camera-module/screens/PreviewScreen';
+import TimelineEditor from '@modules/video-editor/camera-module/components/timeline/TimelineEditor';
 import type { CameraClipArray } from '@modules/video-editor/camera-module/types/camera.types';
 
 /**
- * Editor Screen — wraps the real video editor (PreviewScreen)
+ * Editor Screen — orchestrates the preview and timeline editing flow
  * 
- * Receives recorded clips from upload flow, allows editing (text, filters, audio, stickers, etc),
- * then navigates to post screen with the final edited video.
+ * Receives recorded clips from upload flow. First shows a full-screen video preview (PreviewScreen).
+ * When Edit is pressed, transitions to TimelineEditor for editing (text, filters, audio, stickers, etc).
+ * Then navigates to post screen with the final edited video.
  */
 export default function EditorScreen() {
   const params = useLocalSearchParams();
   const [clips, setClips] = useState<CameraClipArray>([]);
   const [isParsing, setIsReadyParsing] = useState(true);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [showTimeline, setShowTimeline] = useState(false);
 
   // Parse incoming clips safely
   useEffect(() => {
@@ -69,6 +72,16 @@ export default function EditorScreen() {
     router.back();
   }, []);
 
+  const handleEditPress = useCallback((mergedUri: string, updatedClips: CameraClipArray) => {
+    if (__DEV__) console.log(`[FLOW] EditorScreen.handleEditPress called with mergedUri`);
+    // Update clips to use the merged video URI
+    const clipsWithMergedUri = updatedClips.map((clip, idx) =>
+      idx === 0 ? { ...clip, uri: mergedUri } : clip
+    );
+    setClips(clipsWithMergedUri);
+    setShowTimeline(true);
+  }, []);
+
   const handleEditorComplete = useCallback(() => {
     if (__DEV__) console.log(`[FLOW] EditorScreen.onExportComplete called: navigating to post with ${clips.length} clips`);
     
@@ -116,12 +129,22 @@ export default function EditorScreen() {
   }
 
   return (
-    <PreviewScreen
-      clips={clips}
-      onBack={handleEditorBack}
-      onClipUpdate={handleClipUpdate}
-      onExportComplete={handleEditorComplete}
-    />
+    showTimeline ? (
+      <TimelineEditor
+        clips={clips}
+        onClipsUpdate={handleClipUpdate}
+        onBack={handleEditorBack}
+        onNext={handleEditorComplete}
+      />
+    ) : (
+      <PreviewScreen
+        clips={clips}
+        onBack={handleEditorBack}
+        onClipUpdate={handleClipUpdate}
+        onExportComplete={handleEditorComplete}
+        onEditPress={handleEditPress}
+      />
+    )
   );
 }
 

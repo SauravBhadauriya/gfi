@@ -472,7 +472,6 @@ export const pastCompetitionStyles = StyleSheet.create({
         top: 12,
         left: 12,
         backgroundColor: "rgba(0, 0, 0, 0.6)",
-        backdropFilter: "blur(4px)", // If using Expo blur view later, nice touch
         paddingHorizontal: 12,
         paddingVertical: 6,
         borderRadius: 8,

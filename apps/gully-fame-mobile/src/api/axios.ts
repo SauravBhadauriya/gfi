@@ -21,9 +21,14 @@ if (__DEV__) {
 
 const TOKEN_STORAGE_KEY = "authToken";
 
+const isUsableToken = (token: string | null | undefined): token is string => {
+  const normalized = token?.trim();
+  return !!normalized && !["none", "null", "undefined"].includes(normalized.toLowerCase());
+};
+
 const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
-  timeout: 60000, 
+  timeout: 30000,
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -62,11 +67,19 @@ apiClient.interceptors.request.use(
 
       if (!config.skipAuth) {
         const token = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
-        if (token) {
+        if (isUsableToken(token)) {
           config.headers = config.headers || {};
-          config.headers.Authorization = `Bearer ${token}`;
-        } else if (__DEV__) {
-          console.warn("[axios] 🔐 [VERIFICATION] No token found in SecureStore - request will be sent without auth");
+          config.headers.Authorization = `Bearer ${token.trim()}`;
+        } else {
+          if (config.headers) {
+            delete config.headers.Authorization;
+          }
+          if (token) {
+            await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+          }
+          if (__DEV__) {
+            console.warn("[axios] No usable token found in SecureStore; request will be sent without auth");
+          }
         }
       }
       
@@ -203,7 +216,11 @@ apiClient.interceptors.response.use(
 
 export const setAuthToken = async (token: string): Promise<void> => {
   try {
-    await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token);
+    if (isUsableToken(token)) {
+      await SecureStore.setItemAsync(TOKEN_STORAGE_KEY, token.trim());
+    } else {
+      await SecureStore.deleteItemAsync(TOKEN_STORAGE_KEY);
+    }
   } catch (error) {
     console.error("[axios] Failed to store auth token:", error);
     throw error;
@@ -212,7 +229,8 @@ export const setAuthToken = async (token: string): Promise<void> => {
 
 export const getAuthToken = async (): Promise<string | null> => {
   try {
-    return await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+    const token = await SecureStore.getItemAsync(TOKEN_STORAGE_KEY);
+    return isUsableToken(token) ? token.trim() : null;
   } catch (error) {
     console.error("[axios] Failed to retrieve auth token:", error);
     return null;

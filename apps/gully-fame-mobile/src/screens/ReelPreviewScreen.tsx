@@ -22,11 +22,11 @@ import {
 } from 'react-native';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
-interface ReelPreviewScreenParams {
+type ReelPreviewScreenParams = {
   videoUri: string;
-  duration: number;
+  duration: string;
   audioId?: string;
   audioName?: string;
   mode: string;
@@ -34,7 +34,10 @@ interface ReelPreviewScreenParams {
 
 export default function ReelPreviewScreen() {
   const params = useLocalSearchParams<ReelPreviewScreenParams>();
-  const videoRef = useRef<any>(null);
+  const player = useVideoPlayer(params?.videoUri ? { uri: params.videoUri } : null, (instance) => {
+    instance.loop = true;
+    instance.play();
+  });
 
   const [caption, setCaption] = useState('');
   const [tags, setTags] = useState('');
@@ -164,13 +167,11 @@ export default function ReelPreviewScreen() {
           {/* Video Preview */}
           {params?.videoUri && (
             <View style={styles.videoContainer}>
-              <Video
-                ref={videoRef}
-                source={{ uri: params.videoUri }}
+              <VideoView
+                player={player}
                 style={styles.video}
-                useNativeControls
-                resizeMode="contain"
-                isLooping
+                nativeControls
+                contentFit="contain"
               />
               <Text style={styles.durationText}>
                 Duration: {params.duration}s

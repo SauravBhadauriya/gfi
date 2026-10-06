@@ -6,8 +6,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import * as FileSystem from "expo-file-system";
-import { File } from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 
 export interface KYCDocument {
   type: "aadhar" | "pan" | "driving_license" | "passport";
@@ -50,21 +49,9 @@ export async function uploadKYCDocument(
   try {
     console.log("[kycVerificationService] Uploading KYC document:", documentType);
 
-    // Get file info using new API
-    const imageFile = new File(imageUri);
-    let fileExists = true;
-    try {
-      await imageFile.getInfo();
-    } catch (error) {
-      console.warn("[kycVerificationService] File info failed, trying legacy:", error);
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(imageUri);
-        if (!fileInfo.exists) {
-          throw new Error("Document image not found");
-        }
-      } catch (legacyError) {
-        throw new Error("Document image not found");
-      }
+    const fileInfo = await FileSystem.getInfoAsync(imageUri);
+    if (!fileInfo.exists) {
+      throw new Error("Document image not found");
     }
 
     // KIRO: Create FormData for multipart upload
@@ -82,7 +69,9 @@ export async function uploadKYCDocument(
         "Content-Type": "multipart/form-data",
       },
       onUploadProgress: (progressEvent) => {
-        const percentage = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+        const percentage = progressEvent.total
+          ? Math.round((progressEvent.loaded / progressEvent.total) * 100)
+          : 0;
         onProgress?.(percentage);
       },
     });
@@ -129,12 +118,17 @@ export async function submitKYCVerification(
     console.log("[kycVerificationService] POST user/kyc");
 
     // Upload all documents first
-    const uploadedDocuments = [];
+    const uploadedDocuments: Array<{
+      type: KYCSubmitRequest['documents'][number]['type'];
+      frontDocumentId: string;
+      documentNumber: string;
+      backDocumentId?: string;
+    }> = [];
     for (const doc of request.documents) {
       // Upload front image
       const frontResult = await uploadKYCDocument(`${doc.type}_front`, doc.frontImageUri);
 
-      if (!frontResult.success) {
+      if (!frontResult.success || !frontResult.data) {
         throw new Error(`Failed to upload ${doc.type} front image`);
       }
 
@@ -148,7 +142,7 @@ export async function submitKYCVerification(
       if (doc.backImageUri) {
         const backResult = await uploadKYCDocument(`${doc.type}_back`, doc.backImageUri);
 
-        if (!backResult.success) {
+        if (!backResult.success || !backResult.data) {
           throw new Error(`Failed to upload ${doc.type} back image`);
         }
 
@@ -241,7 +235,7 @@ export async function getKYCStatus(): Promise<ApiResponse<KYCStatus>> {
       message: error.message || "Failed to get KYC status",
       error: error.message,
       data: {
-        status: "error",
+        status: "pending",
         documents: [],
       },
     };

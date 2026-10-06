@@ -6,7 +6,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { getAuthToken } from "../axios";
 
 let Device: any = null;
 let Notifications: any = null;
@@ -112,7 +112,8 @@ export async function registerDeviceForNotifications(): Promise<
       };
     }
 
-    const token = (await withTimeout(Notifications.getExpoPushTokenAsync())).data;
+    const pushTokenResult = await withTimeout<any>(Notifications.getExpoPushTokenAsync());
+    const token = pushTokenResult.data as string;
     console.log("[notificationIntegrationService] Device token obtained");
 
     // Register with backend
@@ -162,7 +163,7 @@ export async function getNotifications(
 ): Promise<ApiResponse<Notification[]>> {
   try {
     // Check if user is authenticated before making API call
-    const token = await AsyncStorage.getItem('authToken');
+    const token = await getAuthToken();
     if (!token) {
       console.warn("[notificationIntegrationService] No auth token - returning empty notifications");
       return {
@@ -175,8 +176,8 @@ export async function getNotifications(
     console.log("[notificationIntegrationService] Fetching notifications with auth token");
 
     const response = await withTimeout(
-      apiClient.get<any>("notifications", {
-        params: { limit, offset, unreadOnly },
+      apiClient.get<any>("notification/notification", {
+        params: { time: unreadOnly ? 2 : 1, page: Math.floor(offset / limit) + 1, limit },
       })
     );
     const responseData = response.data as any;
@@ -216,7 +217,10 @@ export async function markNotificationAsRead(
   try {
     console.log("[notificationIntegrationService] Marking notification as read:", notificationId);
 
-    const response = await apiClient.post<any>(`notifications/${notificationId}/read`);
+    const response = await apiClient.put<any>(`notification/${notificationId}/read`, {
+      notification_id: notificationId,
+      status: "read",
+    });
     const responseData = response.data as any;
 
     if (responseData.code === 1) {
@@ -252,7 +256,7 @@ export async function markAllNotificationsAsRead(): Promise<ApiResponse<{ count:
   try {
     console.log("[notificationIntegrationService] Marking all notifications as read");
 
-    const response = await apiClient.post<any>("notifications/read-all");
+    const response = await apiClient.put<any>("notification/read-all", {});
     const responseData = response.data as any;
 
     if (responseData.code === 1) {

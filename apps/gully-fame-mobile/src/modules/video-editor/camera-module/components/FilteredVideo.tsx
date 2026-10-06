@@ -1,14 +1,14 @@
 import { VideoView, useVideoPlayer } from "expo-video";
 import React, { useEffect } from 'react';
-import { StyleSheet, View, ViewStyle } from 'react-native';
+import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import type { FilterConfig } from '../types/filters';
 import { getFilterOverlayFromProperties } from '../utils/filterOverlays';
 
 interface FilteredVideoProps {
   source: { uri: string };
   videoRef?: React.RefObject<any>;
-  style?: ViewStyle;
-  contentFit?: 'contain' | 'cover' | 'fill' | 'none' | 'scale-down';
+  style?: StyleProp<ViewStyle>;
+  contentFit?: 'contain' | 'cover' | 'fill';
   shouldPlay?: boolean;
   isLooping?: boolean;
   rate?: number;
@@ -102,7 +102,7 @@ const FilteredVideo: React.FC<FilteredVideoProps> = ({
         style={StyleSheet.absoluteFill}
         player={player}
         contentFit={contentFit}
-        contentPosition="center"
+        contentPosition={{ dx: 0, dy: 0 }}
       />
       
       {/* Filter color overlay - simulates filter effect */}

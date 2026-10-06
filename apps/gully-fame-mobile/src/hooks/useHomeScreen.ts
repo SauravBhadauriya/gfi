@@ -45,7 +45,7 @@ async function fetchHomeScreen(): Promise<HomeScreenData> {
         const banners = data.banners?.map((b: any) => ({
             ...b,
             image: toFullUrl(b.image),
-        })) ?? heroSlides;
+        })) ?? [];
 
         // ✅ Categories — icon path fix karo
         const categories = data.categories?.map((c: any) => ({

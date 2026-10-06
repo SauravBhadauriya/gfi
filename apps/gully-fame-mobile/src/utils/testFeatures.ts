@@ -5,7 +5,7 @@
  */
 
 import musicLibraryService from "../api/services/musicLibraryService";
-import videoEditorService from "../api/services/videoEditorService";
+import { videoEditorService } from "../api/services/videoEditorService";
 import feedService from "../api/services/feedService";
 import mockDataLoader from "./mockDataLoader";
 import { ErrorHandler } from "./errorHandler";
@@ -114,7 +114,7 @@ class TestFeatures {
 
     // Test 2: Get effects
     await this.runTest("Video Editor", "Get Effects", async () => {
-      const result = await videoEditorService.getEffects();
+      const result = await videoEditorService.getVideoEffects();
       if (!result.success || !result.data || result.data.length === 0) {
         throw new Error("No effects returned");
       }
@@ -126,7 +126,7 @@ class TestFeatures {
 
     // Test 3: Get transitions
     await this.runTest("Video Editor", "Get Transitions", async () => {
-      const result = await videoEditorService.getTransitions();
+      const result = await videoEditorService.getVideoTransitions();
       if (!result.success || !result.data || result.data.length === 0) {
         throw new Error("No transitions returned");
       }
@@ -138,7 +138,7 @@ class TestFeatures {
 
     // Test 4: Get stickers
     await this.runTest("Video Editor", "Get Stickers", async () => {
-      const result = await videoEditorService.getStickers();
+      const result = await videoEditorService.getVideoStickers();
       if (!result.success || !result.data || result.data.length === 0) {
         throw new Error("No stickers returned");
       }
@@ -155,36 +155,36 @@ class TestFeatures {
     // Test 1: Get trending reels
     await this.runTest("Feed", "Get Trending Reels", async () => {
       const result = await feedService.getTrendingReels();
-      if (!result.success || !result.data || result.data.length === 0) {
+      if (!result.success || !result.data || result.data.reels.length === 0) {
         throw new Error("No trending reels returned");
       }
       return {
-        message: `✓ Retrieved ${result.data.length} trending reels`,
-        data: { reelCount: result.data.length },
+        message: `✓ Retrieved ${result.data.reels.length} trending reels`,
+        data: { reelCount: result.data.reels.length },
       };
     });
 
     // Test 2: Get for you reels
     await this.runTest("Feed", "Get For You Reels", async () => {
       const result = await feedService.getForYouReels();
-      if (!result.success || !result.data || result.data.length === 0) {
+      if (!result.success || !result.data || result.data.reels.length === 0) {
         throw new Error("No for you reels returned");
       }
       return {
-        message: `✓ Retrieved ${result.data.length} for you reels`,
-        data: { reelCount: result.data.length },
+        message: `✓ Retrieved ${result.data.reels.length} for you reels`,
+        data: { reelCount: result.data.reels.length },
       };
     });
 
     // Test 3: Get popular reels
     await this.runTest("Feed", "Get Popular Reels", async () => {
       const result = await feedService.getPopularReels();
-      if (!result.success || !result.data || result.data.length === 0) {
+      if (!result.success || !result.data || result.data.reels.length === 0) {
         throw new Error("No popular reels returned");
       }
       return {
-        message: `✓ Retrieved ${result.data.length} popular reels`,
-        data: { reelCount: result.data.length },
+        message: `✓ Retrieved ${result.data.reels.length} popular reels`,
+        data: { reelCount: result.data.reels.length },
       };
     });
 
@@ -215,34 +215,34 @@ class TestFeatures {
     // Test 6: Toggle like reel
     await this.runTest("Feed", "Toggle Like Reel", async () => {
       const reelsResult = await feedService.getTrendingReels();
-      if (!reelsResult.data || reelsResult.data.length === 0) {
+      if (!reelsResult.data || reelsResult.data.reels.length === 0) {
         throw new Error("No reels to test like");
       }
-      const reelId = reelsResult.data[0].id;
+      const reelId = reelsResult.data.reels[0].id;
       const result = await feedService.toggleLikeReel(reelId);
       if (!result.success) {
         throw new Error("Failed to toggle like");
       }
       return {
         message: `✓ Successfully toggled like on reel ${reelId}`,
-        data: { reelId, liked: result.data?.liked },
+        data: { reelId, liked: result.data?.isLiked },
       };
     });
 
     // Test 7: Toggle save reel
     await this.runTest("Feed", "Toggle Save Reel", async () => {
       const reelsResult = await feedService.getTrendingReels();
-      if (!reelsResult.data || reelsResult.data.length === 0) {
+      if (!reelsResult.data || reelsResult.data.reels.length === 0) {
         throw new Error("No reels to test save");
       }
-      const reelId = reelsResult.data[0].id;
+      const reelId = reelsResult.data.reels[0].id;
       const result = await feedService.toggleSaveReel(reelId);
       if (!result.success) {
         throw new Error("Failed to toggle save");
       }
       return {
         message: `✓ Successfully toggled save on reel ${reelId}`,
-        data: { reelId, saved: result.data?.saved },
+        data: { reelId, saved: result.data?.isSaved },
       };
     });
   }

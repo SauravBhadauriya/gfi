@@ -19,7 +19,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
-import { Video } from 'expo-video';
+import LegacyVideo, { type LegacyVideoHandle } from '../LegacyVideo';
 import { router } from 'expo-router';
 import Svg, { Path, G, Circle, Rect, Defs, RadialGradient, Stop, Line } from 'react-native-svg';
 import { scale, spacing, getFontSize, wp } from '../../utils/responsive';
@@ -248,6 +248,15 @@ interface ReelViewerProps {
   insets?: { top: number; bottom: number; left: number; right: number };
 }
 
+interface ReelComment {
+  id: number;
+  likes: number;
+  isLiked: boolean;
+  username: string;
+  comment: string;
+  replies?: ReelComment[];
+}
+
 export const ReelViewer: React.FC<ReelViewerProps> = ({
   visible,
   reels,
@@ -275,8 +284,8 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
   const [commentLikes, setCommentLikes] = useState<Map<number, { likes: number; isLiked: boolean }>>(new Map());
   
   const reelFlatListRef = useRef<FlatList>(null);
-  const videoRefs = useRef<Map<number, Video>>(new Map());
-  const playPauseIconTimeout = useRef<NodeJS.Timeout | null>(null);
+  const videoRefs = useRef<Map<number, LegacyVideoHandle>>(new Map());
+  const playPauseIconTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoPlayingStates = useRef<Map<number, boolean>>(new Map());
   const playPauseIconOpacity = useRef(new Animated.Value(0)).current;
   const starAnimations = useRef<Map<number, { scale: Animated.Value; opacity: Animated.Value }>>(new Map());
@@ -617,7 +626,7 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
         >
           {reel.type === 'video' && (reel.video || reel.source) ? (
             shouldLoadVideo ? (
-              <Video
+              <LegacyVideo
                 ref={(ref) => {
                   if (ref) {
                     videoRefs.current.set(reel.id, ref);
@@ -1011,8 +1020,7 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
                   keyboardShouldPersistTaps="handled"
                 >
                   {/* Sample Comments with Replies */}
-                  {[
-                  ].map((comment) => {
+                  {([] as ReelComment[]).map((comment) => {
                     const commentLikeData = commentLikes.get(comment.id) || { likes: comment.likes, isLiked: comment.isLiked };
                     return (
                       <View key={comment.id}>
@@ -1243,8 +1251,7 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
               <View style={styles.friendsSection}>
                 <Text style={styles.sectionTitle}>Send to</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendsList}>
-                  {[
-                  ].map((friend) => (
+                  {([] as Array<{ id: string; avatar: number | { uri: string }; name: string }>).map((friend) => (
                     <TouchableOpacity key={friend.id} style={styles.friendItem}>
                       <Image source={friend.avatar} style={styles.friendAvatar} />
                       <Text style={styles.friendName} numberOfLines={1}>{friend.name}</Text>
@@ -2109,4 +2116,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

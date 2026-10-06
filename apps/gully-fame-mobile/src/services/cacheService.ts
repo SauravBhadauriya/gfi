@@ -194,13 +194,13 @@ export class CacheService {
   ): Promise<{ data: T | null; isFresh: boolean }> {
     try {
       // Check if fresh cache exists
-      const cached = await this.get(key);
+      const cached = await this.get<T>(key);
       if (cached) {
         return { data: cached, isFresh: true };
       }
 
       // Check if stale cache exists
-      const stale = await this.getStale(key);
+      const stale = await this.getStale<T>(key);
 
       // Fetch fresh data in background
       fetchFn()

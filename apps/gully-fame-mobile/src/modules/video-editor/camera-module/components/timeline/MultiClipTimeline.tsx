@@ -1,26 +1,27 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
-import { Dimensions, StyleSheet, View, Text } from 'react-native';
+import { Dimensions, StyleSheet, View, Text, TouchableOpacity, Image } from 'react-native';
 import Animated, {
   useAnimatedRef,
   useSharedValue,
 } from 'react-native-reanimated';
-import Svg, { Path } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 import type { CameraClip } from '../../types/camera.types';
 import {
   calculateTimelinePositions,
   getTotalTimelineDuration,
 } from '../../utils/timelineHelpers';
-import TimelineClip from './TimelineClip';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const VIDEO_TRACK_HEIGHT = 60;
+const VIDEO_TRACK_HEIGHT = 56;
 const LAYER_TRACK_HEIGHT = 36;
-const PIXELS_PER_SECOND = 60; // 60 pixels per second of video for smooth scaling
+const TRACK_HEADER_WIDTH = 48;
+const PIXELS_PER_SECOND = 60;
 
 interface MultiClipTimelineProps {
   clips: CameraClip[];
   currentTime: number;
   selectedClipId?: string;
+  selectedMusicTrack?: any;
   thumbnails?: Map<string, string>;
   onClipPress?: (clip: CameraClip) => void;
   onTrimStart?: (clip: CameraClip, newTrimStart: number) => void;
@@ -30,56 +31,65 @@ interface MultiClipTimelineProps {
   onScroll?: (scrollX: number) => void;
 }
 
-/**
- * CapCut / VN Style Multi-Track Timeline Editor
- * Automatically generates Text, Voice, and Music layers above the main video track
- */
 const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
   clips,
   currentTime,
   selectedClipId,
+  selectedMusicTrack,
   thumbnails = new Map(),
   onClipPress,
-  onTrimStart,
-  onTrimEnd,
-  onClipReorder,
   onTimelineSeek,
   onScroll,
 }) => {
   const animatedScrollRef = useAnimatedRef<Animated.ScrollView>();
   const playheadPosition = useSharedValue(0);
-
   const isDraggingClip = useRef(false);
-  const draggedClipIndex = useRef<number | null>(null);
-  const [dragPreviewX, setDragPreviewX] = useState<number | null>(null);
   const lastScrollTimeRef = useRef(0);
+  const [isVideoMuted, setIsVideoMuted] = useState(false);
 
-  // 📈 Calculate master timeline positions
   const positionedClips = useMemo(() => calculateTimelinePositions(clips), [clips]);
   const totalDuration = useMemo(() => getTotalTimelineDuration(clips), [clips]);
   const totalWidth = totalDuration * PIXELS_PER_SECOND;
 
-  // 🚀 EXTRACT MULTI-TRACK LAYERS FROM CLIPS
-  const { textBlocks, voiceBlocks, musicBlocks } = useMemo(() => {
+  // Extract multi-track layers (Adjust, Text, Voice, Music)
+  const { textBlocks, voiceBlocks, musicBlocks, adjustBlocks } = useMemo(() => {
     const texts: any[] = [];
     const voices: any[] = [];
     const musics: any[] = [];
+    const adjusts: any[] = [];
+
+    // Global selected music track rendering
+    if (selectedMusicTrack) {
+      musics.push({
+        id: selectedMusicTrack._id || selectedMusicTrack.id || 'selected-music',
+        name: selectedMusicTrack.title || selectedMusicTrack.name || 'Background Music',
+        start: 0,
+        duration: totalDuration || 15,
+      });
+    }
 
     positionedClips.forEach((clip) => {
       const clipStart = clip.timelineStart ?? 0;
       const clipDuration = (clip.timelineEnd ?? 0) - clipStart;
 
-      // Extract Text Overlays
+      if (clip.filterPreset) {
+        adjusts.push({
+          id: `adjust-${clip.id}`,
+          name: clip.filterPreset.name || 'Adjust',
+          start: clipStart,
+          duration: clipDuration,
+        });
+      }
+
       (clip.textOverlays || []).forEach((txt, idx) => {
         texts.push({
           id: txt.id || `text-${clip.id}-${idx}`,
-          text: txt.text || "Text",
+          text: txt.text || 'Text',
           start: clipStart,
-          duration: clipDuration, // Currently bounding to clip length
+          duration: clipDuration,
         });
       });
 
-      // Extract Voiceovers
       (clip.voiceOverlays || []).forEach((voice, idx) => {
         voices.push({
           id: voice.id || `voice-${clip.id}-${idx}`,
@@ -88,22 +98,16 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
           duration: voice.duration || clipDuration,
         });
       });
-
-      // Extract Music / SoundFX
-      (clip.soundEffects || []).forEach((snd, idx) => {
-        musics.push({
-          id: snd.id || `music-${clip.id}-${idx}`,
-          name: snd.name || `Audio ${idx + 1}`,
-          start: clipStart,
-          duration: snd.duration || clipDuration,
-        });
-      });
     });
 
-    return { textBlocks: texts, voiceBlocks: voices, musicBlocks: musics };
-  }, [positionedClips]);
+    return {
+      textBlocks: texts,
+      voiceBlocks: voices,
+      musicBlocks: musics,
+      adjustBlocks: adjusts,
+    };
+  }, [positionedClips, selectedMusicTrack, totalDuration]);
 
-  // ⚡ Sync JS State to UI Thread Scroll Position
   useEffect(() => {
     const targetPosition = currentTime * PIXELS_PER_SECOND;
     playheadPosition.value = targetPosition;
@@ -118,37 +122,6 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
     }
   }, [currentTime, playheadPosition, animatedScrollRef]);
 
-  // Drag & Drop Handlers (Original Logic kept intact)
-  const handleClipDragStart = useCallback((clip: CameraClip) => {
-    const index = clips.findIndex((c) => c.id === clip.id);
-    if (index === -1) return;
-    isDraggingClip.current = true;
-    draggedClipIndex.current = index;
-  }, [clips]);
-
-  const handleClipDrag = useCallback((clip: CameraClip, pageX: number) => {
-    if (draggedClipIndex.current === null) return;
-    setDragPreviewX(pageX);
-  }, []);
-
-  const handleClipDragEnd = useCallback((clip: CameraClip) => {
-    if (draggedClipIndex.current === null) return;
-    const fromIndex = draggedClipIndex.current;
-    
-    if (dragPreviewX !== null && animatedScrollRef.current) {
-      const targetTime = dragPreviewX / PIXELS_PER_SECOND;
-      const targetIndex = positionedClips.findIndex(
-        (c) => targetTime >= (c.timelineStart ?? 0) && targetTime < (c.timelineEnd ?? 0)
-      );
-      if (targetIndex !== -1 && targetIndex !== fromIndex) {
-        onClipReorder?.(fromIndex, targetIndex);
-      }
-    }
-    isDraggingClip.current = false;
-    draggedClipIndex.current = null;
-    setDragPreviewX(null);
-  }, [dragPreviewX, positionedClips, onClipReorder, animatedScrollRef]);
-
   const handleScroll = useCallback((event: any) => {
     const scrollX = event.nativeEvent.contentOffset?.x || 0;
     onScroll?.(scrollX);
@@ -161,17 +134,48 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
     onTimelineSeek?.(Math.max(0, Math.min(time, totalDuration)));
   }, [totalDuration, onTimelineSeek]);
 
-  // Fake waveform renderer for audio tracks
-  const renderWaveform = () => (
-    <View style={{ flexDirection: 'row', alignItems: 'center', opacity: 0.3, overflow: 'hidden', marginLeft: 'auto', marginRight: 8 }}>
-      {Array.from({ length: 20 }).map((_, i) => (
-        <View key={i} style={{ width: 2, height: 8 + Math.random() * 12, backgroundColor: '#fff', marginHorizontal: 1, borderRadius: 2 }} />
-      ))}
-    </View>
-  );
-
   return (
     <View style={styles.container}>
+      {/* Center Playhead Needle */}
+      <View style={styles.centerPlayheadContainer} pointerEvents="none">
+        <View style={styles.playheadCap} />
+        <View style={styles.playheadLine} />
+      </View>
+
+      {/* Left Track Control Headers */}
+      <View style={styles.trackHeadersColumn} pointerEvents="box-none">
+        {adjustBlocks.length > 0 && (
+          <View style={styles.headerCell}>
+            <Ionicons name="color-filter-outline" size={18} color="#FF5722" />
+          </View>
+        )}
+        {textBlocks.length > 0 && (
+          <View style={styles.headerCell}>
+            <Ionicons name="text-outline" size={18} color="#8B5CF6" />
+          </View>
+        )}
+        {voiceBlocks.length > 0 && (
+          <View style={styles.headerCell}>
+            <Ionicons name="mic-outline" size={18} color="#E91E63" />
+          </View>
+        )}
+        {musicBlocks.length > 0 && (
+          <View style={styles.headerCell}>
+            <Ionicons name="musical-notes-outline" size={18} color="#0284C7" />
+          </View>
+        )}
+        <View style={[styles.headerCell, { height: VIDEO_TRACK_HEIGHT, marginTop: 4 }]}>
+          <TouchableOpacity onPress={() => setIsVideoMuted(!isVideoMuted)}>
+            <Ionicons
+              name={isVideoMuted ? 'volume-mute' : 'volume-high-outline'}
+              size={18}
+              color="#FFF"
+            />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Scrollable Tracks */}
       <Animated.ScrollView
         ref={animatedScrollRef}
         horizontal
@@ -186,83 +190,127 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
       >
         <View style={styles.multiTrackContainer}>
 
-          {/* 🟪 TRACK 1: Text Layers */}
+          {/* Orange Track: Adjustments */}
+          {adjustBlocks.length > 0 && (
+            <View style={styles.trackRow}>
+              {adjustBlocks.map((block) => (
+                <View
+                  key={block.id}
+                  style={[
+                    styles.layerBlock,
+                    styles.adjustBlock,
+                    {
+                      left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND,
+                      width: Math.max(block.duration * PIXELS_PER_SECOND, 40),
+                    },
+                  ]}
+                >
+                  <Text style={styles.layerText} numberOfLines={1}>🎨 {block.name}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Purple Track: Text */}
           {textBlocks.length > 0 && (
             <View style={styles.trackRow}>
               {textBlocks.map((block) => (
                 <View
                   key={block.id}
-                  style={[styles.layerBlock, styles.textBlock, { left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND, width: block.duration * PIXELS_PER_SECOND }]}
+                  style={[
+                    styles.layerBlock,
+                    styles.textBlock,
+                    {
+                      left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND,
+                      width: Math.max(block.duration * PIXELS_PER_SECOND, 40),
+                    },
+                  ]}
                 >
-                  <Text style={styles.layerText} numberOfLines={1}>T  {block.text}</Text>
+                  <Text style={styles.layerText} numberOfLines={1}>T {block.text}</Text>
                 </View>
               ))}
             </View>
           )}
 
-          {/* 🟪 TRACK 2: Voiceover Layers */}
+          {/* Pink Track: Voiceover */}
           {voiceBlocks.length > 0 && (
             <View style={styles.trackRow}>
               {voiceBlocks.map((block) => (
                 <View
                   key={block.id}
-                  style={[styles.layerBlock, styles.voiceBlock, { left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND, width: block.duration * PIXELS_PER_SECOND }]}
+                  style={[
+                    styles.layerBlock,
+                    styles.voiceBlock,
+                    {
+                      left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND,
+                      width: Math.max(block.duration * PIXELS_PER_SECOND, 40),
+                    },
+                  ]}
                 >
                   <Text style={styles.layerText} numberOfLines={1}>🎙️ {block.name}</Text>
-                  {renderWaveform()}
                 </View>
               ))}
             </View>
           )}
 
-          {/* 🟪 TRACK 3: Music Layers */}
+          {/* Blue Track: Selected Music */}
           {musicBlocks.length > 0 && (
             <View style={styles.trackRow}>
               {musicBlocks.map((block) => (
                 <View
                   key={block.id}
-                  style={[styles.layerBlock, styles.musicBlock, { left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND, width: block.duration * PIXELS_PER_SECOND }]}
+                  style={[
+                    styles.layerBlock,
+                    styles.musicBlock,
+                    {
+                      left: SCREEN_WIDTH / 2 + block.start * PIXELS_PER_SECOND,
+                      width: Math.max(block.duration * PIXELS_PER_SECOND, 60),
+                    },
+                  ]}
                 >
-                  <Text style={styles.layerText} numberOfLines={1}>🎵 {block.name}</Text>
-                  {renderWaveform()}
+                  <Ionicons name="musical-note" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                  <Text style={styles.layerText} numberOfLines={1}>{block.name}</Text>
                 </View>
               ))}
             </View>
           )}
 
-          {/* 🎬 MAIN TRACK: Video Clips (Bottom Most) */}
+          {/* Video Strip with Thumbnails */}
           <View style={styles.videoTrackRow}>
-            {/* Center Playhead Left Padding Offset */}
             <View style={{ width: SCREEN_WIDTH / 2 }} />
 
             {positionedClips.map((clip) => {
               const start = clip.timelineStart ?? 0;
               const end = clip.timelineEnd ?? 0;
-              const clipWidth = (end - start) * PIXELS_PER_SECOND;
-              const thumbnailUri = thumbnails.get(clip.id);
+              const clipWidth = Math.max((end - start) * PIXELS_PER_SECOND, 50);
+              const isSelected = clip.id === selectedClipId;
+              const thumbUri = thumbnails.get(clip.id) || clip.uri;
 
               return (
-                <TimelineClip
+                <TouchableOpacity
                   key={clip.id}
-                  clip={clip}
-                  width={clipWidth}
-                  thumbnailUri={thumbnailUri}
-                  isSelected={clip.id === selectedClipId}
-                  pixelsPerSecond={PIXELS_PER_SECOND}
-                  onPress={onClipPress}
-                  onTrimStart={onTrimStart}
-                  onTrimEnd={onTrimEnd}
-                  onDragStart={handleClipDragStart}
-                  onDrag={handleClipDrag}
-                  onDragEnd={handleClipDragEnd}
-                />
+                  activeOpacity={0.8}
+                  onPress={() => onClipPress?.(clip)}
+                  style={[
+                    styles.videoClipTile,
+                    { width: clipWidth },
+                    isSelected && styles.videoClipTileSelected,
+                  ]}
+                >
+                  {thumbUri ? (
+                    <Image source={{ uri: thumbUri }} style={styles.clipThumbnailImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.clipThumbnailPlaceholder}>
+                      <Ionicons name="videocam" size={20} color="#666" />
+                    </View>
+                  )}
+                </TouchableOpacity>
               );
             })}
 
-            {/* Right Padding Offset */}
             <View style={{ width: SCREEN_WIDTH / 2 }} />
           </View>
-          
+
         </View>
       </Animated.ScrollView>
     </View>
@@ -272,17 +320,58 @@ const MultiClipTimeline: React.FC<MultiClipTimelineProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111', // Matches the timeline area background
+    backgroundColor: '#0F0F0F',
     position: 'relative',
+  },
+  centerPlayheadContainer: {
+    position: 'absolute',
+    left: SCREEN_WIDTH / 2 - 6,
+    top: 0,
+    bottom: 0,
+    width: 12,
+    alignItems: 'center',
+    zIndex: 100,
+  },
+  playheadCap: {
+    width: 12,
+    height: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+  },
+  playheadLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  trackHeadersColumn: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: TRACK_HEADER_WIDTH,
+    backgroundColor: 'rgba(15, 15, 15, 0.9)',
+    zIndex: 90,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    gap: 4,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  headerCell: {
+    height: LAYER_TRACK_HEIGHT,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   timelineContent: {
     paddingVertical: 10,
-    justifyContent: 'flex-end', // Pushes all tracks to stick together nicely
+    justifyContent: 'flex-end',
   },
   multiTrackContainer: {
     flexDirection: 'column',
     justifyContent: 'flex-end',
-    gap: 4, // Spacing between tracks
+    gap: 4,
     height: '100%',
   },
   trackRow: {
@@ -293,7 +382,7 @@ const styles = StyleSheet.create({
   videoTrackRow: {
     height: VIDEO_TRACK_HEIGHT,
     flexDirection: 'row',
-    marginTop: 6,
+    marginTop: 4,
   },
   layerBlock: {
     position: 'absolute',
@@ -303,25 +392,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   layerText: {
-    color: '#fff',
+    color: '#FFF',
     fontSize: 11,
     fontWeight: '600',
     flexShrink: 1,
   },
-  
-  /* CapCut / VN Exact Style Colors */
-  textBlock: {
-    backgroundColor: '#8B5CF6', // Purple for Text
+  adjustBlock: { backgroundColor: '#FF5722' },
+  textBlock: { backgroundColor: '#8B5CF6' },
+  voiceBlock: { backgroundColor: '#E91E63' },
+  musicBlock: { backgroundColor: '#0284C7' },
+  videoClipTile: {
+    height: '100%',
+    borderRadius: 6,
+    overflow: 'hidden',
+    backgroundColor: '#222',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    marginRight: 2,
   },
-  voiceBlock: {
-    backgroundColor: '#D946EF', // Magenta for Voiceovers
+  videoClipTileSelected: {
+    borderColor: '#EC9A15',
   },
-  musicBlock: {
-    backgroundColor: '#C026D3', // Pink for Audio/Music
-  }
+  clipThumbnailImage: {
+    width: '100%',
+    height: '100%',
+  },
+  clipThumbnailPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#333',
+  },
 });
 
 export default MultiClipTimeline;

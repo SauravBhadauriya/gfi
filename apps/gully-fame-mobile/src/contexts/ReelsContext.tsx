@@ -2,7 +2,7 @@
 // Reels Context - Manage reels feed state globally
 
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import { reelsService } from '../api/services/reelsService';
+import { reelsService, type Reel as ApiReel } from '../api/services/reelsService';
 
 export interface Reel {
   id: string;
@@ -19,6 +19,21 @@ export interface Reel {
   createdAt: string;
   isLiked?: boolean;
 }
+
+const mapReel = (reel: ApiReel): Reel => ({
+  id: String(reel.id),
+  title: reel.caption,
+  description: reel.caption,
+  videoUrl: reel.video.uri,
+  thumbnail: reel.thumbnail,
+  creatorId: reel.userId,
+  creatorName: reel.username,
+  likes: reel.likes,
+  comments: reel.comments,
+  shares: reel.shares,
+  createdAt: reel.createdAt ?? '',
+  isLiked: reel.isLiked,
+});
 
 export interface Comment {
   id: string;
@@ -88,10 +103,11 @@ export const ReelsProvider = ({ children }: { children: React.ReactNode }) => {
       const result = await reelsService.getReels(10, cursor);
 
       if (result.success && result.data?.reels) {
+        const fetchedReels = result.data.reels.map(mapReel);
         if (pageNum === 1) {
-          setReels(result.data.reels);
+          setReels(fetchedReels);
         } else {
-          setReels((prev) => [...prev, ...result.data.reels]);
+          setReels((prev) => [...prev, ...fetchedReels]);
         }
         setHasMore(result.data.hasMore || false);
         setPage(pageNum);

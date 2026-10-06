@@ -79,7 +79,7 @@ export default function ChatDetailScreen() {
     new Animated.ValueXY({ x: 0, y: 0 }),
   ).current;
   const actionBarOpacity = useRef(new Animated.Value(0)).current;
-  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   
   const [loading, setLoading] = useState(true);

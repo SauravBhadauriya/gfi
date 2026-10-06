@@ -45,7 +45,6 @@ export default function RootLayout() {
         Inter_700Bold,
     });
 
-    // ✅ SAHI: Component mount hone par Splash Screen lock karein
     useEffect(() => {
         SplashScreen.preventAutoHideAsync().catch(() => {});
     }, []);
@@ -68,23 +67,41 @@ export default function RootLayout() {
                 console.error('[RootLayout] Error info:', errorInfo);
             }}
         >
-            <SafeAreaProvider>
+            <SafeAreaProvider style={{ flex: 1, backgroundColor: 'transparent' }}>
                 <BrandingProvider>
                     <UserRoleProvider>
-                        <GestureHandlerRootView style={{ flex: 1 }}>
+                        <GestureHandlerRootView style={{ flex: 1, backgroundColor: 'transparent' }}>
                             <Stack
                                 screenOptions={{
                                     headerShown: false,
-                                    contentStyle: { backgroundColor: "#3C2610" },
+                                    /* 🚀 CRITICAL FIX: Changed from "#3C2610" to "transparent".
+                                       Global solid background on Root Stack was forcing Android's
+                                       SurfaceFlinger compositor to hide the underlying camera SurfaceView. */
+                                    contentStyle: { backgroundColor: "transparent" },
                                     animation: "fade",
                                 }}
                             >
                                 <Stack.Screen name="index" options={{ headerShown: false }} />
+                                <Stack.Screen
+                                    name="camera-test"
+                                    options={{
+                                        headerShown: false,
+                                        contentStyle: { backgroundColor: 'transparent' },
+                                        animation: 'none',
+                                    }}
+                                />
                                 <Stack.Screen name="auth" options={{ headerShown: false }} />
                                 <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-                                <Stack.Screen name="(main)" options={{ headerShown: false }} />
+                                <Stack.Screen 
+                                    name="(main)" 
+                                    options={{ 
+                                        headerShown: false,
+                                        contentStyle: { backgroundColor: 'transparent' },
+                                        animation: 'none',
+                                    }} 
+                                />
                             </Stack>
-                            <StatusBar style="light" translucent={false} />
+                            <StatusBar style="light" />
                         </GestureHandlerRootView>
                     </UserRoleProvider>
                 </BrandingProvider>

@@ -13,5 +13,6 @@ export type topPerformersForHomeScreenFullData =
         defaultProfilePicture: ImageSourcePropType;
         badge: "🥇" | "🥈" | "🥉" | "⭐";
         label: string;
+        points?: number;
         id?: number;
     };

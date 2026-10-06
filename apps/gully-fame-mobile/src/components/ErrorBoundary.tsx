@@ -19,6 +19,8 @@ interface State {
   errorInfo: React.ErrorInfo | null;
 }
 
+const getToastColor = (_type: ErrorResponse['type']): string => '#EC9A15';
+
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);

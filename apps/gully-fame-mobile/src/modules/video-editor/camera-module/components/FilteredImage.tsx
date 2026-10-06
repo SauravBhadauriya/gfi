@@ -31,7 +31,7 @@ const FilteredImage: React.FC<FilteredImageProps> = ({ filter, style, ...props }
 
     if (brightness !== 0) {
       const brightnessOverlay: ViewStyle = {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         pointerEvents: 'none',
       };
 
@@ -58,7 +58,7 @@ const FilteredImage: React.FC<FilteredImageProps> = ({ filter, style, ...props }
     if (contrast > 1.0 && filter.name !== 'Grayscale') {
       // High contrast - dark overlay
       const contrastOverlay: ViewStyle = {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         pointerEvents: 'none',
         backgroundColor: 'rgba(0, 0, 0, 0.1)',
         opacity: (contrast - 1.0) * 0.2,
@@ -67,7 +67,7 @@ const FilteredImage: React.FC<FilteredImageProps> = ({ filter, style, ...props }
     } else if (contrast < 1.0 && filter.name !== 'Grayscale') {
       // Low contrast - light overlay
       const contrastOverlay: ViewStyle = {
-        ...StyleSheet.absoluteFillObject,
+        ...StyleSheet.absoluteFill,
         pointerEvents: 'none',
         backgroundColor: 'rgba(255, 255, 255, 0.1)',
         opacity: (1.0 - contrast) * 0.15,

@@ -3,10 +3,9 @@
  * Handles all audio effects, TTS, mixing, and processing
  */
 
-// Audio imports removed - expo-av native module error
-const Audio = { Sound: { create: async () => ({ sound: null }) } };
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 import { AudioTrackWithEffects, VoiceOverlayWithEffects, AudioEffectType, TextToSpeechConfig, AudioMixSettings } from '../types/audioEffects.types';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Conditional Speech import - optional for TTS
 let Speech: any = null;
@@ -83,15 +82,15 @@ export function generateAudioEffectFilter(effect: AudioEffectType, eqSettings?: 
 export async function synthesizeTextToSpeech(config: TextToSpeechConfig): Promise<string> {
   try {
     // Request audio permissions
-    const { status } = await Audio.requestPermissionsAsync();
+    const { status } = await requestRecordingPermissionsAsync();
     if (status !== 'granted') {
       throw new Error('Audio permission not granted');
     }
 
     // Set audio mode for recording
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      playsInSilentModeIOS: true,
+    await setAudioModeAsync({
+      allowsRecording: true,
+      playsInSilentMode: true,
     });
 
     const voiceConfig = TTS_VOICES[config.voice] || TTS_VOICES['alex'];
@@ -270,4 +269,4 @@ export function calculateAudioDuration(tracks: AudioTrackWithEffects[]): number 
   return Math.max(...tracks.map(track => track.endTime || track.duration));
 }
 
-export { Audio, Speech };
+export { Speech };

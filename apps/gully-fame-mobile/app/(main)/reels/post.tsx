@@ -228,7 +228,7 @@ export default function PostScreen() {
             setUploadProgress(Math.round(progress));
           }
         },
-        timeout: 300000, // 5 minutes
+        timeout: 30000,
       });
 
       if (response.data?.reel) {

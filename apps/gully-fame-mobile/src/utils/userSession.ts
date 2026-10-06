@@ -160,7 +160,7 @@ export const saveUserSession = async (
             userProfileImage.startsWith("file://")
           ) {
             try {
-              const { readAsStringAsync } = await import("expo-file-system");
+              const { readAsStringAsync } = await import("expo-file-system/legacy");
               const base64 = await readAsStringAsync(userProfileImage, {
                 encoding: "base64" as any,
               });

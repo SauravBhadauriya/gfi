@@ -11,11 +11,32 @@ import {
 } from 'react-native';
 import { getReels } from '../api/services/reelsService';
 import type { Reel } from '../types/reels';
-import { Video } from 'expo-video';
+import { VideoView, useVideoPlayer } from 'expo-video';
 // Importing the newly updated Support Popup
 import { TipPopup } from '../components/tip/TipComponents';
 
 const { height, width } = Dimensions.get('window');
+
+const ReelVideo = ({ uri, active, onError }: { uri: string; active: boolean; onError: (error: unknown) => void }) => {
+  const player = useVideoPlayer({ uri }, (instance) => {
+    instance.loop = true;
+    instance.muted = false;
+  });
+
+  useEffect(() => {
+    if (active) player.play();
+    else player.pause();
+  }, [active, player]);
+
+  useEffect(() => {
+    const subscription = player.addListener('statusChange', ({ error }) => {
+      if (error) onError(error);
+    });
+    return () => subscription.remove();
+  }, [onError, player]);
+
+  return <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" />;
+};
 
 
 const ReelsScreen = () => {
@@ -75,18 +96,13 @@ const ReelsScreen = () => {
     return (
       <View style={styles.reelItem}>
         {isNearby && videoSource ? (
-          <Video
-            source={{ uri: videoSource }}
-            style={StyleSheet.absoluteFillObject}
-            resizeMode="cover"
-            shouldPlay={isActive}
-            isLooping
-            isMuted={false}
-            useNativeControls={false}
+          <ReelVideo
+            uri={videoSource}
+            active={isActive}
             onError={(e) => console.error(`Video ${index} Error:`, e)}
           />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#111' }]} />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: '#111' }]} />
         )}
 
         {/* Right Sidebar Icons Layout */}

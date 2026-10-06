@@ -106,8 +106,8 @@ const TimelineClip: React.FC<TimelineClipProps> = ({
 
       if (!onTrimEnd) return;
       const timeDelta = (translation / pixelsPerSecond) * speedValue;
-      const currentEnd = clip.trimEnd ?? clip.duration;
-      const newEnd = Math.min(clip.duration, currentEnd + timeDelta);
+      const currentEnd = clip.trimEnd ?? clip.duration ?? 0;
+      const newEnd = Math.min(clip.duration ?? currentEnd, currentEnd + timeDelta);
       
       const limitStart = clip.trimStart ?? 0;
       if (newEnd > limitStart) {
@@ -206,7 +206,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   selectedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderColor: '#ffffff', // Instagram uses white or yellow borders for active clips
     borderTopWidth: 2,
     borderBottomWidth: 2,

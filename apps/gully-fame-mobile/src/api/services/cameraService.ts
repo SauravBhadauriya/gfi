@@ -1,9 +1,8 @@
 // Camera Service
 // Handles video recording, compression, and upload functionality
 
-import * as FileSystem from "expo-file-system";
-import { File } from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { ApiResponse } from "../types";
 import apiClient from "../axios";
 
@@ -78,31 +77,16 @@ export async function getVideoFileInfo(videoUri: string): Promise<ApiResponse<Vi
   try {
     console.log("[cameraService] Getting video file info:", videoUri);
 
-    // Use new File API to get file info
-    const videoFile = new File(videoUri);
-    let fileSize = 0;
-    try {
-      // Try new API first
-      const fileInfo = await videoFile.getInfo();
-      fileSize = fileInfo.size || 0;
-    } catch (error) {
-      console.warn("[cameraService] New File API failed, trying legacy:", error);
-      // Fallback to legacy API
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(videoUri);
-        if (!fileInfo.exists) {
-          return {
-            success: false,
-            message: "Video file not found",
-            error: "File does not exist",
-            data: undefined,
-          };
-        }
-        fileSize = fileInfo.size || 0;
-      } catch (legacyError) {
-        throw legacyError;
-      }
+    const fileInfo = await FileSystem.getInfoAsync(videoUri);
+    if (!fileInfo.exists) {
+      return {
+        success: false,
+        message: "Video file not found",
+        error: "File does not exist",
+        data: undefined,
+      };
     }
+    const fileSize = fileInfo.size || 0;
 
     const fileName = videoUri.split("/").pop() || "video.mp4";
     const videoFileData: VideoFile = {
@@ -222,18 +206,7 @@ export async function deleteVideoFile(videoUri: string): Promise<ApiResponse<boo
   try {
     console.log("[cameraService] Deleting video file:", videoUri);
 
-    const videoFile = new File(videoUri);
-    try {
-      await videoFile.delete();
-    } catch (error) {
-      console.warn("[cameraService] New API delete failed, trying legacy:", error);
-      // Fallback to legacy method
-      try {
-        await FileSystem.deleteAsync(videoUri);
-      } catch (legacyError) {
-        throw legacyError;
-      }
-    }
+    await FileSystem.deleteAsync(videoUri);
 
     console.log("[cameraService] Video file deleted");
 

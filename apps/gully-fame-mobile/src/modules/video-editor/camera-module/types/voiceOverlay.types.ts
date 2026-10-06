@@ -1,5 +1,6 @@
 export interface VoiceOverlay {
   id: string;
+  name?: string;
   uri: string;
   duration: number;
   startTime: number;

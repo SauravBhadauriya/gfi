@@ -33,7 +33,7 @@ const SearchScreen: React.FC<SearchScreenProps> = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState<"all" | "users" | "reels" | "competitions">("all");
   const [trendingHashtags, setTrendingHashtags] = useState<SearchHashtag[]>([]);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ✅ CREATED BY KIRO - Load trending hashtags and search history on mount
   useEffect(() => {

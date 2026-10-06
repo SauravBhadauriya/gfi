@@ -10,7 +10,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   FlatList,
-  SearchBar,
   ActivityIndicator,
   Modal,
   Dimensions,

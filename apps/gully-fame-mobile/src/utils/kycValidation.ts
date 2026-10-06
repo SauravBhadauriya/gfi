@@ -2,6 +2,22 @@ import { Alert } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getUserKycStatus } from "../api/services/userService";
 import { getCurrentUser } from "../api/services/userService";
+import { router } from "expo-router";
+
+export async function navigateToNextKycStep(step: string): Promise<void> {
+  const routes: Record<string, string> = {
+    personalDetails: "/onboarding/personal-details",
+    dob: "/onboarding/personal-details",
+    gender: "/onboarding/personal-details",
+    bio: "/onboarding/personal-details",
+    image: "/onboarding/upload-avatar",
+    faceScan: "/onboarding/face-scan",
+    kycCompleted: "/onboarding/all-done",
+    allDone: "/onboarding/all-done",
+  };
+  const route = routes[step];
+  if (route) router.push(route as never);
+}
 
 /**
  * Check if all required KYC steps are completed

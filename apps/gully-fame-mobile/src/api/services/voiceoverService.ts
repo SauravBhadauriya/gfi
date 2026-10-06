@@ -5,8 +5,7 @@
 
 import apiClient from "../axios";
 import { ApiResponse } from "../types";
-import * as FileSystem from "expo-file-system";
-import { File } from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 
 export interface Voiceover {
   id?: string;
@@ -37,21 +36,9 @@ export async function uploadVoiceover(
       volume,
     });
 
-    // Get file info using new API
-    const audioFile = new File(audioUri);
-    let fileExists = true;
-    try {
-      await audioFile.getInfo();
-    } catch (error) {
-      console.warn("[voiceoverService] File info failed, trying legacy:", error);
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(audioUri);
-        if (!fileInfo.exists) {
-          throw new Error("Audio file does not exist");
-        }
-      } catch (legacyError) {
-        throw new Error("Audio file does not exist");
-      }
+    const fileInfo = await FileSystem.getInfoAsync(audioUri);
+    if (!fileInfo.exists) {
+      throw new Error("Audio file does not exist");
     }
 
     // Create form data for upload

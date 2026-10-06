@@ -22,7 +22,7 @@ import {
   Platform,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { uploadVideoComplete, VideoUploadRequest } from '@api/services/videoUploadService';
 import { useVideoPlayer, VideoView } from 'expo-video';
@@ -34,7 +34,7 @@ interface RecordingSegment {
   timestamp: number;
 }
 
-interface PreviewParams {
+type PreviewParams = {
   segments?: string;
   videoUri?: string;
   duration?: string;

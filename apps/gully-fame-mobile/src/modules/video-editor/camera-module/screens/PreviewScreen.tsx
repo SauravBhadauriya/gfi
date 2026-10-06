@@ -1,18 +1,21 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, SafeAreaView, Alert } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
-import ExportScreen from '../components/ExportScreen';
-import TimelineEditor from '../components/timeline/TimelineEditor';
-import { useUndoRedo } from '../hooks/useUndoRedo';
-import { cameraStyles } from '../styles/cameraStyles';
-import { calculateTimelinePositions } from '../utils/timelineHelpers';
+import {
+  StyleSheet,
+  View,
+  Text,
+  TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  StatusBar,
+  Platform,
+  SafeAreaView as RNSafeAreaView,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import * as MediaLibrary from 'expo-media-library';
+import { exportAndCombineClips } from '../utils/videoExporter';
 import type { CameraClip, CameraClipArray } from '../types/camera.types';
-
-interface ActiveOverlay {
-  id: string;
-  type: 'image' | 'emoji';
-  content: string | number;
-}
 
 interface PreviewScreenProps {
   clips: CameraClipArray;
@@ -20,189 +23,228 @@ interface PreviewScreenProps {
   onClipUpdate?: (clips: CameraClipArray) => void;
   onAddClip?: (source: 'camera' | 'gallery') => void;
   onExportComplete?: () => void;
+  onEditPress?: (mergedUri: string, clips: CameraClipArray) => void;
 }
 
-const PreviewScreen: React.FC<PreviewScreenProps> = ({ 
-  clips, 
-  onBack, 
-  onClipUpdate, 
+const PreviewScreen: React.FC<PreviewScreenProps> = ({
+  clips,
+  onBack,
+  onClipUpdate,
   onAddClip,
-  onExportComplete
+  onExportComplete,
+  onEditPress,
 }) => {
-  const [currentClipIndex, setCurrentClipIndex] = useState(0);
-  const [updatedClips, setUpdatedClips] = useState<CameraClipArray>(clips);
-  const [showExport, setShowExport] = useState(false);
-  
-  const [overlays, setOverlays] = useState<ActiveOverlay[]>([]);
-  const [activeOverlayId, setActiveOverlayId] = useState<string | null>(null);
-  const overlayCounterRef = useRef(0);
+  const insets = useSafeAreaInsets();
+  const [mergedUri, setMergedUri] = useState<string | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  const [mergeProgress, setMergeProgress] = useState(0);
+  const [isMuted, setIsMuted] = useState(false);
 
-  const undoRedo = useUndoRedo(clips);
+  const playerRef = useRef<any>(null);
+  const player = useVideoPlayer(mergedUri ?? '', (player) => {
+    if (mergedUri) {
+      player.loop = true;
+      player.muted = isMuted;
+      player.play();
+      playerRef.current = player;
+    }
+  });
 
+  // Sync muted state with player
   useEffect(() => {
-    if (clips && clips.length > 0) {
-      setUpdatedClips(clips);
-      undoRedo.reset(clips);
+    if (playerRef.current && mergedUri) {
+      playerRef.current.muted = isMuted;
     }
-  }, [clips]); 
+  }, [isMuted, mergedUri]);
 
-  const handleSelectOverlay = useCallback((type: 'image' | 'emoji', content: string | number) => {
-    overlayCounterRef.current += 1;
-    const newOverlay: ActiveOverlay = {
-      id: `overlay-${Date.now()}-${overlayCounterRef.current}`,
-      type,
-      content,
+  // Merge clips on mount
+  useEffect(() => {
+    if (clips.length === 0) {
+      return;
+    }
+
+    if (clips.length === 1) {
+      // Single clip: use directly without merge
+      setMergedUri(clips[0].uri);
+      setIsMerging(false);
+      return;
+    }
+
+    // Multiple clips: merge them
+    const mergeClips = async () => {
+      setIsMerging(true);
+      setMergeError(null);
+      setMergeProgress(0);
+
+      try {
+        const uri = await exportAndCombineClips(
+          clips,
+          (progress, status) => {
+            setMergeProgress(progress);
+            if (__DEV__) console.log(`[PreviewScreen] Merge progress: ${Math.round(progress * 100)}% - ${status}`);
+          }
+        );
+        setMergedUri(uri);
+        if (__DEV__) console.log(`[PreviewScreen] Merge complete: ${uri}`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error('[PreviewScreen] Merge error:', errorMsg);
+        setMergeError(errorMsg || 'Failed to merge videos');
+      } finally {
+        setIsMerging(false);
+      }
     };
-    setOverlays(prev => [...prev, newOverlay]);
-    setActiveOverlayId(newOverlay.id);
-  }, []);
 
-  const handleDeleteOverlay = useCallback((id: string) => {
-    setOverlays(prev => prev.filter(item => item.id !== id));
-    setActiveOverlayId(null);
-  }, []);
+    mergeClips();
+  }, [clips]);
 
-  const handleAddClip = useCallback((source: 'camera' | 'gallery') => {
-    onAddClip?.(source);
-  }, [onAddClip]);
+  const handleBack = useCallback(() => {
+    Alert.alert('Discard recording?', 'Going back will discard your recording.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: onBack,
+      },
+    ]);
+  }, [onBack]);
 
-  const handleAddClipFromGallery = useCallback((newClip: CameraClip) => {
-    undoRedo.addToHistory({ clips: updatedClips });
-    
-    const newClips = [...updatedClips, newClip];
-    const positionedClips = calculateTimelinePositions(newClips);
-    
-    setUpdatedClips(positionedClips);
-    setCurrentClipIndex(positionedClips.length - 1);
-    onClipUpdate?.(positionedClips);
-  }, [updatedClips, onClipUpdate, undoRedo]);
+  const handleRetake = useCallback(() => {
+    Alert.alert('Re-record?', 'This will discard your current recording and take you back to the camera.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Re-record',
+        style: 'destructive',
+        onPress: () => {
+          onClipUpdate?.([]);
+          onBack?.();
+        },
+      },
+    ]);
+  }, [onBack, onClipUpdate]);
 
-  const handleUndo = useCallback(() => {
-    const previousState = undoRedo.undo();
-    if (previousState) {
-      const positionedClips = calculateTimelinePositions(previousState.clips);
-      setUpdatedClips(positionedClips);
-      onClipUpdate?.(positionedClips);
-      
-      if (currentClipIndex >= positionedClips.length) {
-        setCurrentClipIndex(Math.max(0, positionedClips.length - 1));
+  const handleSaveToGallery = useCallback(async () => {
+    if (!mergedUri) return;
+
+    try {
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (permission.status !== 'granted') {
+        Alert.alert('Permission Required', 'We need access to your gallery to save this video.');
+        return;
       }
-    }
-  }, [undoRedo, onClipUpdate, currentClipIndex]);
 
-  const handleRedo = useCallback(() => {
-    const nextState = undoRedo.redo();
-    if (nextState) {
-      const positionedClips = calculateTimelinePositions(nextState.clips);
-      setUpdatedClips(positionedClips);
-      onClipUpdate?.(positionedClips);
-      
-      if (currentClipIndex >= positionedClips.length) {
-        setCurrentClipIndex(Math.max(0, positionedClips.length - 1));
-      }
+      await MediaLibrary.saveToLibraryAsync(mergedUri);
+      Alert.alert('Success', 'Video saved to gallery');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error('[PreviewScreen] Save to gallery error:', errorMsg);
+      Alert.alert('Error', 'Failed to save video to gallery');
     }
-  }, [undoRedo, onClipUpdate, currentClipIndex]);
+  }, [mergedUri]);
+
+  const handleEdit = useCallback(() => {
+    if (mergedUri) {
+      onEditPress?.(mergedUri, clips);
+    }
+  }, [mergedUri, clips, onEditPress]);
 
   const handleNext = useCallback(() => {
-    setShowExport(true);
-  }, []);
+    onExportComplete?.();
+  }, [onExportComplete]);
 
-  // 🛠️ FIX: Receives exported video URI and updates parent before navigating to post screen
-  const handleExportComplete = useCallback((exportedVideoUri?: string) => {
-    if (__DEV__) console.log(`[FLOW] PreviewScreen.handleExportComplete called: exportedUri=${exportedVideoUri?.substring(0, 50)}..., clips=${updatedClips.length}`);
-    setShowExport(false);
-
-    if (exportedVideoUri && updatedClips.length > 0) {
-      // Validate exported file exists before proceeding
-      if (__DEV__) console.log(`[FLOW] Validating export file exists: ${exportedVideoUri.substring(0, 50)}...`);
-      FileSystem.getInfoAsync(exportedVideoUri)
-        .then((fileInfo) => {
-          if (!fileInfo.exists) {
-            if (__DEV__) console.error(`[FLOW] Export file does not exist: ${exportedVideoUri}`);
-            Alert.alert(
-              "Export Failed",
-              "The exported video file was not found. Please try exporting again.",
-              [{ text: "OK", onPress: () => setShowExport(true) }]
-            );
-            return;
-          }
-          
-          if (__DEV__) console.log(`[FLOW] Export file validated: size=${fileInfo.size} bytes`);
-          const exportReadyClips = updatedClips.map((clip, idx) =>
-            idx === 0 ? { ...clip, uri: exportedVideoUri } : clip
-          );
-          if (__DEV__) console.log(`[FLOW] Updated first clip with export uri`);
-          onClipUpdate?.(exportReadyClips);
-
-          if (__DEV__) console.log('[FLOW] PreviewScreen: Calling onExportComplete (will navigate to post)');
-          onExportComplete?.();
-        })
-        .catch((error) => {
-          if (__DEV__) console.error('[FLOW] File validation error:', error);
-          Alert.alert(
-            "Export Validation Error",
-            "Could not verify the exported video file. Please try again.",
-            [{ text: "OK", onPress: () => setShowExport(true) }]
-          );
-        });
-    } else {
-      if (__DEV__) console.warn('[FLOW] Export complete but no uri or no clips');
-      if (!exportedVideoUri) {
-        Alert.alert(
-          "Export Failed",
-          "The video export did not produce an output file. Please try again.",
-          [{ text: "OK", onPress: () => setShowExport(true) }]
-        );
-      } else {
-        if (__DEV__) console.log('[FLOW] PreviewScreen: Calling onExportComplete (will navigate to post)');
-        onExportComplete?.();
-      }
+  const handleRetryMerge = useCallback(() => {
+    setMergeError(null);
+    setMergeProgress(0);
+    setMergedUri(null);
+    // Trigger re-merge by retrieving first clip
+    if (clips.length === 1) {
+      setMergedUri(clips[0].uri);
     }
-  }, [updatedClips, onClipUpdate, onExportComplete]);
+  }, [clips]);
 
-  if (!clips?.length || !updatedClips[currentClipIndex]) {
+  // Empty state
+  if (!clips || clips.length === 0) {
     return (
-      <SafeAreaView style={[cameraStyles.previewContainer, styles.emptyContainer]}>
+      <View style={styles.container}>
         <Text style={styles.emptyText}>No media found</Text>
-      </SafeAreaView>
+      </View>
     );
   }
 
-  if (showExport) {
+  // Merging state
+  if (isMerging) {
     return (
-      <ExportScreen
-        clips={updatedClips}
-        overlays={overlays}
-        onBack={() => setShowExport(false)}
-        onComplete={handleExportComplete}
-      />
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color="#EC9A15" style={styles.spinner} />
+        <Text style={styles.mergeProgressText}>Merging videos…</Text>
+        <Text style={styles.mergeProgressPercent}>{Math.round(mergeProgress * 100)}%</Text>
+      </View>
     );
   }
 
+  // Error state
+  if (mergeError) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>{mergeError}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={handleRetryMerge}>
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.cancelButton} onPress={onBack}>
+          <Text style={styles.cancelButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // Video preview state
   return (
     <View style={styles.container}>
-      <TimelineEditor
-        clips={updatedClips}
-        onClipsUpdate={(newClips) => {
-          undoRedo.addToHistory({ clips: updatedClips });
-          setUpdatedClips(newClips);
-          onClipUpdate?.(newClips);
-        }}
-        onBack={onBack}
-        onNext={handleNext}
-        onAddClip={handleAddClip}
-        onAddClipFromGallery={handleAddClipFromGallery}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        canUndo={undoRedo.canUndo}
-        canRedo={undoRedo.canRedo}
-        
-        overlays={overlays}
-        activeOverlayId={activeOverlayId}
-        onSelectOverlay={handleSelectOverlay}
-        onDeleteOverlay={handleDeleteOverlay}
-        setActiveOverlayId={setActiveOverlayId}
-      />
+      <StatusBar hidden />
+      {mergedUri && (
+        <VideoView
+          player={player}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          nativeControls={false}
+        />
+      )}
+
+      {/* Top overlay */}
+      <RNSafeAreaView style={[styles.topOverlay, { paddingTop: insets.top }]} pointerEvents="box-none">
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Ionicons name="arrow-back" size={28} color="#fff" />
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.muteButton} onPress={() => setIsMuted(!isMuted)}>
+          <Ionicons name={isMuted ? 'volume-mute' : 'volume-high'} size={24} color="#fff" />
+        </TouchableOpacity>
+      </RNSafeAreaView>
+
+      {/* Bottom overlay */}
+      <View style={[styles.bottomOverlay, { paddingBottom: insets.bottom + 16 }]} pointerEvents="box-none">
+        <View style={styles.bottomButtonGroup}>
+          <TouchableOpacity style={styles.controlButton} onPress={handleRetake}>
+            <Ionicons name="refresh-outline" size={24} color="#fff" />
+            <Text style={styles.controlButtonText}>Retake</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.controlButton} onPress={handleSaveToGallery}>
+            <Ionicons name="download-outline" size={24} color="#fff" />
+            <Text style={styles.controlButtonText}>Save</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.controlButton} onPress={handleEdit}>
+            <Ionicons name="create-outline" size={24} color="#fff" />
+            <Text style={styles.controlButtonText}>Edit</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.controlButton, styles.nextButton]} onPress={handleNext}>
+            <Ionicons name="checkmark" size={24} color="#000" />
+            <Text style={[styles.controlButtonText, styles.nextButtonText]}>Next</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </View>
   );
 };
@@ -210,16 +252,117 @@ const PreviewScreen: React.FC<PreviewScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000000',
-  },
-  emptyContainer: {
+    backgroundColor: '#000',
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000000',
+  },
+  spinner: {
+    marginBottom: 20,
+  },
+  mergeProgressText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  mergeProgressPercent: {
+    color: '#EC9A15',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginTop: 10,
+  },
+  errorText: {
+    color: '#ff6b6b',
+    fontSize: 16,
+    textAlign: 'center',
+    marginHorizontal: 20,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#EC9A15',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 20,
+  },
+  retryButtonText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   emptyText: {
-    color: '#FFFFFF',
-    fontSize: 16,
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  topOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    zIndex: 100,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  muteButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bottomOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+  },
+  bottomButtonGroup: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  controlButton: {
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  controlButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  nextButton: {
+    backgroundColor: '#EC9A15',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  nextButtonText: {
+    color: '#000',
+    marginTop: 4,
   },
 });
 

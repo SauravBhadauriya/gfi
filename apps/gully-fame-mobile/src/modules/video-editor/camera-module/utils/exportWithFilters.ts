@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import type { CameraClip } from '../types/camera.types';
 import { applyPresetToImage, applyPresetToVideo } from './ffmpegFilters';
 import { clipHasFilter } from './filterHelpers';

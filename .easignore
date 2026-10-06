@@ -1,60 +1,8 @@
-# Created by Kiro - EAS Build Ignore Configuration
-# Specifies files and directories to exclude from EAS builds
-
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
-
-
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Git
-.git/
-.gitignore
-.gitattributes
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Build artifacts
-build/
-dist/
-.next/
-out/
-
-# Testing
-coverage/
-.nyc_output/
-
-# Logs
-logs/
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# Temporary
-*.tmp
-.cache/
-.turbo/
-
-# Documentation
-*.md
-docs/
-
-# CI/CD
-.github/
-.gitlab-ci.yml
-.circleci/
-
-# Misc
-.DS_Store
-*.pem
+**/node_modules/
+**/.git/
+**/android/
+**/ios/
+**/dist/
+**/build/
+**/.expo/
+**/.next/

@@ -9,10 +9,10 @@ import {
   Dimensions,
   ScrollView,
   Alert,
-  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
+import { VideoView, useVideoPlayer } from "expo-video";
 import {
   CloseIcon,
   ArrowDownIcon,
@@ -38,8 +38,27 @@ import MultiTrackTimeline, {
   type TimelineTrack,
 } from "@/components/MultiTrackTimeline";
 import type { AudioTrimData } from "@/components/AudioTrimView";
+import { exportAndCombineClips } from "@modules/video-editor/camera-module/utils/videoExporter";
+import type { CameraClipArray } from "@modules/video-editor/camera-module/types/camera.types";
 
 const { width, height } = Dimensions.get("window");
+
+function VideoClipPreview({ uri, isPlaying }: { uri: string; isPlaying: boolean }) {
+  const player = useVideoPlayer(uri, (videoPlayer) => {
+    videoPlayer.loop = true;
+    videoPlayer.play();
+  });
+
+  useEffect(() => {
+    if (isPlaying) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [isPlaying, player]);
+
+  return <VideoView player={player} style={styles.videoImage} contentFit="cover" nativeControls={false} />;
+}
 
 export default function EditScreen() {
   const params = useLocalSearchParams();
@@ -87,7 +106,28 @@ export default function EditScreen() {
     }
   }, [params.clips]);
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (clips.length === 0) {
+      Alert.alert("Export failed", "No video clips are available to export.");
+      return;
+    }
+
+    let exportedUri: string;
+    try {
+      const exportClips = clips.map((clip) => ({
+        ...clip,
+        type: "video" as const,
+        source: clip.source || "camera",
+      })) as CameraClipArray;
+      exportedUri = await exportAndCombineClips(exportClips);
+    } catch (error) {
+      Alert.alert(
+        "Export failed",
+        error instanceof Error ? error.message : "Could not process this video. Please try again."
+      );
+      return;
+    }
+
     const competitionId = params.competitionId
       ? String(params.competitionId)
       : null;
@@ -110,7 +150,7 @@ export default function EditScreen() {
     router.push({
       pathname: "/(main)/upload/post",
       params: {
-        clips: JSON.stringify(clips),
+        clips: JSON.stringify([{ ...clips[0], uri: exportedUri }]),
         timelineTracks: JSON.stringify(timelineTracks),
         ...(competitionId && { competitionId }),
         ...(competitionName && { competitionName }),
@@ -209,11 +249,7 @@ export default function EditScreen() {
           <View style={styles.previewContainer}>
             <View style={styles.videoPreview}>
               {clips.length > 0 && clips[0]?.uri ? (
-                <Image
-                  source={{ uri: clips[0].uri }}
-                  style={styles.videoImage}
-                  resizeMode="cover"
-                />
+                <VideoClipPreview uri={clips[0].uri} isPlaying={isPlaying} />
               ) : (
                 <View style={styles.placeholderVideo}>
                   <Text style={styles.placeholderText}>Video Preview</Text>
@@ -455,9 +491,8 @@ export default function EditScreen() {
       {}
       {showTrimView && selectedMusicForTrim && (
         <AudioTrimView
-          music={selectedMusicForTrim}
-          videoDuration={videoDuration}
-          onConfirm={(trimData: AudioTrimData) => {
+          duration={videoDuration}
+          onComplete={(trimData: AudioTrimData) => {
             console.log('[EditScreen] Audio trimmed:', trimData);
             
             setSelectedMusicForTrim({
@@ -466,7 +501,6 @@ export default function EditScreen() {
             });
             setShowTrimView(false);
           }}
-          onCancel={() => setShowTrimView(false)}
         />
       )}
 

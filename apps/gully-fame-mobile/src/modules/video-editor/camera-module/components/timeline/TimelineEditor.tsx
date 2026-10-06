@@ -1,10 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState, useMemo } from "react";
-import { Dimensions, StyleSheet, Text, TouchableOpacity, View, Animated as RNAnimated, Alert } from "react-native";
-import Svg, { Path, Rect, Circle } from "react-native-svg";
+import React, { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import {
+  Dimensions,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Animated as RNAnimated,
+  Alert,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 import type { CameraClip } from "../../types/camera.types";
 import type { FilterConfig } from "../../types/filters";
 import type { TextOverlay } from "../../types/textOverlay.types";
-import { hasFilterChanges } from "../../utils/filterHelpers";
 import {
   clampTrimPoints,
   getTotalTimelineDuration,
@@ -14,19 +25,22 @@ import {
 import { generateThumbnailsForClips } from "../../utils/thumbnailGenerator";
 import AddClipOverlay from "../AddClipOverlay";
 import DraggableTextOverlays from "../DraggableTextOverlays";
-import PreviewActionButtons from "../PreviewActionButtons";
 import TextEditorModal from "../TextEditorModal";
 import MultiClipPlayer from "./MultiClipPlayer";
 import MultiClipTimeline from "./MultiClipTimeline";
-import SpeedSelector, { SpeedSelection } from "../SpeedSelector";
-
+import EnhancedTimelineControls from "../EnhancedTimelineControls";
+import PreviewActionButtons from "../PreviewActionButtons";
 import { GestureSticker } from "./GestureSticker";
+
+// Live Gully Fame API Services
+import { listAudio } from "@/api/services/musicLibraryService";
+import { listFilters } from "@/api/services/filterLibraryService";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 interface ActiveOverlay {
   id: string;
-  type: 'image' | 'emoji';
+  type: "image" | "emoji";
   content: string | number;
 }
 
@@ -42,10 +56,10 @@ interface TimelineEditorProps {
   canUndo?: boolean;
   canRedo?: boolean;
   selectedFilter?: FilterConfig;
-  
+
   overlays?: ActiveOverlay[];
   activeOverlayId?: string | null;
-  onSelectOverlay?: (type: 'image' | 'emoji', content: string | number) => void;
+  onSelectOverlay?: (type: "image" | "emoji", content: string | number) => void;
   onDeleteOverlay?: (id: string) => void;
   setActiveOverlayId?: (id: string | null) => void;
 }
@@ -68,45 +82,66 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
   onDeleteOverlay,
   setActiveOverlayId,
 }) => {
+  const insets = useSafeAreaInsets();
+
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [selectedClipId, setSelectedClipId] = useState<string | undefined>();
   const [thumbnails, setThumbnails] = useState<Map<string, string>>(new Map());
   const [isReady, setIsReady] = useState(false);
   const [showAddClipOverlay, setShowAddClipOverlay] = useState(false);
-  const [showTrimHandles, setShowTrimHandles] = useState(false);
   const [currentFilter, setCurrentFilter] = useState<FilterConfig | null>(
     selectedFilter || clips.find((c) => c.filterPreset)?.filterPreset || null
   );
   const [showTextEditor, setShowTextEditor] = useState(false);
   const [selectedTextOverlay, setSelectedTextOverlay] = useState<TextOverlay | null>(null);
   const [selectedOverlayId, setSelectedOverlayId] = useState<string | null>(null);
-  
-  // 🔥 Trash Bin Animation States
+
+  // Background audio & filter states
+  const [selectedMusicTrack, setSelectedMusicTrack] = useState<any | null>(null);
+  const [backendTracks, setBackendTracks] = useState<any[]>([]);
+  const [backendFilters, setBackendFilters] = useState<any[]>([]);
+
+  // Fetch Live Backend Data
+  useEffect(() => {
+    const fetchBackendData = async () => {
+      try {
+        const audioRes = await listAudio("trending", 1, 50);
+        if (audioRes.success && audioRes.data?.tracks) {
+          setBackendTracks(audioRes.data.tracks);
+        }
+      } catch (e) {
+        console.warn("Failed to load backend audio tracks:", e);
+      }
+
+      try {
+        const filterRes = await listFilters(undefined, 1, 50);
+        if (filterRes.success && filterRes.data?.filters) {
+          setBackendFilters(filterRes.data.filters);
+        }
+      } catch (e) {
+        console.warn("Failed to load backend filters:", e);
+      }
+    };
+    fetchBackendData();
+  }, []);
+
+  // Trash Bin & Sticker Drag Handlers
   const [isDraggingSticker, setIsDraggingSticker] = useState(false);
   const [isHoveringTrash, setIsHoveringTrash] = useState(false);
   const trashOpacity = useRef(new RNAnimated.Value(0)).current;
 
+  const handleStickerDragStart = useCallback(() => setIsDraggingSticker(true), []);
+  const handleStickerDragUpdate = useCallback((x: number, y: number) => {}, []);
+  const handleStickerDragEnd = useCallback(() => setIsDraggingSticker(false), []);
+
   const [previewDimensions, setPreviewDimensions] = useState({
     width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.15,
+    height: SCREEN_HEIGHT * 0.42,
   });
-
-  useEffect(() => {
-    if (selectedFilter) setCurrentFilter(selectedFilter);
-  }, [selectedFilter]);
 
   const isDraggingTimeline = useRef(false);
   const totalDuration = getTotalTimelineDuration(clips);
-
-  const selectedClipSpeedConfig = useMemo((): SpeedSelection => {
-    if (selectedClipId) {
-      const target = clips.find((c) => c.id === selectedClipId);
-      // @ts-ignore
-      return target?.speedConfig || { type: 'constant', value: 1 };
-    }
-    return { type: 'constant', value: 1 };
-  }, [selectedClipId, clips]);
 
   const currentClipUri = useMemo(() => {
     if (selectedClipId) {
@@ -119,8 +154,14 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
   useEffect(() => {
     setIsReady(false);
     generateThumbnailsForClips(clips)
-      .then((thumbs) => { setThumbnails(thumbs); setIsReady(true); })
-      .catch((error) => { console.warn("Thumbnails error:", error); setIsReady(true); });
+      .then((thumbs) => {
+        setThumbnails(thumbs);
+        setIsReady(true);
+      })
+      .catch((error) => {
+        console.warn("Thumbnails error:", error);
+        setIsReady(true);
+      });
   }, [clips]);
 
   const togglePlayPause = useCallback(() => {
@@ -132,126 +173,72 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
     }
   }, [isPlaying, currentTime, totalDuration]);
 
-  const lastSeekTimeRef = useRef(0);
-  const seekTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSeekRef = useRef<number | null>(null);
-
-  const handleTimelineSeek = useCallback((time: number) => {
-    const clampedTime = Math.max(0, Math.min(time, totalDuration));
-    setCurrentTime(clampedTime);
-    setIsPlaying(false);
-    isDraggingTimeline.current = true;
-
-    if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
-    pendingSeekRef.current = clampedTime;
-
-    const now = Date.now();
-    if (now - lastSeekTimeRef.current < 150) {
-      seekTimeoutRef.current = setTimeout(() => {
-        if (pendingSeekRef.current !== null) {
-          setCurrentTime(pendingSeekRef.current);
-          pendingSeekRef.current = null;
-          lastSeekTimeRef.current = Date.now();
-        }
-        isDraggingTimeline.current = false;
-      }, 150);
-      return;
-    }
-
-    lastSeekTimeRef.current = now;
-    pendingSeekRef.current = null;
-
-    setTimeout(() => { isDraggingTimeline.current = false; }, 200);
-  }, [totalDuration]);
-
-  // --- TRASH LOGIC START ---
-  const TRASH_ZONE_Y = previewDimensions.height - 80; 
-  const TRASH_ZONE_X_MIN = (SCREEN_WIDTH / 2) - 40;
-  const TRASH_ZONE_X_MAX = (SCREEN_WIDTH / 2) + 40;
-
-  const handleStickerDragStart = useCallback(() => {
-    setIsDraggingSticker(true);
-    RNAnimated.spring(trashOpacity, {
-      toValue: 1,
-      useNativeDriver: true,
-      friction: 5,
-    }).start();
-  }, [trashOpacity]);
-
-  const handleStickerDragUpdate = useCallback((x: number, y: number) => {
-    // Check agar sticker Trash zone ke andar aaya
-    const inTrashZone = y > TRASH_ZONE_Y && x > TRASH_ZONE_X_MIN && x < TRASH_ZONE_X_MAX;
-    setIsHoveringTrash(inTrashZone);
-  }, [TRASH_ZONE_Y, TRASH_ZONE_X_MIN, TRASH_ZONE_X_MAX]);
-
-  const handleStickerDragEnd = useCallback((id: string, x: number, y: number) => {
-    setIsDraggingSticker(false);
-    setIsHoveringTrash(false);
-    
-    RNAnimated.timing(trashOpacity, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-
-    // Agar delete zone mein chora, toh sticker remove kardo
-    if (y > TRASH_ZONE_Y && x > TRASH_ZONE_X_MIN && x < TRASH_ZONE_X_MAX) {
-      if (onDeleteOverlay) onDeleteOverlay(id);
-    }
-  }, [TRASH_ZONE_Y, TRASH_ZONE_X_MIN, TRASH_ZONE_X_MAX, onDeleteOverlay, trashOpacity]);
-  // --- TRASH LOGIC END ---
+  const handleTimelineSeek = useCallback(
+    (time: number) => {
+      const clampedTime = Math.max(0, Math.min(time, totalDuration));
+      setCurrentTime(clampedTime);
+      setIsPlaying(false);
+    },
+    [totalDuration]
+  );
 
   const handleClipPress = useCallback((clip: CameraClip) => {
-    setSelectedClipId(clip.id);
+    setSelectedClipId((prev) => (prev === clip.id ? undefined : clip.id));
   }, []);
 
-  const handleSpeedSelectionChange = useCallback((selection: SpeedSelection) => {
-    if (!selectedClipId) return;
-    const updatedClips = clips.map((c) => {
-      if (c.id === selectedClipId) {
-        return { ...c, speedConfig: selection, durationMultiplier: selection.type === 'constant' ? (1 / (selection.value as number)) : 1.0 };
-      }
-      return c;
-    });
-    onClipsUpdate(calculateTimelinePositions(updatedClips));
-  }, [selectedClipId, clips, onClipsUpdate]);
+  // ✂️ Live Video Split
+  const handleSplitClip = useCallback(() => {
+    const currentClipData = getClipAtTimelineTime(clips, currentTime);
 
-  const handleTrimStart = useCallback((clip: CameraClip, newTrimStart: number) => {
-    const updatedClips = clips.map((c) => c.id === clip.id ? clampTrimPoints({ ...c, trimStart: newTrimStart }) : c);
-    onClipsUpdate(calculateTimelinePositions(updatedClips));
-  }, [clips, onClipsUpdate]);
-
-  const handleTrimEnd = useCallback((clip: CameraClip, newTrimEnd: number) => {
-    const updatedClips = clips.map((c) => c.id === clip.id ? clampTrimPoints({ ...c, trimEnd: newTrimEnd }) : c);
-    onClipsUpdate(calculateTimelinePositions(updatedClips));
-  }, [clips, onClipsUpdate]);
-
-  const handleClipReorder = useCallback((fromIndex: number, toIndex: number) => {
-    const newClips = [...clips];
-    const [movedClip] = newClips.splice(fromIndex, 1);
-    newClips.splice(toIndex, 0, movedClip);
-    onClipsUpdate(calculateTimelinePositions(newClips));
-  }, [clips, onClipsUpdate]);
-
-  const handleDeleteClip = useCallback(() => {
-    if (!selectedClipId) {
-      const clipAtTime = getClipAtTimelineTime(clips, currentTime);
-      if (clipAtTime) setSelectedClipId(clipAtTime.clip.id);
+    if (!currentClipData) {
+      Alert.alert("Split Error", "No video clip found at current playhead position.");
       return;
     }
+
+    const { clip, localTime } = currentClipData;
+    const clipStart = clip.timelineStart ?? 0;
+    const clipEnd = clip.timelineEnd ?? 0;
+
+    if (currentTime <= clipStart + 0.2 || currentTime >= clipEnd - 0.2) {
+      Alert.alert("Cannot Split", "Playhead is too close to the clip boundary.");
+      return;
+    }
+
+    const splitPoint = localTime;
+
+    const firstHalf: CameraClip = {
+      ...clip,
+      id: `clip-${Date.now().toString(36)}-1`,
+      trimEnd: splitPoint,
+    };
+
+    const secondHalf: CameraClip = {
+      ...clip,
+      id: `clip-${Date.now().toString(36)}-2`,
+      trimStart: splitPoint,
+    };
+
+    const targetIndex = clips.findIndex((c) => c.id === clip.id);
+    const updatedClips = [...clips];
+    updatedClips.splice(targetIndex, 1, firstHalf, secondHalf);
+
+    const repositionedClips = calculateTimelinePositions(updatedClips);
+
+    setSelectedClipId(undefined);
+    onClipsUpdate(repositionedClips);
+  }, [clips, currentTime, onClipsUpdate]);
+
+  const handleDeleteClip = useCallback(() => {
+    if (!selectedClipId) return;
     const newClips = clips.filter((c) => c.id !== selectedClipId);
-    if (newClips.length === 0) { onBack?.(); return; }
+    if (newClips.length === 0) {
+      onBack?.();
+      return;
+    }
     const positionedClips = calculateTimelinePositions(newClips);
-    if (currentTime > getTotalTimelineDuration(positionedClips)) setCurrentTime(getTotalTimelineDuration(positionedClips));
     setSelectedClipId(undefined);
     onClipsUpdate(positionedClips);
-  }, [selectedClipId, clips, currentTime, onClipsUpdate, onBack]);
-
-  const handleTimelineScroll = useCallback((scrollX: number) => {
-    isDraggingTimeline.current = true;
-    if (seekTimeoutRef.current) clearTimeout(seekTimeoutRef.current);
-    seekTimeoutRef.current = setTimeout(() => { isDraggingTimeline.current = false; }, 200);
-  }, []);
+  }, [selectedClipId, clips, onClipsUpdate, onBack]);
 
   const formatTime = useCallback((seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -259,518 +246,488 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   }, []);
 
-  const handleFilter = useCallback((filter: FilterConfig) => {
-    setCurrentFilter(filter);
-    const clipsToUpdate = selectedClipId ? clips.filter((c) => c.id === selectedClipId) : clips;
-    const updatedClips = clips.map((clip) => {
-      if (clipsToUpdate.some((c) => c.id === clip.id)) {
-        if (filter.name === "Original" || !hasFilterChanges(filter)) {
-          const { filterPreset, ...clipWithoutFilter } = clip;
-          return { ...clipWithoutFilter };
-        } else {
-          return { ...clip, filterPreset: filter };
-        }
-      }
-      return clip;
-    });
-    onClipsUpdate(updatedClips);
-  }, [selectedClipId, clips, onClipsUpdate]);
-
-  const handleOverlay = useCallback(() => { 
-    Alert.alert("Overlay", "Overlay feature - Coming soon with more options!");
-  }, []);
-  const handleText = useCallback(() => { setSelectedTextOverlay(null); setSelectedOverlayId(null); setShowTextEditor(true); }, []);
-  
-  const currentClipForText = useMemo(() => getClipAtTimelineTime(clips, currentTime)?.clip || clips[0] || null, [clips, currentTime]);
-  const currentTextOverlays = useMemo(() => currentClipForText?.textOverlays || [], [currentClipForText]);
+  const currentClipForText = useMemo(
+    () => getClipAtTimelineTime(clips, currentTime)?.clip || clips[0] || null,
+    [clips, currentTime]
+  );
+  const currentTextOverlays = useMemo(
+    () => currentClipForText?.textOverlays || [],
+    [currentClipForText]
+  );
 
   const handleTextOverlayPress = useCallback((overlay: TextOverlay) => {
-    setSelectedTextOverlay(overlay); setSelectedOverlayId(overlay.id); setShowTextEditor(true);
+    setSelectedTextOverlay(overlay);
+    setSelectedOverlayId(overlay.id);
+    setShowTextEditor(true);
   }, []);
 
-  const handleTextOverlaySave = useCallback((overlay: TextOverlay) => {
-    if (!currentClipForText) return;
-    const existingOverlays = currentClipForText.textOverlays || [];
-    const existingIndex = existingOverlays.findIndex((o) => o.id === overlay.id);
-    let updatedOverlays = existingIndex >= 0 ? existingOverlays.map((o, i) => i === existingIndex ? overlay : o) : [...existingOverlays, overlay];
-    onClipsUpdate(clips.map((clip) => clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip));
-    setSelectedOverlayId(null); setShowTextEditor(false);
-  }, [currentClipForText, clips, onClipsUpdate]);
+  const handleTextOverlaySave = useCallback(
+    (overlay: TextOverlay) => {
+      if (!currentClipForText) return;
+      const existingOverlays = currentClipForText.textOverlays || [];
+      const existingIndex = existingOverlays.findIndex((o) => o.id === overlay.id);
+      let updatedOverlays =
+        existingIndex >= 0
+          ? existingOverlays.map((o, i) => (i === existingIndex ? overlay : o))
+          : [...existingOverlays, overlay];
+      onClipsUpdate(
+        clips.map((clip) =>
+          clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip
+        )
+      );
+      setSelectedOverlayId(null);
+      setShowTextEditor(false);
+    },
+    [currentClipForText, clips, onClipsUpdate]
+  );
 
-  const handleTextOverlayDelete = useCallback((overlayId: string) => {
-    if (!currentClipForText) return;
-    const updatedOverlays = (currentClipForText.textOverlays || []).filter((o) => o.id !== overlayId);
-    onClipsUpdate(clips.map((clip) => clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip));
-    setSelectedOverlayId(null); setSelectedTextOverlay(null); setShowTextEditor(false);
-  }, [currentClipForText, clips, onClipsUpdate]);
+  const handleTextOverlayDelete = useCallback(
+    (overlayId: string) => {
+      if (!currentClipForText) return;
+      const updatedOverlays = (currentClipForText.textOverlays || []).filter(
+        (o) => o.id !== overlayId
+      );
+      onClipsUpdate(
+        clips.map((clip) =>
+          clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip
+        )
+      );
+      setSelectedOverlayId(null);
+      setSelectedTextOverlay(null);
+      setShowTextEditor(false);
+    },
+    [currentClipForText, clips, onClipsUpdate]
+  );
 
-  const handleTextOverlayUpdate = useCallback((overlay: TextOverlay) => {
-    if (!currentClipForText) return;
-    const existingOverlays = currentClipForText.textOverlays || [];
-    const existingIndex = existingOverlays.findIndex((o) => o.id === overlay.id);
-    if (existingIndex >= 0) {
-      const updatedOverlays = [...existingOverlays]; updatedOverlays[existingIndex] = overlay;
-      onClipsUpdate(clips.map((clip) => clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip));
-    }
-  }, [currentClipForText, clips, onClipsUpdate]);
+  const handleTextOverlayUpdate = useCallback(
+    (overlay: TextOverlay) => {
+      if (!currentClipForText) return;
+      const existingOverlays = currentClipForText.textOverlays || [];
+      const existingIndex = existingOverlays.findIndex((o) => o.id === overlay.id);
+      if (existingIndex >= 0) {
+        const updatedOverlays = [...existingOverlays];
+        updatedOverlays[existingIndex] = overlay;
+        onClipsUpdate(
+          clips.map((clip) =>
+            clip.id === currentClipForText.id ? { ...clip, textOverlays: updatedOverlays } : clip
+          )
+        );
+      }
+    },
+    [currentClipForText, clips, onClipsUpdate]
+  );
 
-  const handleTextEditorClose = useCallback(() => { setShowTextEditor(false); setSelectedTextOverlay(null); setSelectedOverlayId(null); }, []);
-  
-  const handleMusic = useCallback(() => { 
-    Alert.alert("Music", "Music library - Access your music files");
-  }, []);
-  const handleVoiceAdd = useCallback((voice: any) => { 
-    Alert.alert("Voice Over", `Added voice: ${voice?.name || 'Voice'}`);
-  }, []);
-  const handleSoundFXAdd = useCallback((sound: any) => { 
-    Alert.alert("Sound FX", `Added sound effect: ${sound?.name || 'Sound'}`);
-  }, []);
-  const handleCaptionAdd = useCallback((caption: any) => { 
-    Alert.alert("Captions", "Caption added to timeline");
-  }, []);
-  const handleAdjustChange = useCallback((settings: any) => { 
-    console.log("Adjust settings applied:", settings);
-  }, []);
-  const handleOverlayEffectAdd = useCallback((effect: any) => {
-    console.log("✨ Overlay effect added:", effect);
-  }, []);
-  const handleCutoutAdd = useCallback((cutout: any) => { 
-    Alert.alert("Cutout", "Cutout effect applied");
-  }, []);
-  const handleLinkAdd = useCallback((link: any) => { 
-    Alert.alert("Links", `Added link: ${link?.url || 'Link'}`);
-  }, []);
-  const handlePaste = useCallback((content: string) => { 
-    Alert.alert("Paste", "Content pasted to timeline");
+  const handleTextEditorClose = useCallback(() => {
+    setShowTextEditor(false);
+    setSelectedTextOverlay(null);
+    setSelectedOverlayId(null);
   }, []);
 
-  const handleAddPress = useCallback(() => { setShowAddClipOverlay(true); }, []);
-  const handleSelectCamera = useCallback(() => { setShowAddClipOverlay(false); onAddClip?.("camera"); }, [onAddClip]);
-  const handleSelectGallery = useCallback((newClip: CameraClip) => {
+  const handleAddPress = useCallback(() => {
+    setShowAddClipOverlay(true);
+  }, []);
+
+  const handleSelectCamera = useCallback(() => {
     setShowAddClipOverlay(false);
-    if (onAddClipFromGallery) onAddClipFromGallery(newClip);
-    else onClipsUpdate(calculateTimelinePositions([...clips, newClip]));
-  }, [onAddClipFromGallery, clips, onClipsUpdate]);
+    onAddClip?.("camera");
+  }, [onAddClip]);
 
-  const handleTrim = useCallback(() => {
-    setShowTrimHandles((prev) => !prev);
-    if (!showTrimHandles && isPlaying) setIsPlaying(false);
-  }, [showTrimHandles, isPlaying]);
+  const handleSelectGallery = useCallback(
+    (newClip: CameraClip) => {
+      setShowAddClipOverlay(false);
+      if (onAddClipFromGallery) onAddClipFromGallery(newClip);
+      else onClipsUpdate(calculateTimelinePositions([...clips, newClip]));
+    },
+    [onAddClipFromGallery, clips, onClipsUpdate]
+  );
 
   if (clips.length === 0) {
-    console.warn('⚠️ TimelineEditor: No clips to render!');
-    return <View style={styles.container}><Text style={{ color: '#fff', alignSelf: 'center', marginTop: 100 }}>No clips to edit</Text></View>;
+    return (
+      <View style={styles.container}>
+        <Text style={{ color: "#fff", alignSelf: "center", marginTop: 100 }}>
+          No clips to edit
+        </Text>
+      </View>
+    );
   }
-
-  console.log('✅ TimelineEditor: Rendering with', clips.length, 'clips - First clip:', clips[0]?.uri?.substring(0, 50));
 
   return (
     <View style={styles.container}>
-      
-      {/* TOP HEADER */}
-      <View style={styles.topHeader}>
-         <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-               <Path d="M18 6L6 18M6 6l12 12" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-            </Svg>
-         </TouchableOpacity>
-         
-         <View style={{flexDirection: 'row', alignItems: 'center'}}>
-           <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700', marginRight: 4 }}>New project</Text>
-           <Svg width={14} height={14} viewBox="0 0 24 24" fill="none"><Path d="M6 9l6 6 6-6" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Svg>
-         </View>
-         
-         <View style={{flexDirection: 'row', alignItems: 'center', gap: 12}}>
-           <Text style={{color: '#fff', fontWeight: 'bold', fontSize: 12}}>HD</Text>
-           <TouchableOpacity style={styles.exportButton} onPress={onNext}>
-              <Text style={{ color: '#000', fontSize: 14, fontWeight: '800' }}>Export</Text>
-           </TouchableOpacity>
-         </View>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" translucent />
+
+      {/* 1. TOP HEADER (With Dynamic Notch Padding) */}
+      <View style={[styles.topHeader, { paddingTop: Math.max(insets.top, 12) }]}>
+        <TouchableOpacity onPress={onBack} style={styles.headerIconBtn}>
+          <Ionicons name="close" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.projectTitleDropdown}>
+          <Text style={styles.projectTitleText}>Welcome to Edits</Text>
+          <Ionicons name="chevron-down" size={16} color="#FFFFFF" />
+        </TouchableOpacity>
+
+        <View style={styles.headerRightGroup}>
+          <TouchableOpacity style={styles.headerIconBtn}>
+            <Ionicons name="search" size={20} color="#FFFFFF" />
+          </TouchableOpacity>
+
+          <Text style={styles.hdTag}>HD</Text>
+
+          <TouchableOpacity style={styles.nextPillBtn} onPress={onNext}>
+            <Text style={styles.nextPillText}>Next {">"}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* VIDEO PREVIEW AREA - TOP */}
-      <View 
+      {/* 2. VIDEO PREVIEW AREA */}
+      <View
         style={styles.videoPreviewArea}
         onLayout={(event) => {
           const { width, height } = event.nativeEvent.layout;
           setPreviewDimensions({ width, height });
         }}
       >
-        <MultiClipPlayer 
-          clips={clips} 
-          currentTime={currentTime} 
-          isPlaying={isPlaying} 
-          onTimeUpdate={setCurrentTime} 
-          onLoad={() => setIsReady(true)} 
-          onEnd={() => setIsPlaying(false)} 
-          filter={currentFilter || undefined} 
-          isDraggingTimeline={isDraggingTimeline.current} 
+        <MultiClipPlayer
+          clips={clips}
+          currentTime={currentTime}
+          isPlaying={isPlaying}
+          onTimeUpdate={setCurrentTime}
+          onLoad={() => setIsReady(true)}
+          onEnd={() => setIsPlaying(false)}
+          filter={currentFilter || undefined}
+          isDraggingTimeline={isDraggingTimeline.current}
         />
 
-        {currentClipForText && <DraggableTextOverlays overlays={currentTextOverlays} containerWidth={previewDimensions.width} containerHeight={previewDimensions.height} currentTime={currentTime} onOverlayUpdate={handleTextOverlayUpdate} onOverlayPress={handleTextOverlayPress} selectedOverlayId={selectedOverlayId} />}
+        {currentClipForText && (
+          <DraggableTextOverlays
+            overlays={currentTextOverlays}
+            containerWidth={previewDimensions.width}
+            containerHeight={previewDimensions.height}
+            currentTime={currentTime}
+            onOverlayUpdate={handleTextOverlayUpdate}
+            onOverlayPress={handleTextOverlayPress}
+            selectedOverlayId={selectedOverlayId}
+          />
+        )}
 
         {overlays.map((overlayItem) => (
-           <GestureSticker
-             key={overlayItem.id}
-             id={overlayItem.id}
-             type={overlayItem.type}
-             content={overlayItem.content as string}
-             isActive={activeOverlayId === overlayItem.id}
-             onSelect={() => setActiveOverlayId?.(overlayItem.id)}
-             onDragStart={handleStickerDragStart}
-             onDragUpdate={handleStickerDragUpdate}
-             onDragEnd={handleStickerDragEnd}
-           />
+          <GestureSticker
+            key={overlayItem.id}
+            id={overlayItem.id}
+            type={overlayItem.type}
+            content={overlayItem.content as string}
+            isActive={activeOverlayId === overlayItem.id}
+            onSelect={() => setActiveOverlayId?.(overlayItem.id)}
+            onDragStart={handleStickerDragStart}
+            onDragUpdate={handleStickerDragUpdate}
+            onDragEnd={handleStickerDragEnd}
+          />
         ))}
 
         {!isPlaying && (
           <TouchableOpacity style={styles.playCenterOverlay} onPress={togglePlayPause}>
-             <View style={styles.playCircle}>
-                <Svg width={28} height={28} viewBox="0 0 24 24" fill="none"><Path d="M8 5v14l11-7L8 5z" fill="#ffffff" /></Svg>
-             </View>
+            <View style={styles.playCircle}>
+              <Ionicons name="play" size={28} color="#EC9A15" style={{ marginLeft: 3 }} />
+            </View>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* EDITING AREA - BOTTOM (3 COLUMN LAYOUT) */}
-      <View style={styles.editingAreaContainer}>
-        
-        {/* LEFT COLUMN - CONTROLS */}
-        <View style={styles.leftControls}>
-          {/* Play/Pause Button - Orange Circle */}
-          <TouchableOpacity style={styles.playButtonLarge} onPress={togglePlayPause}>
-            {isPlaying ? (
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none"><Path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" fill="#000" /></Svg>
-            ) : (
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none"><Path d="M8 5v14l11-7L8 5z" fill="#000" /></Svg>
-            )}
-          </TouchableOpacity>
+      {/* 3. PLAYER CONTROLS ROW */}
+      <View style={styles.playerControlsRow}>
+        <TouchableOpacity style={styles.playPauseBtn} onPress={togglePlayPause}>
+          <Ionicons
+            name={isPlaying ? "pause" : "play"}
+            size={22}
+            color="#EC9A15"
+          />
+        </TouchableOpacity>
 
-          {/* Add Audio Button */}
-          <TouchableOpacity style={styles.addAudioButton}>
-            <Text style={{ fontSize: 16, color: '#fff' }}>+</Text>
-            <Text style={{ fontSize: 9, color: '#888', marginTop: 2 }}>Add</Text>
-            <Text style={{ fontSize: 9, color: '#888' }}>audio</Text>
-          </TouchableOpacity>
-
-          {/* Delete Button */}
-          {selectedClipId && (
-            <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteClip}>
-              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-                <Circle cx="12" cy="12" r="9" fill="none" stroke="#ff4d4d" strokeWidth="2" />
-                <Path d="M7 12h10" stroke="#ff4d4d" strokeWidth="2" strokeLinecap="round" />
-              </Svg>
-            </TouchableOpacity>
-          )}
+        <View style={styles.timeDisplayContainer}>
+          <Text style={styles.timeMainText}>
+            {formatTime(currentTime)} / {formatTime(totalDuration)}
+          </Text>
+          <Text style={styles.timeSubText}>
+            {(currentTime % 1 !== 0 ? currentTime.toFixed(1) : Math.floor(currentTime))}s
+          </Text>
         </View>
 
-        {/* CENTER COLUMN - TIMELINE */}
-        <View style={styles.centerEditingArea}>
-          <View style={styles.timelineWrapper}>
-            <View style={styles.playheadLine} pointerEvents="none" />
-            
-            {isReady && (
-              <MultiClipTimeline
-                clips={clips}
-                currentTime={currentTime}
-                selectedClipId={selectedClipId}
-                thumbnails={thumbnails}
-                onClipPress={handleClipPress}
-                onTrimStart={showTrimHandles ? handleTrimStart : undefined}
-                onTrimEnd={showTrimHandles ? handleTrimEnd : undefined}
-                onClipReorder={handleClipReorder}
-                onTimelineSeek={handleTimelineSeek}
-                onScroll={handleTimelineScroll}
-              />
-            )}
-            
-            <TouchableOpacity style={styles.floatingAddButton} onPress={handleAddPress}>
-              <Svg width={18} height={18} viewBox="0 0 24 24" fill="none"><Path d="M12 5v14M5 12h14" stroke="#000" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></Svg>
-            </TouchableOpacity>
-          </View>
-
-          {/* Time Display & Controls Row */}
-          <View style={styles.timeControlsRow}>
-            <View style={styles.timeDisplaySmall}>
-              <Text style={styles.timeText}>{formatTime(currentTime)} / {formatTime(totalDuration)}</Text>
-              <Text style={styles.secondsText}>{(currentTime % 1 !== 0 ? currentTime.toFixed(1) : Math.floor(currentTime))}s</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* RIGHT COLUMN - CONTROLS */}
-        <View style={styles.rightControls}>
-          {/* Undo Button */}
-          <TouchableOpacity onPress={onUndo} disabled={!canUndo} style={{ opacity: canUndo ? 1 : 0.4, padding: 8 }}>
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none"><Path d="M9 14L4 9l5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><Path d="M4 9h10c3.3 0 6 2.7 6 6s-2.7 6-6 6H9" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Svg>
+        <View style={styles.undoRedoGroup}>
+          <TouchableOpacity onPress={onUndo} disabled={!canUndo} style={[styles.undoRedoBtn, !canUndo && styles.disabledBtn]}>
+            <Ionicons name="arrow-undo" size={20} color="#FFFFFF" />
           </TouchableOpacity>
-
-          {/* Redo Button */}
-          <TouchableOpacity onPress={onRedo} disabled={!canRedo} style={{ opacity: canRedo ? 1 : 0.4, padding: 8 }}>
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none"><Path d="M15 14l5-5-5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /><Path d="M20 9H10C6.7 9 4 11.7 4 15s2.7 6 6 6h5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Svg>
-          </TouchableOpacity>
-
-          {/* Volume/Audio Icon */}
-          <TouchableOpacity style={styles.volumeButton}>
-            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none"><Path d="M3 9v6a2 2 0 002 2h4l5 5v-16l-5 5H5a2 2 0 00-2 2z" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></Svg>
+          <TouchableOpacity onPress={onRedo} disabled={!canRedo} style={[styles.undoRedoBtn, !canRedo && styles.disabledBtn]}>
+            <Ionicons name="arrow-redo" size={20} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* BOTTOM TOOLBAR */}
-      <View style={styles.bottomToolbar}>
+      {/* 4. MULTI-TRACK TIMELINE */}
+      <View style={styles.timelineContainer}>
         {isReady && (
-          <PreviewActionButtons
-            displayUri={currentClipUri}
-            onFilter={handleFilter}
-            onOverlay={handleOverlay}
-            onText={handleText}
-            onSticker={(type, content) => onSelectOverlay?.(type, content)} 
-            onMusic={handleMusic}
-            onVoiceAdd={handleVoiceAdd}
-            onSoundFXAdd={handleSoundFXAdd}
-            onCaptionAdd={handleCaptionAdd}
-            onAdjustChange={handleAdjustChange}
-            onOverlayEffectAdd={handleOverlayEffectAdd}
-            onCutoutAdd={handleCutoutAdd}
-            onLinkAdd={handleLinkAdd}
-            onPaste={handlePaste}
-            startTime={currentTime}
-            onTTSGenerate={() => console.log('TTS Generate')}
-            onUpdateAudioTracks={() => console.log('Audio Tracks Updated')}
-            onUpdateAudioMix={() => console.log('Audio Mix Updated')}
-            audioTracks={[]}
-            masterVolume={1}
+          <MultiClipTimeline
+            clips={clips}
+            currentTime={currentTime}
+            selectedClipId={selectedClipId}
+            selectedMusicTrack={selectedMusicTrack}
+            thumbnails={thumbnails}
+            onClipPress={handleClipPress}
+            onTimelineSeek={handleTimelineSeek}
           />
         )}
+
+        <TouchableOpacity style={styles.floatingAddButton} onPress={handleAddPress}>
+          <Ionicons name="add" size={24} color="#000000" />
+        </TouchableOpacity>
       </View>
 
-      <AddClipOverlay visible={showAddClipOverlay} onClose={() => setShowAddClipOverlay(false)} onSelectCamera={handleSelectCamera} onSelectGallery={handleSelectGallery} />
-      <TextEditorModal visible={showTextEditor} overlay={selectedTextOverlay} onSave={handleTextOverlaySave} onDelete={handleTextOverlayDelete} onClose={handleTextEditorClose} containerWidth={previewDimensions.width} containerHeight={previewDimensions.height} />
+      {/* 5. DYNAMIC BOTTOM TOOLBAR */}
+      <View style={[styles.bottomToolbarContainer, { paddingBottom: Math.max(insets.bottom, 6) }]}>
+        {isReady && (
+          selectedClipId ? (
+            /* CLIP EDIT TOOLBAR */
+            <EnhancedTimelineControls
+              currentTime={currentTime}
+              duration={totalDuration}
+              onTimeChange={setCurrentTime}
+              onPlayPause={togglePlayPause}
+              isPlaying={isPlaying}
+              onDelete={handleDeleteClip}
+              onSplit={handleSplitClip}
+              onVolume={() => Alert.alert("Volume", "Adjust track audio volume")}
+              onTextPress={() => {
+                setSelectedTextOverlay(null);
+                setSelectedOverlayId(null);
+                setShowTextEditor(true);
+              }}
+              onDuplicate={() => {
+                if (selectedClipId) {
+                  const target = clips.find((c) => c.id === selectedClipId);
+                  if (target) {
+                    const dup: CameraClip = {
+                      ...target,
+                      id: `clip-${Date.now().toString(36)}`,
+                    };
+                    onClipsUpdate(calculateTimelinePositions([...clips, dup]));
+                  }
+                }
+              }}
+            />
+          ) : (
+            /* ROOT TOOLBAR */
+            <PreviewActionButtons
+              displayUri={currentClipUri}
+              onFilter={(filter) => {
+                setCurrentFilter(filter);
+                const updatedClips = clips.map((clip) => {
+                  if (!selectedClipId || clip.id === selectedClipId) {
+                    if (!filter) {
+                      const { filterPreset, ...clipWithoutFilter } = clip;
+                      return clipWithoutFilter;
+                    }
+                    return { ...clip, filterPreset: filter };
+                  }
+                  return clip;
+                });
+                onClipsUpdate(updatedClips);
+              }}
+              onOverlay={() => Alert.alert("Overlay", "Add Picture-in-Picture overlay")}
+              onText={() => {
+                setSelectedTextOverlay(null);
+                setSelectedOverlayId(null);
+                setShowTextEditor(true);
+              }}
+              onSticker={(sticker) => onSelectOverlay?.('emoji', sticker ?? '')}
+              onMusic={(musicTrack) => {
+                if (musicTrack) {
+                  setSelectedMusicTrack(musicTrack);
+                }
+              }}
+              onVoiceAdd={(v) => Alert.alert("Voice", "Record voiceover")}
+              onSoundFXAdd={(s) => Alert.alert("Sound FX", "Sound effects")}
+              onCaptionAdd={(c) => Alert.alert("Captions", "Generate Captions")}
+              onAdjustChange={(a) => Alert.alert("Adjust", "Color grading options")}
+              onCutoutAdd={(c) => Alert.alert("Cutout", "Smart Cutout")}
+              onLinkAdd={(l) => Alert.alert("Links", "Add Link Overlay")}
+              onPaste={(p) => Alert.alert("Paste", "Content pasted")}
+              startTime={currentTime}
+              audioTracks={[]}
+              masterVolume={1}
+            />
+          )
+        )}
+      </View>
+
+      <AddClipOverlay
+        visible={showAddClipOverlay}
+        onClose={() => setShowAddClipOverlay(false)}
+        onSelectCamera={handleSelectCamera}
+        onSelectGallery={handleSelectGallery}
+      />
+
+      <TextEditorModal
+        visible={showTextEditor}
+        overlay={selectedTextOverlay}
+        onSave={handleTextOverlaySave}
+        onDelete={handleTextOverlayDelete}
+        onClose={handleTextEditorClose}
+        containerWidth={previewDimensions.width}
+        containerHeight={previewDimensions.height}
+      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0A0A0A", flexDirection: 'column' },
-  
-  topHeader: {
-    height: 56, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    paddingHorizontal: 16, 
-    paddingTop: 8,
-    paddingBottom: 4,
-    backgroundColor: '#0A0A0A', 
-    zIndex: 10,
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-  exportButton: { 
-    backgroundColor: '#fff', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderRadius: 20 
-  },
-
-  /* VIDEO PREVIEW AREA - TOP */
-  videoPreviewArea: {
-    height: SCREEN_HEIGHT * 0.30,
-    width: '100%',
-    backgroundColor: '#000',
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
-  },
-
-  playCenterOverlay: { 
-    position: 'absolute', 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    zIndex: 5 
-  }, 
-  playCircle: { 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30, 
-    backgroundColor: 'rgba(0,0,0,0.4)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-
-  /* EDITING AREA - 3 COLUMN LAYOUT */
-  editingAreaContainer: {
+  container: {
     flex: 1,
-    flexDirection: 'row',
-    backgroundColor: '#0A0A0A',
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    backgroundColor: "#000000",
+    flexDirection: "column",
   },
-
-  /* LEFT COLUMN - CONTROLS */
-  leftControls: {
-    width: 70,
-    backgroundColor: '#0A0A0A',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingVertical: 12,
+  topHeader: {
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    backgroundColor: "#000000",
+    zIndex: 50,
+  },
+  headerIconBtn: {
+    padding: 4,
+  },
+  projectTitleDropdown: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  projectTitleText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  headerRightGroup: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
-    borderRightWidth: 0.5,
-    borderRightColor: 'rgba(255, 255, 255, 0.08)',
   },
-
-  playButtonLarge: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#ec9a15',
-    justifyContent: 'center',
-    alignItems: 'center',
+  hdTag: {
+    color: "#EC9A15",
+    fontSize: 12,
+    fontWeight: "800",
+    marginHorizontal: 4,
+  },
+  nextPillBtn: {
+    backgroundColor: "#EC9A15",
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    borderRadius: 18,
+  },
+  nextPillText: {
+    color: "#000000",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  videoPreviewArea: {
+    height: SCREEN_HEIGHT * 0.42,
+    width: "100%",
+    backgroundColor: "#000000",
+    position: "relative",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  playCenterOverlay: {
+    position: "absolute",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
+  },
+  playCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderColor: "#EC9A15",
+  },
+  playerControlsRow: {
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    backgroundColor: "#0F0F0F",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+  playPauseBtn: {
+    width: 36,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  timeDisplayContainer: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+  },
+  timeMainText: {
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: "600",
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  timeSubText: {
+    color: "#EC9A15",
+    fontSize: 11,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
+  undoRedoGroup: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  undoRedoBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  disabledBtn: {
+    opacity: 0.3,
+  },
+  timelineContainer: {
+    flex: 1,
+    backgroundColor: "#0F0F0F",
+    position: "relative",
+  },
+  floatingAddButton: {
+    position: "absolute",
+    right: 16,
+    bottom: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#EC9A15",
+    justifyContent: "center",
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 5,
-  },
-
-  addAudioButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
-  },
-
-  deleteButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  /* CENTER COLUMN - EDITING AREA */
-  centerEditingArea: {
-    flex: 1,
-    backgroundColor: '#0A0A0A',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    flexDirection: 'column',
-  },
-
-  timelineWrapper: {
-    flex: 1,
-    backgroundColor: '#111',
-    borderRadius: 6,
-    overflow: 'hidden',
-    position: 'relative',
-  },
-
-  playheadLine: {
-    position: 'absolute', 
-    left: '50%', 
-    top: 0, 
-    bottom: 0, 
-    width: 2,
-    backgroundColor: '#fff', 
-    zIndex: 99,
-  },
-
-  floatingAddButton: {
-    position: 'absolute', 
-    right: 10, 
-    bottom: 10, 
-    width: 36, 
-    height: 36,
-    borderRadius: 6, 
-    backgroundColor: '#fff', 
-    justifyContent: 'center', 
-    alignItems: 'center',
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.3, 
-    shadowRadius: 3, 
-    elevation: 4, 
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 6,
     zIndex: 100,
   },
-
-  timeControlsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 6,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+  bottomToolbarContainer: {
+    minHeight: 65,
+    backgroundColor: "#000000",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255, 255, 255, 0.08)",
+    justifyContent: "center",
   },
-
-  timeDisplaySmall: {
-    alignItems: 'center',
-  },
-
-  timeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-
-  secondsText: {
-    color: '#888',
-    fontSize: 10,
-    marginTop: 1,
-    fontWeight: '400',
-  },
-
-  /* RIGHT COLUMN - CONTROLS */
-  rightControls: {
-    width: 60,
-    backgroundColor: '#0A0A0A',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingVertical: 12,
-    gap: 8,
-    borderLeftWidth: 0.5,
-    borderLeftColor: 'rgba(255, 255, 255, 0.08)',
-  },
-
-  volumeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  /* BOTTOM TOOLBAR */
-  bottomToolbar: { 
-    height: 65, 
-    backgroundColor: '#0A0A0A', 
-    justifyContent: 'center', 
-    borderTopWidth: 0.5, 
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
-  },
-
-  /* Legacy/hidden styles */
-  mainEditingArea: { display: 'none' },
-  videoCanvas: { display: 'none' },
-  trashContainer: { display: 'none' },
-  trashCircle: { display: 'none' },
-  trashCircleHover: { display: 'none' },
-  controlRibbon: { display: 'none' },
-  timeCurrent: { display: 'none' },
-  timeDuration: { display: 'none' },
-  timelineArea: { display: 'none' },
-  timeDisplayRow: { display: 'none' },
-  contextActionsRow: { display: 'none' },
-  actionButton: { display: 'none' },
-  actionButtonText: { display: 'none' },
-  toolbarArea: { display: 'none' },
 });
 
 export default TimelineEditor;

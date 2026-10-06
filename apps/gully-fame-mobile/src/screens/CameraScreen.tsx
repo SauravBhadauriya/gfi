@@ -1,8 +1,7 @@
 /**
  * Complete Camera Screen Implementation with Multi-Segment Support
  * Features:
- * - Fixed Android black preview: keep CameraView mounted (flex:1) and toggle
- *   the `active` prop instead of conditionally unmounting on focus change.
+ * - Fixed Android black preview: keep CameraView mounted with transparent container
  * - Fixed Android recording crash (mute passed to recordAsync)
  * - Multi-segment recording (stitch multiple clips)
  * - Next button & Delete last segment control
@@ -20,15 +19,11 @@ import {
   PermissionsAndroid,
   Platform,
   Animated,
+  Dimensions,
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import { useIsFocused } from '@react-navigation/native';
-
-// ============================================================================
-// TYPES & CONSTANTS
-// ============================================================================
+import { router, useFocusEffect } from 'expo-router';
 
 type UIMode = 'REEL' | 'LIVE';
 type CameraFacing = 'front' | 'back';
@@ -50,7 +45,7 @@ interface CameraScreenState {
   flash: FlashMode;
   speed: SpeedMultiplier;
   timer: TimerDuration;
-  maxDuration: number; // 60s for REEL
+  maxDuration: number;
   selectedMusic: { id: string; name: string } | null;
   segments: RecordingSegment[];
 }
@@ -68,20 +63,29 @@ const INITIAL_STATE: CameraScreenState = {
   segments: [],
 };
 
-// ============================================================================
-// MAIN COMPONENT
-// ============================================================================
-
 export default function CameraScreen() {
-  const isFocused = useIsFocused();
+  const { width, height } = Dimensions.get('screen');
+  const [isFocused, setIsFocused] = useState(true);
   const [state, setState] = useState<CameraScreenState>(INITIAL_STATE);
   const [isLoading, setIsLoading] = useState(true);
   const [showSpeedModal, setShowSpeedModal] = useState(false);
   const [showTimerModal, setShowTimerModal] = useState(false);
 
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
+  );
+
+  useEffect(() => {
+    console.log('[CameraScreen] MOUNT');
+    return () => console.log('[CameraScreen] UNMOUNT');
+  }, []);
+
   const cameraRef = useRef<any>(null);
-  const recordingTimerRef = useRef<NodeJS.Timeout>();
-  const countdownTimerRef = useRef<NodeJS.Timeout>();
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const currentSegmentDurationRef = useRef<number>(0);
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
@@ -98,8 +102,6 @@ export default function CameraScreen() {
         setIsLoading(false);
       }
     })();
-    // Request permissions once on mount; permission hooks are stable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -122,7 +124,6 @@ export default function CameraScreen() {
     }
   }, []);
 
-  // Total recorded duration across all segments
   const totalRecordedDuration = state.segments.reduce((acc, seg) => acc + seg.duration, 0) + state.recordingTime;
 
   const startRecording = useCallback(async () => {
@@ -142,7 +143,6 @@ export default function CameraScreen() {
 
       const remainingTime = state.maxDuration - totalRecordedDuration;
 
-      // Start recording with mute: true to fix Android media conflicts
       const videoData = await cameraRef.current.recordAsync({
         maxDuration: remainingTime,
         mute: true,
@@ -323,15 +323,9 @@ export default function CameraScreen() {
 
   return (
     <View style={styles.container}>
-      {/*
-        Keep CameraView permanently mounted and use `active` to pause/resume.
-        Conditionally unmounting on focus tears down the native camera session
-        and causes a black preview on Android when returning to the screen.
-        Use flex:1 (not absoluteFill) so the preview surface gets a measured size.
-      */}
       <CameraView
         ref={cameraRef}
-        style={styles.cameraPreview}
+        style={{ position: 'absolute', top: 0, left: 0, width, height }}
         facing={state.cameraFacing}
         enableTorch={state.flash === 'on'}
         mode="video"
@@ -386,7 +380,6 @@ export default function CameraScreen() {
 
       {/* Bottom Controls */}
       <View style={styles.bottomControls}>
-        {/* Progress bar */}
         <View style={styles.recordingIndicator}>
           <View style={[styles.recordingDot, state.isRecording && { backgroundColor: '#FF4444' }]} />
           <Text style={styles.recordingText}>{formattedTime} / 1:00</Text>
@@ -402,7 +395,6 @@ export default function CameraScreen() {
         )}
 
         <View style={styles.controlsRow}>
-          {/* Gallery or Delete Last Clip */}
           {state.segments.length > 0 && !state.isRecording ? (
             <TouchableOpacity style={styles.controlButton} onPress={handleDeleteLastSegment}>
               <Text style={{ fontSize: 20 }}>⌫</Text>
@@ -413,7 +405,6 @@ export default function CameraScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Record / Stop Button */}
           <TouchableOpacity
             style={[styles.recordButton, state.isRecording && styles.recordButtonRecording]}
             onPress={handleRecordPress}
@@ -422,7 +413,6 @@ export default function CameraScreen() {
             <Text style={styles.recordButtonText}>{state.isRecording ? 'Stop' : 'Record'}</Text>
           </TouchableOpacity>
 
-          {/* Next Button (Visible when segments recorded) */}
           {state.segments.length > 0 && !state.isRecording ? (
             <TouchableOpacity style={[styles.controlButton, styles.nextButton]} onPress={handleNavigateToPreview}>
               <Text style={styles.nextButtonText}>Next →</Text>
@@ -475,17 +465,10 @@ export default function CameraScreen() {
   );
 }
 
-// ============================================================================
-// STYLES
-// ============================================================================
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-  },
-  cameraPreview: {
-    flex: 1,
   },
   permissionContainer: {
     flex: 1,

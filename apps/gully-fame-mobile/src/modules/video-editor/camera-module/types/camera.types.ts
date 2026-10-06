@@ -53,6 +53,8 @@ export interface CameraClip {
   type: ClipType;
   source: ClipSource;
   speed?: number; // Legacy: single speed multiplier (0.3, 0.5, 1, 2, 3, 5)
+  speedConfig?: { type: 'constant'; value: number };
+  musicOffset?: number;
   speedSegments?: SpeedSegment[]; // Speed segments for variable-speed playback
   filterPreset?: import("./filters").FilterPreset; // Selected filter preset for export
   trimStart?: number; // Start trim point in original clip (seconds, default: 0)

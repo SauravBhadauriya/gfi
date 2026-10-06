@@ -63,12 +63,13 @@ export interface PaymentError {
 async function getUserPaymentData() {
   try {
     // Import auth service to get actual user data
-    const { getCurrentUser } = await import('./authService');
-    const user = await getCurrentUser();
+    const { authService } = await import('./authService');
+    const result = await authService.getUserProfile();
+    const user = result.data;
     return {
       email: user?.email || '',
-      contact: user?.phone || '',
-      name: user?.name || user?.username || '',
+      contact: user?.mobile || '',
+      name: [user?.firstName, user?.lastName].filter(Boolean).join(' '),
     };
   } catch (error) {
     console.error('[paymentService] Failed to fetch user data:', error);
@@ -166,12 +167,18 @@ export const formatAmount = (amount: number): string => {
 export interface InitiatePaymentParams {
   amount: number | string;
   description: string;
+  image?: string;
+  currency?: string;
+  orderId?: string;
   competitionId?: string;
   competitionName?: string;
   userId?: string;
   userEmail?: string;
   userContact?: string;
   userName?: string;
+  email?: string;
+  contact?: string;
+  name?: string;
 }
 
 export interface PaymentResult {

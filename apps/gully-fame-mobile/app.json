@@ -3,7 +3,7 @@
     "name": "Gully Fame",
     "slug": "gully-fame-mobile",
     "version": "1.0.0",
-    "backgroundColor": "#3C2610",
+    "backgroundColor": "#000000",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "gullyfamemobile",
@@ -19,7 +19,7 @@
       }
     },
     "android": {
-      "backgroundColor": "#3C2610",
+      "backgroundColor": "#000000",
       "usesCleartextTraffic": false,
       "versionCode": 1,
       "package": "com.gullyfame.mobile",
@@ -39,7 +39,8 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED"
       ]
     },
     "web": {
@@ -101,9 +102,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "f5294312-557c-428a-a89b-12a7193444b5"
+        "projectId": "b3d08547-d9c1-47f8-9832-8a64bb6de279"
       }
     },
-    "owner": "gullyfameindia"
+    "owner": "gullyfamei"
   }
 }

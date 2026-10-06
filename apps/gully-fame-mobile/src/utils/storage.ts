@@ -2,6 +2,7 @@
 // Storage Utilities - AsyncStorage helpers with encryption/decryption
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Buffer } from 'buffer';
 
 /**
  * Simple encryption (base64 - for demo only, use proper encryption in production)

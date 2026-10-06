@@ -51,7 +51,7 @@ export class OfflineService {
         isConnected: state.isConnected ?? false,
         isInternetReachable: state.isInternetReachable ?? false,
         type: state.type,
-        isExpensive: state.isExpensive,
+        isExpensive: state.details?.isConnectionExpensive ?? false,
       };
     } catch (error) {
       console.error('[OfflineService] Failed to get network info:', error);
@@ -291,9 +291,10 @@ export async function apiCallWithOfflineSupport<T>(
 
   // Device is online, make normal API call
   const { default: apiClient } = await import('@/api/axios');
-  return apiClient({
+  const response = await apiClient.request<T>({
     method,
     url,
     data,
   });
+  return response.data;
 }

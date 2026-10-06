@@ -1,6 +1,7 @@
 import { NavigationProp, RouteProp } from "@react-navigation/native";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+
+type NativeStackNavigationProp<ParamList extends {}> = NavigationProp<ParamList>;
+type BottomTabNavigationProp<ParamList extends {}> = NavigationProp<ParamList>;
 
 // Auth Stack Params
 export type AuthStackParamList = {

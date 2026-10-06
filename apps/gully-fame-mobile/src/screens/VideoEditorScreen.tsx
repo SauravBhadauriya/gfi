@@ -20,7 +20,7 @@ import {
 
 // 🎬 Importing the premium editor component and types
 import ModernPreviewEditor from "../modules/video-editor/camera-module/components/ModernPreviewEditor";
-import type { CameraClip } from "../types/camera.types";
+import type { CameraClip } from "../modules/video-editor/camera-module/types/camera.types";
 
 // ⚡ Naya Import SpeedSelector ke liye
 import SpeedSelector from "../components/ui/SpeedSelector"; 
@@ -45,14 +45,14 @@ const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({ route, navigation
   const [clip, setClip] = useState<CameraClip>({
     id: `clip_${Date.now()}`,
     uri: videoUri,
+    duration: 0,
     type: "video",
+    source: "camera",
     trimStart: 0,
     trimEnd: 0,
-    filterPreset: null,
     textOverlays: [],
     musicOffset: 0,
-    // ⚡ Initialize Default Speed here
-    speedConfig: { type: 'constant', value: 1.0 }
+    speed: 1,
   });
 
   // ✅ Initialize editing session on mount
@@ -121,9 +121,9 @@ const VideoEditorScreen: React.FC<VideoEditorScreenProps> = ({ route, navigation
       setProcessing(true);
 
       // 1️⃣ Step: Apply Trim if timeline handles were dragged
-      if (clip.trimStart > 0 || clip.trimEnd < (session.duration || 0)) {
+      if ((clip.trimStart ?? 0) > 0 || (clip.trimEnd ?? session.duration ?? 0) < (session.duration || 0)) {
         setProcessingMessage("Trimming your video clip...");
-        await videoEditorService.trimVideo(session.id, clip.trimStart || 0, clip.trimEnd || session.duration);
+        await videoEditorService.trimVideo(session.id, clip.trimStart ?? 0, clip.trimEnd ?? session.duration);
       }
 
       // ⚡ Step 1.5: Apply Speed adjustment before filters

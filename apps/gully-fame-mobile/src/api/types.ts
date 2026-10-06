@@ -2,6 +2,7 @@ import { AxiosError } from 'axios';
 
 export interface ApiResponse<T = any> {
   success: boolean;
+  code?: number;
   message?: string;
   data?: T;
   error?: string;
@@ -38,4 +39,3 @@ export interface RequestConfig {
   skipAuth?: boolean;
   timeout?: number;
 }
-

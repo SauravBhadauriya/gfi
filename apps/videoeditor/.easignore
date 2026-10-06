@@ -1,0 +1,13 @@
+**/node_modules/
+**/.git/
+**/android/
+**/ios/
+**/dist/
+**/build/
+**/.expo/
+**/.next/
+**/.turbo/
+**/.cache/
+**/coverage/
+**/.yarn/
+**/.pnpm-store/

@@ -114,11 +114,10 @@ const TimelineAudioPanel: React.FC<TimelineAudioPanelProps> = ({
         {/* Tracks */}
         {tracks.length > 0 ? (
           <AdvancedAudioEditor
-            tracks={tracks}
-            onUpdateTrack={handleUpdateTrack}
-            onDeleteTrack={handleDeleteTrack}
-            onApplyEffects={onApplyEffects || (() => {})}
-            maxDuration={maxDuration}
+            tracks={tracks as unknown as import('../types/audioEffects.types').AudioTrackWithEffects[]}
+            onUpdateTracks={(updated) => onUpdateTracks(updated as unknown as AudioTrack[])}
+            onUpdateMixSettings={(settings) => setMasterVolume(settings.masterVolume * 100)}
+            onClose={() => {}}
           />
         ) : (
           <View style={styles.emptyState}>

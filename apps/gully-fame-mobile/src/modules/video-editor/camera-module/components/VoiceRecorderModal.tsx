@@ -9,8 +9,7 @@ import {
   Alert,
   Animated,
 } from "react-native";
-// Audio imports removed - expo-av native module error
-const Audio = { Sound: { create: async () => ({ sound: null }) } };
+import { RecordingPresets, requestRecordingPermissionsAsync, setAudioModeAsync, useAudioRecorder } from "expo-audio";
 import Svg, { Path, Circle } from "react-native-svg";
 import type { VoiceOverlay } from "../types/voiceOverlay.types";
 
@@ -30,8 +29,8 @@ const VoiceRecorderModal: React.FC<VoiceRecorderModalProps> = ({
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingUri, setRecordingUri] = useState<string | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingRef = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -55,22 +54,19 @@ const VoiceRecorderModal: React.FC<VoiceRecorderModalProps> = ({
 
   const startRecording = async () => {
     try {
-      const { granted } = await Audio.requestPermissionsAsync();
+      const { granted } = await requestRecordingPermissionsAsync();
       if (!granted) {
         Alert.alert("Permission Required", "Microphone permission is required to record voice");
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      await recording.startAsync();
-
-      recordingRef.current = recording;
+      await recordingRef.prepareToRecordAsync();
+      recordingRef.record();
       setIsRecording(true);
       setRecordingTime(0);
 
@@ -85,10 +81,8 @@ const VoiceRecorderModal: React.FC<VoiceRecorderModalProps> = ({
 
   const stopRecording = async () => {
     try {
-      if (!recordingRef.current) return;
-
-      await recordingRef.current.stopAndUnloadAsync();
-      const uri = recordingRef.current.getURI();
+      await recordingRef.stop();
+      const uri = recordingRef.uri;
 
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -96,7 +90,6 @@ const VoiceRecorderModal: React.FC<VoiceRecorderModalProps> = ({
 
       setIsRecording(false);
       setRecordingUri(uri || null);
-      recordingRef.current = null;
     } catch (error) {
       Alert.alert("Error", "Failed to stop recording");
       console.error(error);

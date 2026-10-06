@@ -9,7 +9,7 @@ import {
   ScrollView,
 } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import type { OverlayEffect } from '../types/voiceOverlay.types';
+import type { OverlayEffect } from '../../types/voiceOverlay.types';
 
 interface OverlayEditorModalProps {
   visible: boolean;

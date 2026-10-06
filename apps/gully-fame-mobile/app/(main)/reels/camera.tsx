@@ -11,6 +11,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
+  AppState,
   Text,
   TouchableOpacity,
   StyleSheet,
@@ -25,11 +26,11 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
-import { router, useLocalSearchParams } from 'expo-router';
-import { AudioLibraryModal, type Audio } from '@/src/components/AudioLibraryModal';
+import * as MediaLibrary from 'expo-media-library/legacy';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { AudioLibraryModal, type Audio } from '@/components/AudioLibraryModal';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('screen');
 
 // ============================================================================
 // TYPES
@@ -84,11 +85,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-  },
-  camera: {
-    flex: 1,
-    width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT,
   },
   permissionContainer: {
     flex: 1,
@@ -392,6 +388,16 @@ const styles = StyleSheet.create({
 // ============================================================================
 
 export default function InstagramReelCamera() {
+  const { width, height } = Dimensions.get('screen');
+  const [isFocused, setIsFocused] = useState(true);
+  const [appState, setAppState] = useState(AppState.currentState);
+
+  useFocusEffect(
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
+  );
   const params = useLocalSearchParams();
   const [state, setState] = useState<CameraScreenState>(INITIAL_STATE);
   const [hasPermission, setHasPermission] = useState(false);
@@ -400,6 +406,11 @@ export default function InstagramReelCamera() {
   const [showZoomModal, setShowZoomModal] = useState(false);
   const [showAspectModal, setShowAspectModal] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', setAppState);
+    return () => subscription.remove();
+  }, []);
 
   const cameraRef = useRef<CameraView>(null);
   // @ts-ignore - NodeJS.Timeout not available
@@ -513,9 +524,9 @@ export default function InstagramReelCamera() {
   }, [state.maxDuration, state.segments, state.recordingTime]);
 
   const stopRecording = useCallback(async () => {
-    if (cameraRef.current?.isRecording) {
+    if (state.isRecording) {
       try {
-        await cameraRef.current.stopRecording();
+        await cameraRef.current?.stopRecording();
         setState(prev => ({ ...prev, isRecording: false }));
       } catch (error) {
         console.error('[ReelCamera] Stop error:', error);
@@ -672,14 +683,17 @@ export default function InstagramReelCamera() {
   return (
     <View style={styles.container}>
       {/* Camera */}
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={state.cameraFacing}
-        enableTorch={state.flash === 'on'}
-        zoom={state.zoom - 1}
-        mode="video"
-      />
+      {isFocused && appState === 'active' && (
+        <CameraView
+          ref={cameraRef}
+          style={{ position: 'absolute', top: 0, left: 0, width, height }}
+          facing={state.cameraFacing}
+          enableTorch={state.flash === 'on'}
+          zoom={state.zoom - 1}
+          mode="video"
+          active={isFocused && appState === 'active'}
+        />
+      )}
 
       {/* Top Bar */}
       <View style={styles.topBar}>

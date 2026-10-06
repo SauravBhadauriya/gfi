@@ -18,7 +18,7 @@ import {
 import { router, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BackIcon, ShareIcon, ClockIcon, MedalIcon } from "@/icons";
+import { BackIcon, ShareIcon, ClockIcon, MedalIcon, FacebookIcon } from "@/icons";
 import TopPerformer from "@/components/home/TopDancers/TopPerformer";
 import TopTenLeaderboard from "@/components/TopTenLeaderboard/TopTenLeaderboard";
 import { liveCompetitionStyles as styles } from "@/styles/liveCompetitionStyles";
@@ -112,7 +112,7 @@ export default function LiveCompetitionScreen() {
         ]);
 
         let compData = compRes.success ? compRes.data : null;
-        let leadData = [];
+        let leadData: Array<Record<string, unknown>> = [];
 
         if (leadRes.success && leadRes.data?.leaderboard) {
           leadData = leadRes.data.leaderboard.map((entry: any) => ({

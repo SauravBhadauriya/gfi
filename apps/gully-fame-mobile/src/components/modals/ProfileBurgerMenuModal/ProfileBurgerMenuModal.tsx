@@ -11,7 +11,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from "react-native";
-import { Svg, Path, Circle, Polyline, Line } from "react-native-svg";
+import { Svg, Path, Circle, Polyline, Line, Text as SvgText } from "react-native-svg";
 import { ProfileData } from "@/hooks/profileHooks";
 import { useEffect, useState } from "react";
 import { userService } from "@/api/services/userService";
@@ -243,7 +243,7 @@ function ProfileBurgerMenuModal({
             <TouchableOpacity style={styles.menuItem} onPress={() => handleNavigation("/(main)/faq")}>
               <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
                 <Circle cx="12" cy="12" r="10" stroke="#EC9A15" strokeWidth={2} />
-                <Text x="12" y="16" textAnchor="middle" stroke="#EC9A15" fill="#EC9A15" fontSize="12" fontWeight="bold">?</Text>
+                <SvgText x="12" y="16" textAnchor="middle" stroke="#EC9A15" fill="#EC9A15" fontSize="12" fontWeight="bold">?</SvgText>
                 <Path d="M12 16v-4M12 8h.01" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" />
               </Svg>
               <Text style={styles.menuItemText}>FAQs</Text>

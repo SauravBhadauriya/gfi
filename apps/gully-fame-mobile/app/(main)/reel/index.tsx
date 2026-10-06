@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { File, Paths } from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { Asset } from "expo-asset";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import {
@@ -117,14 +117,17 @@ function ReelVideoPlayer({ reel, isVisible, videoRefs }: ReelVideoPlayerProps) {
     };
   }, [isVisible, player]);
 
+  
   return (
     <VideoView
       style={styles.reelImage}
       player={player}
       contentFit="cover"
+      nativeControls={false} // 🛠️ FIX 2: Default video player controls ko hide karega
     />
   );
 }
+
 
 export default function GullyReelScreen() {
   const params = useLocalSearchParams();
@@ -176,7 +179,6 @@ export default function GullyReelScreen() {
   const [shareModalFollowers, setShareModalFollowers] = useState<any[]>([]);
   const [isLoadingShareFollowers, setIsLoadingShareFollowers] = useState(false);
 
-  // Move these declarations earlier to fix "used before declaration" errors
   const [commentModalVisible, setCommentModalVisible] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
   const [currentReelBackendId, setCurrentReelBackendId] = useState<string | null>(null);
@@ -188,17 +190,28 @@ export default function GullyReelScreen() {
   const memoizedReels = useMemo(() => reels, [reels]);
 
   useFocusEffect(
-  useCallback(() => {
-    setIsFocused(true);
-    return () => setIsFocused(false);
-  }, [])
-);
+    useCallback(() => {
+      setIsFocused(true);
+      return () => setIsFocused(false);
+    }, [])
+  );
 
   useEffect(() => {
     const fetchInitialReels = async () => {
       try {
         setIsLoadingReels(true);
-        const response = await reelsService.getReels(10);
+        let response: any;
+        
+        // 🛠️ FIX 3 & 4: Check if coming from Profile (userId exists) or GullyReel Tab
+        if (params.userId) {
+          // Profile Se Aaye -> Sirf is user ki reels dikhao
+          response = (reelsService as any).getUserReels 
+            ? await (reelsService as any).getUserReels(params.userId as string) 
+            : await reelsService.getReels(10, undefined, params.userId as string);
+        } else {
+          // Bottom Nav (GullyReel Tab) Se Aaye -> Sabki global/random reels dikhao
+          response = await reelsService.getReels(10);
+        }
         
         if (response.success && response.data?.reels) {
           setReels(response.data.reels);
@@ -218,25 +231,33 @@ export default function GullyReelScreen() {
     };
     
     fetchInitialReels();
-  }, []);
+  }, [params.userId]); // 👈 params.userId add karna zaruri hai
 
   useFocusEffect(
     useCallback(() => {
       const refetchFeedOnFocus = async () => {
         try {
-          const response = await reelsService.getReels(10);
+          let response: any;
+          if (params.userId) {
+             response = (reelsService as any).getUserReels 
+              ? await (reelsService as any).getUserReels(params.userId as string) 
+              : await reelsService.getReels(10, undefined, params.userId as string);
+          } else {
+             response = await reelsService.getReels(10);
+          }
+
           if (response.success && response.data?.reels) {
             setReels(response.data.reels);
             setCurrentCursor(response.data.nextCursor);
             setHasMoreReels(response.data.hasMore);
           }
         } catch (error: any) {
-          // Silent catch for background refresh
+          // Silent catch
         }
       };
 
       refetchFeedOnFocus();
-    }, [])
+    }, [params.userId])
   );
 
   useEffect(() => {
@@ -414,8 +435,7 @@ export default function GullyReelScreen() {
       await watermarkAsset.downloadAsync();
       const watermarkUri = watermarkAsset.localUri || watermarkAsset.uri;
 
-      const outputFile = new File(Paths.cache, `gully_watermarked_${Date.now()}.mp4`);
-      const outputUri = outputFile.uri;
+      const outputUri = `${FileSystem.cacheDirectory}gully_watermarked_${Date.now()}.mp4`;
 
       const ffmpegCommand = `-i ${videoUri} -i ${watermarkUri} -filter_complex "[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.6[wm];[0:v][wm]overlay=W-w-20:H-h-20" -preset ultrafast -c:a copy ${outputUri}`;
 
@@ -432,9 +452,7 @@ export default function GullyReelScreen() {
           await MediaLibrary.createAlbumAsync("GullyFame", asset, false);
         }
 
-        if (outputFile.exists) {
-          outputFile.delete();
-        }
+        await FileSystem.deleteAsync(outputUri, { idempotent: true });
 
         Alert.alert("Success!", "Reel saved to your gallery with +10 XP!");
       } else {
@@ -606,7 +624,7 @@ export default function GullyReelScreen() {
             ? {
               ...reel,
               isSaved: !reel.isSaved,
-                            saves: reel.isSaved ? Math.max(0, (reel.saves || 0) - 1) : (reel.saves || 0) + 1,
+              saves: reel.isSaved ? Math.max(0, (reel.saves || 0) - 1) : (reel.saves || 0) + 1,
             }
             : reel
         )
@@ -627,47 +645,45 @@ export default function GullyReelScreen() {
     [reels]
   );
 
-  const handleVideoTap = useCallback(async (id: number) => {
+  const handleVideoTap = useCallback((id: number) => {
     const videoRef = videoRefs.current.get(id);
     if (!videoRef) return;
 
     try {
-      const status = await videoRef.getStatusAsync();
-      if (status.isLoaded) {
-        const isPlaying = status.isPlaying;
-        videoPlayingStates.current.set(id, !isPlaying);
+      // 🛠️ FIX for expo-video: using 'playing' property directly instead of getStatusAsync()
+      const isPlaying = videoRef.playing;
+      videoPlayingStates.current.set(id, !isPlaying);
 
-        if (isPlaying) {
-          videoRef.pause();
-          setShowPlayPauseIcon({ reelId: id, isPlaying: false });
-        } else {
-          if (AppState.currentState === "active") {
-            videoRef.play();
-            setShowPlayPauseIcon({ reelId: id, isPlaying: true });
-          }
+      if (isPlaying) {
+        videoRef.pause();
+        setShowPlayPauseIcon({ reelId: id, isPlaying: false });
+      } else {
+        if (AppState.currentState === "active") {
+          videoRef.play();
+          setShowPlayPauseIcon({ reelId: id, isPlaying: true });
         }
+      }
 
-        playPauseIconOpacity.setValue(0);
+      playPauseIconOpacity.setValue(0);
+      Animated.timing(playPauseIconOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+
+      if (playPauseIconTimeout.current) {
+        clearTimeout(playPauseIconTimeout.current);
+      }
+
+      playPauseIconTimeout.current = setTimeout(() => {
         Animated.timing(playPauseIconOpacity, {
-          toValue: 1,
+          toValue: 0,
           duration: 200,
           useNativeDriver: true,
-        }).start();
-
-        if (playPauseIconTimeout.current) {
-          clearTimeout(playPauseIconTimeout.current);
-        }
-
-        playPauseIconTimeout.current = setTimeout(() => {
-          Animated.timing(playPauseIconOpacity, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }).start(() => {
-            setShowPlayPauseIcon(null);
-          });
-        }, 1000);
-      }
+        }).start(() => {
+          setShowPlayPauseIcon(null);
+        });
+      }, 1000);
     } catch (error) {
       console.error("Error toggling video playback:", error);
     }
@@ -726,42 +742,6 @@ export default function GullyReelScreen() {
     [reels]
   );
 
-  // const handleSave = useCallback(
-  //   async (id: number) => {
-  //     const targetReel = reels.find((r) => r.id === id);
-  //     if (!targetReel || !targetReel._backendId) {
-  //       return;
-  //     }
-
-  //     const previousReels = reels;
-
-  //     setReels((prevReels) =>
-  //       prevReels.map((reel) =>
-  //         reel.id === id
-  //           ? {
-  //             ...reel,
-  //             isSaved: !reel.isSaved,
-  //             saves: reel.isSaved ? (reel.saves || 0) - 1 : (reel.saves || 0) + 1,
-  //           }
-  //           : reel
-  //       )
-  //     );
-
-  //     try {
-  //       const response = await reelsService.toggleSaveReel(targetReel._backendId);
-
-  //       if (!response.success) {
-  //         setReels(previousReels);
-  //         Alert.alert("Error", response.message || "Failed to save reel");
-  //       }
-  //     } catch (error: any) {
-  //       setReels(previousReels);
-  //       Alert.alert("Error", "Failed to save reel");
-  //     }
-  //   },
-  //   [reels]
-  // );
-
   const handleEndReached = useCallback(() => {
     if (isLoadingMore || !hasMoreReels || !currentCursor) {
       return;
@@ -772,10 +752,11 @@ export default function GullyReelScreen() {
         setIsLoadingMore(true);
         const response = await reelsService.getReels(10, currentCursor);
 
-        if (response.success && response.data?.reels && response.data.reels.length > 0) {
-          setReels((prevReels) => [...prevReels, ...response.data.reels]);
-          setCurrentCursor(response.data.nextCursor);
-          setHasMoreReels(response.data.hasMore);
+        const pageData = response.data;
+        if (response.success && pageData?.reels && pageData.reels.length > 0) {
+          setReels((prevReels) => [...prevReels, ...pageData.reels]);
+          setCurrentCursor(pageData.nextCursor);
+          setHasMoreReels(pageData.hasMore);
         } else {
           setHasMoreReels(false);
         }
@@ -1425,7 +1406,7 @@ export default function GullyReelScreen() {
                             comment.replies &&
                             comment.replies.length > 0 && (
                               <View style={styles.repliesContainer}>
-                                {comment.replies.map((reply) => {
+                                {comment.replies.map((reply: { id: number; likes: number; isLiked: boolean; avatar?: string; username: string; level: number; comment: string }) => {
                                   const replyLikeData = commentLikes.get(reply.id) || {
                                     likes: reply.likes,
                                     isLiked: reply.isLiked,
@@ -2020,8 +2001,8 @@ export default function GullyReelScreen() {
             setCurrentTipReelId(null);
             setCurrentTipCreatorId(undefined);
           }}
-          reelId={currentTipReelId}
-          creatorId={currentTipCreatorId}
+          reelId={String(currentTipReelId)}
+          creatorId={currentTipCreatorId ?? ''}
           creatorName={
             reels.find((r) => r.id === currentTipReelId)?.creatorName || "Creator"
           }

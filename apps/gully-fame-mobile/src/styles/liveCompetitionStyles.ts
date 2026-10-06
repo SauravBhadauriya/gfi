@@ -910,7 +910,6 @@ export const liveCompetitionStyles = StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: 18,
-        backdropFilter: "blur(10px)",
     },
     statText: {
         color: "#fff",

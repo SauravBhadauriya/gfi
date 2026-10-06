@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
+  AppState,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
   Platform,
-  Dimensions,
   Animated,
   Modal,
   ScrollView,
@@ -14,30 +14,42 @@ import {
   Linking,
   Image,
   PanResponder,
+  Dimensions,
+  InteractionManager,
+  type AppStateStatus,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
+import { 
+  Camera, 
+  useCameraDevice, 
+  useVideoOutput,
+  type CameraRef,
+} from "react-native-vision-camera";
+import { useCameraPermission, useMicrophonePermission } from "react-native-vision-camera/lib/hooks/usePermission";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Svg, { Path, Circle, Rect, G } from "react-native-svg";
+import Svg, { Circle } from "react-native-svg";
+
+// ============================================================================
+// CAMERA IMPLEMENTATION CHOICE: Set CAMERA_USE_EXPO_CAMERA to true to use expo-camera,
+// or false to use react-native-vision-camera (v5.2.3, TextureView/compatible mode on Android)
+// ============================================================================
+const CAMERA_USE_EXPO_CAMERA = false;
+const BUILD_MARKER_TIMESTAMP_VISION = new Date().toISOString();
 
 let VideoEditorModule: any = null;
 import MusicLibraryModal from "@/components/MusicLibraryModal";
 import { listAudio } from "@api/services/musicLibraryService";
-import { listFilters, FilterPreset } from "@api/services/filterLibraryService";
+import { listFilters } from "@api/services/filterLibraryService";
 import {
   FlashIcon,
   TimerIcon,
-  SpeedIcon,
   MusicIcon,
   FilterIcon,
   CloseIcon,
   GalleryIcon,
   CameraFlipIcon,
 } from "@/icons";
-
-const { width } = Dimensions.get("window");
 
 type RecordingMode = "video" | "photo";
 type CameraFacing = "front" | "back";
@@ -63,75 +75,101 @@ interface CameraFormat {
   color: "SDR" | "HDR";
 }
 
-
 function _mapResolutionToQuality(resolution: string): string {
   switch (resolution?.toLowerCase()) {
     case "4k":
     case "4k_3840x2160":
-      return "2160p";  
+      return "2160p";
     case "2k":
     case "2k_2560x1440":
-      return "1440p";  
+      return "1440p";
     case "fhd":
     case "1080p":
-      return "1080p";  
+      return "1080p";
     case "hd":
     case "720p":
     default:
-      return "480p";   
+      return "480p";
   }
 }
-
-function _getVideoQualityBitrate(resolution: string): number {
-  // Bitrate in bits per second for different resolutions
-  switch (resolution?.toLowerCase()) {
-    case "4k":
-    case "4k_3840x2160":
-      return 15000000; // 15 Mbps for 4K
-    case "2k":
-    case "2k_2560x1440":
-      return 8000000;  // 8 Mbps for 2K
-    case "fhd":
-    case "1080p":
-      return 5000000;  // 5 Mbps for FHD
-    case "hd":
-    case "720p":
-    default:
-      return 2500000;  // 2.5 Mbps for HD
-  }
-}
-
 
 export default function TikTokCameraScreen() {
-  console.log("🔥🔥🔥 GULLYFAME CAMERA SCREEN RUNTIME VERSION 999 - ACTUAL ROUTE 🔥🔥🔥");
-  const [isFocused, setIsFocused] = useState(true);
+  const { width, height } = Dimensions.get('screen');
+  const [isFocused, setIsFocused] = useState(false);
+  const [appState, setAppState] = useState(AppState.currentState);
+  const [transitionComplete, setTransitionComplete] = useState(false);
+  const [cameraKey, setCameraKey] = useState(0);
+  const [mountError, setMountError] = useState<string | null>(null);
+  const transitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useFocusEffect(
     useCallback(() => {
       setIsFocused(true);
-      return () => setIsFocused(false);
+      setMountError(null);
+      
+      // Wait for screen transition to complete before mounting camera surface
+      if (transitionTimeoutRef.current) {
+        clearTimeout(transitionTimeoutRef.current);
+      }
+      
+      transitionTimeoutRef.current = setTimeout(() => {
+        const task = InteractionManager.runAfterInteractions(() => {
+          setTransitionComplete(true);
+        });
+        return () => task.cancel();
+      }, 300);
+
+      return () => {
+        setIsFocused(false);
+        setTransitionComplete(false);
+        if (transitionTimeoutRef.current) {
+          clearTimeout(transitionTimeoutRef.current);
+        }
+      };
     }, [])
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      setAppState(state);
+      if (state !== "active") {
+        setTransitionComplete(false);
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
   const params = useLocalSearchParams();
   const competitionId = params.competitionId ? String(params.competitionId) : null;
   const [showVideoEditor, setShowVideoEditor] = useState(false);
   const [isVideoEditorLoaded, setIsVideoEditorLoaded] = useState(false);
   const competitionName = params.competitionName ? String(params.competitionName) : null;
   const entryFee = params.entryFee ? String(params.entryFee) : null;
-  
-  
+
   const supportedResolutions = ["HD", "FHD", "2K", "4K"];
   const supportedFrameRates = [24, 30, 60];
-  const supportedColors: ("SDR" | "HDR")[] = ["SDR", "HDR"];
-  const supportedZoomLevels = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];  
-  
-  const SLIDER_WIDTH = 200;
-  const STEP_WIDTH = SLIDER_WIDTH / (supportedZoomLevels.length - 1);  
-  const zoomThumbTranslateX = useRef(new Animated.Value(0)).current;
-  
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
-  const [microphonePermission, requestMicrophonePermission] = useMicrophonePermissions();
+  const supportedZoomLevels = [1, 2, 3, 4];
 
+  const SLIDER_WIDTH = 200;
+  const STEP_WIDTH = SLIDER_WIDTH / (supportedZoomLevels.length - 1);
+  const zoomThumbTranslateX = useRef(new Animated.Value(0)).current;
+
+  // Declare facing state BEFORE using it in useCameraDevice
+  const [facing, setFacing] = useState<CameraFacing>("back");
+  const [flashEnabled, setFlashEnabled] = useState<FlashMode>("off");
+
+  // Vision-camera permission and device hooks (v5)
+  const cameraPermission = useCameraPermission();
+  const micPermission = useMicrophonePermission();
   
+  // Device hook - now facing is defined
+  const device = useCameraDevice(facing);
+  
+  // Video output for vision-camera recording (v5 API)
+  const videoOutput = useVideoOutput({
+    enableAudio: true,
+  });
+
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("video");
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState("00:00");
@@ -146,9 +184,6 @@ export default function TikTokCameraScreen() {
   const [loadingFilters, setLoadingFilters] = useState(false);
   const [showFilterPopup, setShowFilterPopup] = useState(false);
 
-  
-  const [facing, setFacing] = useState<CameraFacing>("back");
-  const [flashEnabled, setFlashEnabled] = useState<FlashMode>("off");
   const [currentZoom, setCurrentZoom] = useState<number>(1);
   const [showHDPopup, setShowHDPopup] = useState(false);
   const [hdPopupPos, setHDPopupPos] = useState({ x: 0, y: 0 });
@@ -162,57 +197,67 @@ export default function TikTokCameraScreen() {
   const [maxRecordingDuration, setMaxRecordingDuration] = useState<TimerOption>(30);
   const [showSpeedPopup, setShowSpeedPopup] = useState(false);
   const [showTimerPopup, setShowTimerPopup] = useState(false);
-  const [showMusicPopup, setShowMusicPopup] = useState(false);
   const [showMusicPickerModal, setShowMusicPickerModal] = useState(false);
   const [speedPopupPos, setSpeedPopupPos] = useState({ x: 0, y: 0 });
   const [timerPopupPos, setTimerPopupPos] = useState({ x: 0, y: 0 });
-  const [musicPopupPos, setMusicPopupPos] = useState({ x: 0, y: 0 });
   const [filterPopupPos, setFilterPopupPos] = useState({ x: 0, y: 0 });
   const [showFilterLabel, setShowFilterLabel] = useState(false);
   const [filterLabelOpacity] = useState(new Animated.Value(0));
   const [showFilterGrid, setShowFilterGrid] = useState(false);
 
-  const cameraRef = useRef<any>(null);
+  const cameraRef = useRef<CameraRef | null>(null);
   const recordingRef = useRef<any>(null);
-  const isStopping = useRef(false);
   const progressAnim = useRef(new Animated.Value(0)).current;
   const toolbarOpacity = useRef(new Animated.Value(1)).current;
   const clipBarTranslateY = useRef(new Animated.Value(0)).current;
   const zoomMenuScale = useRef(new Animated.Value(0)).current;
-  const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const recordingStartTime = useRef<number>(0);
   const speedButtonRef = useRef<View>(null);
   const timerButtonRef = useRef<View>(null);
   const hdButtonRef = useRef<View>(null);
   const musicButtonRef = useRef<View>(null);
   const filterButtonRef = useRef<View>(null);
-  const cameraViewRef = useRef<View>(null);
   const filterLabelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  
   const handleCameraReady = () => {
-    console.log("[CAMERA] ========== onCameraReady FIRED ==========");
-    console.log("[CAMERA] Platform:", Platform.OS);
-    console.log("[CAMERA] Camera is now ready for recording/photos");
-    if (Platform.OS === 'android') {
-      console.log("[CAMERA-ANDROID] Preview should now be initialized");
-      console.log("[CAMERA-ANDROID] Ratio: 16:9");
-    }
+    console.log("[CAMERA] onCameraReady FIRED on", Platform.OS);
     setCameraReady(true);
   };
 
+  const resetRecordingUI = () => {
+    Animated.timing(toolbarOpacity, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+    Animated.spring(clipBarTranslateY, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start();
+    Animated.spring(zoomMenuScale, {
+      toValue: 0,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start();
+    progressAnim.setValue(0);
+  };
+
   const startRecording = async () => {
-    console.log("[RECORDING] START REQUESTED");
-    
+    console.log("[RECORDING] START REQUESTED - Camera Implementation:", CAMERA_USE_EXPO_CAMERA ? "expo-camera" : "vision-camera v5");
+
     if (isRecording) {
       console.log("[RECORDING] Already recording, ignoring");
       return;
     }
 
-    if (!microphonePermission?.granted) {
+    if (!micPermission.hasPermission) {
       try {
-        const micPermission = await requestMicrophonePermission();
-        if (!micPermission.granted) {
+        const granted = await micPermission.requestPermission();
+        if (!granted) {
           Alert.alert(
             "Microphone Permission Required",
             "We need access to your microphone to record videos with audio.",
@@ -226,7 +271,7 @@ export default function TikTokCameraScreen() {
           );
           return;
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("[PERMISSION] error:", error);
         return;
       }
@@ -237,16 +282,12 @@ export default function TikTokCameraScreen() {
       Alert.alert("Error", "Camera not ready. Please wait a moment and try again.");
       return;
     }
-    
-    console.log("[CAMERA] ref ready");
-    
+
     if (!cameraReady) {
-      console.log("[CAMERA] Camera not ready yet (onCameraReady not fired)");
+      console.log("[CAMERA] Camera not ready yet (onInitialized not fired)");
       Alert.alert("Error", "Camera is warming up. Please try again.");
       return;
     }
-    
-    console.log("[CAMERA] Camera ready to record");
 
     setIsRecording(true);
     recordingStartTime.current = Date.now();
@@ -280,119 +321,64 @@ export default function TikTokCameraScreen() {
     }).start();
 
     try {
-      console.log("[RECORDING] INVOKING recordAsync");
+      console.log("[RECORDING] Starting video recording via vision-camera v5");
       
-      const recordingOptions: any = {
-        mute: false, 
-        maxDuration: (maxRecordingDuration || 60) * 1000,
-        quality: _mapResolutionToQuality(selectedCameraFormat.resolution),
-      };
-      
-      console.log("[RECORDING OPTIONS]", recordingOptions);
-      
-      const videoData = await cameraRef.current.recordAsync(recordingOptions);
-      
-      console.log("[RECORDING] RESOLVED with data:", videoData);
-
-      if (!videoData?.uri) {
-        console.log("[FILE] NO URI - recording produced no data");
-        setIsRecording(false);
-        recordingRef.current = null;
-        Alert.alert("Error", "No video recorded");
-        
-        Animated.timing(toolbarOpacity, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }).start();
-        Animated.spring(clipBarTranslateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 8,
-        }).start();
-        Animated.spring(zoomMenuScale, {
-          toValue: 0,
-          useNativeDriver: true,
-          tension: 50,
-          friction: 8,
-        }).start();
-        progressAnim.setValue(0);
-        return;
+      // Vision-camera v5 recording via videoOutput.createRecorder()
+      if (!videoOutput) {
+        throw new Error("Video output not available");
       }
 
-      console.log("[FILE] URI:", videoData.uri);
-      const newClip: VideoClip = {
-        id: Date.now().toString(),
-        uri: videoData.uri,
-        duration: Math.floor((Date.now() - recordingStartTime.current) / 1000),
-      };
+      const recorder = await videoOutput.createRecorder({});
       
-      console.log("[CLIP] CREATED:", newClip);
-      setRecordedClips((prev) => [...prev, newClip]);
+      await recorder.startRecording(
+        (filePath: string, reason: string) => {
+          console.log("[RECORDING] Finished:", filePath, reason);
+          const elapsed = (Date.now() - recordingStartTime.current) / 1000;
+          const newClip: VideoClip = {
+            id: Date.now().toString(),
+            uri: `file://${filePath}`,
+            duration: elapsed,
+            speed: selectedSpeed,
+            musicTrack: selectedMusicTrack,
+            filter: selectedFilter,
+            resolution: selectedCameraFormat.resolution,
+            frameRate: selectedCameraFormat.frameRate,
+          };
+          setRecordedClips((prev) => [...prev, newClip]);
+          setIsRecording(false);
+          recordingRef.current = null;
+          resetRecordingUI();
+        },
+        (error: Error) => {
+          console.error("[RECORDING] Error during recording:", error);
+          Alert.alert("Recording Error", error?.message || "Failed during recording");
+          setIsRecording(false);
+          recordingRef.current = null;
+          resetRecordingUI();
+        }
+      );
 
-      setIsRecording(false);
-      recordingRef.current = null;
+      recordingRef.current = recorder;
 
-      Animated.timing(toolbarOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-
-      Animated.spring(clipBarTranslateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-
-      Animated.spring(zoomMenuScale, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-
-      progressAnim.setValue(0);
-
+      // Stop after max duration
+      if (maxDuration > 0) {
+        setTimeout(() => {
+          if (isRecording && recordingRef.current) {
+            recordingRef.current.stopRecording();
+          }
+        }, maxDuration * 1000);
+      }
     } catch (error: any) {
       console.error("[RECORDING] START ERROR:", error?.message);
       setIsRecording(false);
       recordingRef.current = null;
-      
-      Animated.timing(toolbarOpacity, {
-        toValue: 1,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-      Animated.spring(clipBarTranslateY, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-      Animated.spring(zoomMenuScale, {
-        toValue: 0,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 8,
-      }).start();
-      progressAnim.setValue(0);
-
-      Alert.alert(
-        "Recording Error",
-        error?.message || "Failed to start recording."
-      );
+      resetRecordingUI();
+      Alert.alert("Recording Error", error?.message || "Failed to start recording.");
     }
   };
+
   const stopRecording = async () => {
-    console.log("[STOP] REQUESTED");
-    
-    if (!isRecording) {
-      console.log("[STOP] Not recording, ignoring");
-      return;
-    }
+    if (!isRecording) return;
 
     try {
       if (timerIntervalRef.current) {
@@ -400,24 +386,25 @@ export default function TikTokCameraScreen() {
         timerIntervalRef.current = null;
       }
 
-      if (cameraRef.current?.isRecording) {
-        cameraRef.current.stopRecording();
+      if (recordingRef.current) {
+        await recordingRef.current.stopRecording();
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("[STOP] ERROR:", error);
+      setIsRecording(false);
+      recordingRef.current = null;
+      resetRecordingUI();
     }
   };
+
   const handleRecordPress = () => {
-    console.log("🔥🔥🔥 ACTUAL VISIBLE CAMERA BUTTON PRESSED 🔥🔥🔥");
     if (isRecording) {
       stopRecording();
     } else {
-      
       startRecording();
     }
   };
 
-  
   const deleteClip = (clipId: string) => {
     Alert.alert("Discard this clip?", "Are you sure you want to delete this clip?", [
       { text: "Cancel", style: "cancel" },
@@ -434,12 +421,11 @@ export default function TikTokCameraScreen() {
     ]);
   };
 
-  
   const toggleCamera = () => {
+    setCameraReady(false);
     setFacing((prev) => (prev === "back" ? "front" : "back"));
   };
 
-  
   const toggleFlash = () => {
     setFlashEnabled((prev) => {
       if (prev === "off") return "on";
@@ -448,13 +434,10 @@ export default function TikTokCameraScreen() {
     });
   };
 
-  
   const handleZoomChange = (zoom: number) => {
     if (supportedZoomLevels.includes(zoom)) {
       setCurrentZoom(zoom);
       const index = supportedZoomLevels.indexOf(zoom);
-      const newZoomRatio = (zoom - 0.5) / 3.5;
-      console.log(`[ZOOM] Changed to ${zoom}x (index: ${index}, zoomRatio: ${newZoomRatio.toFixed(2)})`);
 
       Animated.spring(zoomThumbTranslateX, {
         toValue: index * STEP_WIDTH,
@@ -465,59 +448,43 @@ export default function TikTokCameraScreen() {
     }
   };
 
-  
   const handleSpeedPress = () => {
     if (speedButtonRef.current) {
       speedButtonRef.current.measureInWindow((x, y, w, h) => {
         setSpeedPopupPos({
-          x: x - 8, 
-          y: y + h + 4, 
+          x: x - 8,
+          y: y + h + 4,
         });
         setShowSpeedPopup(true);
       });
     }
   };
 
-  
   const handleTimerPress = () => {
     if (timerButtonRef.current) {
       timerButtonRef.current.measureInWindow((x, y, w, h) => {
         setTimerPopupPos({
-          x: x - 8, 
-          y: y + h + 4, 
+          x: x - 8,
+          y: y + h + 4,
         });
         setShowTimerPopup(true);
       });
     }
   };
 
-  
   const pickFromGallery = async () => {
     try {
-      console.warn("[GALLERY] Button pressed - attempting to open picker");
-      
-      
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.All,
         allowsEditing: false,
         quality: 1,
       });
-      
-      console.warn("[GALLERY] Picker result:", result);
-      
-      if (result.canceled) {
-        console.warn("[GALLERY] User canceled");
-        return;
-      }
-      
+
+      if (result.canceled) return;
+
       const asset = result.assets?.[0];
-      console.warn("[GALLERY] Selected asset:", asset);
-      
-      if (!asset) {
-        console.error("[GALLERY] No asset");
-        return;
-      }
-      
+      if (!asset) return;
+
       const clip: VideoClip = {
         id: `gallery-${Date.now()}`,
         uri: asset.uri,
@@ -529,43 +496,37 @@ export default function TikTokCameraScreen() {
         resolution: selectedCameraFormat.resolution,
         frameRate: selectedCameraFormat.frameRate,
       };
-      
+
       setRecordedClips((prev) => [...prev, clip]);
-      console.warn("[GALLERY] SUCCESS - clip added");
     } catch (err) {
       console.error("[GALLERY] CAUGHT ERROR:", err);
     }
   };
 
-  
   const handleVideoEditorExport = (clips: any[]) => {
     setShowVideoEditor(false);
-    
+
     const convertedClips: VideoClip[] = clips.map((clip, index) => ({
       id: clip.id || `video-editor-${Date.now()}-${index}`,
       uri: clip.uri || clip.path || "",
       duration: clip.duration || 0,
       thumbnail: clip.thumbnailUri || clip.thumbnail,
     }));
-    
+
     setRecordedClips(convertedClips);
   };
 
-  
   const handleVideoEditorCancel = () => {
-    console.log("[Camera] VideoEditor cancel called, hiding VideoEditor");
     setShowVideoEditor(false);
   };
 
-  
   const handleNext = () => {
     if (recordedClips.length === 0) {
       Alert.alert("No Clips", "Please record at least one clip before proceeding.");
       return;
     }
-    
-    
-    const clipsWithMetadata = recordedClips.map(clip => ({
+
+    const clipsWithMetadata = recordedClips.map((clip) => ({
       ...clip,
       speed: selectedSpeed,
       musicTrack: selectedMusicTrack,
@@ -573,17 +534,7 @@ export default function TikTokCameraScreen() {
       resolution: selectedCameraFormat.resolution,
       frameRate: selectedCameraFormat.frameRate,
     }));
-    
-    console.log("[CAMERA] Passing clips with metadata:", {
-      count: clipsWithMetadata.length,
-      speed: selectedSpeed,
-      music: selectedMusicTrack?.title || "None",
-      filter: selectedFilter?.name || "None",
-      resolution: selectedCameraFormat.resolution,
-      frameRate: selectedCameraFormat.frameRate,
-    });
-    
-    
+
     router.push({
       pathname: "/(main)/upload/edit",
       params: {
@@ -595,13 +546,11 @@ export default function TikTokCameraScreen() {
     });
   };
 
-  
   const showFilterLabelBriefly = () => {
-    
     if (filterLabelTimeoutRef.current) {
       clearTimeout(filterLabelTimeoutRef.current);
     }
-    
+
     setShowFilterLabel(true);
     Animated.sequence([
       Animated.timing(filterLabelOpacity, {
@@ -625,88 +574,69 @@ export default function TikTokCameraScreen() {
   const handleFilterSwipe = (direction: "left" | "right") => {
     if (filterList.length === 0) return;
 
-    const currentIndex = filterList.findIndex(f => f.id === selectedFilter?.id);
+    const currentIndex = filterList.findIndex((f) => f.id === selectedFilter?.id);
     let nextIndex;
 
     if (direction === "left") {
-      
       nextIndex = (currentIndex + 1) % filterList.length;
     } else {
-      
       nextIndex = (currentIndex - 1 + filterList.length) % filterList.length;
     }
 
     const nextFilter = filterList[nextIndex];
     setSelectedFilter(nextFilter);
-    console.log(`[FILTER] Swiped ${direction}: selected ${nextFilter.name}`);
     showFilterLabelBriefly();
   };
 
-  
   const cameraSwipeResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => !isRecording,
-      onMoveShouldSetPanResponder: (evt, gestureState) => !isRecording && Math.abs(gestureState.dx) > 10,
+      onMoveShouldSetPanResponder: (evt, gestureState) =>
+        !isRecording && Math.abs(gestureState.dx) > 10,
       onPanResponderRelease: (evt, gestureState) => {
         if (isRecording || filterList.length === 0) return;
 
         const SWIPE_THRESHOLD = 50;
         if (gestureState.dx > SWIPE_THRESHOLD) {
-          
           handleFilterSwipe("right");
         } else if (gestureState.dx < -SWIPE_THRESHOLD) {
-          
           handleFilterSwipe("left");
         }
       },
     })
   ).current;
-  const zoomPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => !isRecording,  
-      onMoveShouldSetPanResponder: () => !isRecording,   
-      onPanResponderMove: (evt, gestureState) => {
-        if (!isRecording) {  
-          const sliderWidth = 200;
-          const startX = width / 2 - sliderWidth / 2;
-          const relativeX = Math.max(0, Math.min(sliderWidth, gestureState.moveX - startX));
-          const zoomIndex = Math.round((relativeX / sliderWidth) * (supportedZoomLevels.length - 1));
-          const zoom = supportedZoomLevels[zoomIndex] || 1;
-          handleZoomChange(zoom);
-          console.log(`[ZOOM] Slider: index ${zoomIndex} → ${zoom}x`);
-        }
-      },
-    })
-  ).current;
 
-  
-  
-  
-  const zoomRatio = Math.max(0, Math.min(1, (currentZoom - 0.5) / 3.5));
-  
-  
-  if (Platform.OS === "android" || Platform.OS === "ios") {
-    
-  }
+  // Recording timer (mm:ss) - pehle ye kabhi update nahi hota tha
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingTime("00:00");
+      return;
+    }
+    const id = setInterval(() => {
+      const total = Math.floor((Date.now() - recordingStartTime.current) / 1000);
+      const mm = String(Math.floor(total / 60)).padStart(2, "0");
+      const ss = String(total % 60).padStart(2, "0");
+      setRecordingTime(`${mm}:${ss}`);
+    }, 500);
+    return () => clearInterval(id);
+  }, [isRecording]);
 
-  
   useEffect(() => {
     if (showVideoEditor && !isVideoEditorLoaded) {
       (async () => {
         try {
-          const module = await import('@modules/video-editor');
+          const module = await import("@modules/video-editor");
           VideoEditorModule = module.default;
           setIsVideoEditorLoaded(true);
         } catch (error) {
-          console.error('[CameraScreen] Failed to load VideoEditorModule:', error);
-          Alert.alert('Error', 'Failed to load video editor');
+          console.error("[CameraScreen] Failed to load VideoEditorModule:", error);
+          Alert.alert("Error", "Failed to load video editor");
           setShowVideoEditor(false);
         }
       })();
     }
   }, [showVideoEditor, isVideoEditorLoaded]);
 
-  
   useEffect(() => {
     const verifyRole = async () => {
       const role = await AsyncStorage.getItem("userRole");
@@ -723,49 +653,27 @@ export default function TikTokCameraScreen() {
     verifyRole();
   }, []);
 
-  
-  useEffect(() => {
-    console.log("[COMPONENT] CameraScreen mounted");
-    console.log("[COMPONENT] Platform:", Platform.OS);
-    if (Platform.OS === 'android') {
-      console.log("[CAMERA-ANDROID] Initializing Android camera preview with ratio prop");
-    }
-    
-    return () => {
-      console.log("[COMPONENT] CameraScreen unmounted");
-      if (isRecording) {
-        console.error("[COMPONENT] ⚠️ WARNING: CameraScreen unmounted while isRecording=true - this will cancel recording!");
-      }
-    };
-  }, []);
-  
   useEffect(() => {
     const loadMusicLibrary = async () => {
-      console.log("[MUSIC] Loading music library...");
       setLoadingMusic(true);
       const response = await listAudio("trending", 1, 50);
       if (response.success && response.data?.tracks) {
-        console.log(`[MUSIC] Loaded ${response.data.tracks.length} tracks`);
         setMusicTracks(response.data.tracks);
       } else {
-        console.warn("[MUSIC] Failed to load music library");
         setMusicTracks([]);
       }
       setLoadingMusic(false);
     };
     loadMusicLibrary();
   }, []);
-  
+
   useEffect(() => {
     const loadFilterLibrary = async () => {
-      console.log("[FILTER] Loading filter library...");
       setLoadingFilters(true);
       const response = await listFilters(undefined, 1, 50);
       if (response.success && response.data?.filters) {
-        console.log(`[FILTER] Loaded ${response.data.filters.length} filters`);
         setFilterList(response.data.filters);
       } else {
-        console.warn("[FILTER] Failed to load filter library");
         setFilterList([]);
       }
       setLoadingFilters(false);
@@ -773,59 +681,91 @@ export default function TikTokCameraScreen() {
     loadFilterLibrary();
   }, []);
 
-
-
-  
   useEffect(() => {
-    if (!cameraPermission?.granted) {
-      console.log("[PERMISSIONS] Requesting camera permission");
-      requestCameraPermission();
-    }
+    (async () => {
+      if (!cameraPermission.hasPermission) {
+        await cameraPermission.requestPermission();
+      }
+      if (!micPermission.hasPermission) {
+        await micPermission.requestPermission();
+      }
+    })();
   }, []);
 
-  if (!cameraPermission) {
-    console.log("[PERMISSIONS] Loading permissions...");
-    return (
-      <View style={styles.container}>
-        <Text style={{ color: "#fff", alignSelf: "center", marginTop: 50 }}>Loading...</Text>
-      </View>
-    );
-  }
+  // Physical Android Device Guard: BOTH camera and microphone permissions chahiye mount se pehle
+  const hasAllPermissions = cameraPermission.hasPermission && micPermission.hasPermission;
 
-  if (!cameraPermission.granted) {
-    console.log("[PERMISSIONS] Camera permission not granted");
+  if (!hasAllPermissions) {
     return (
       <View style={styles.container}>
         <View style={styles.permissionContainer}>
-          <Text style={styles.permissionTitle}>Camera Permission Required</Text>
-          <Text style={styles.permissionText}>We need access to your camera to record videos.</Text>
-          <TouchableOpacity onPress={requestCameraPermission} style={styles.permissionButton}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
+          <Text style={styles.permissionTitle}>Permissions Required</Text>
+          <Text style={styles.permissionText}>
+            Camera and microphone permissions are required to record videos.
+          </Text>
+          <TouchableOpacity
+            onPress={async () => {
+              await cameraPermission.requestPermission();
+              await micPermission.requestPermission();
+            }}
+            style={styles.permissionButton}
+          >
+            <Text style={styles.permissionButtonText}>Grant Permissions</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  const bottomOffset = recordedClips.length > 0 ? 80 : 0;
-
-  console.log("[CAMERA] Render - isFocused:", isFocused, "cameraReady:", cameraReady, "hasPermission:", cameraPermission?.granted);
+  const bottomOffset = recordedClips.length > 0 ? 80 : 20;
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <View style={styles.container} {...cameraSwipeResponder.panHandlers}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
 
-      <CameraView
-        style={StyleSheet.absoluteFill}
-        facing={facing}
-        flash={flashEnabled}
-        ref={cameraRef}
-        onCameraReady={handleCameraReady}
-        mode="video"
-        mute={false}
-      />
+      {/* CRITICAL FIX: Camera ALWAYS rendered at bottom, no conditional mount to avoid Surface abandonment */}
+      {CAMERA_USE_EXPO_CAMERA ? (
+        // Stub for expo-camera (would need CameraView import)
+        <View style={StyleSheet.absoluteFill} />
+      ) : (
+        // react-native-vision-camera v5 (TextureView mode on Android for compatibility)
+        device && isFocused && transitionComplete && appState === "active" && cameraPermission.hasPermission && micPermission.hasPermission && (
+          <Camera
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            device={device}
+            isActive={true}
+            outputs={[videoOutput]}
+            torchMode={facing === "back" && flashEnabled === "on" ? "on" : "off"}
+            zoom={currentZoom}
+            implementationMode="compatible"
+            onStarted={handleCameraReady}
+            onError={(error: Error) => {
+              console.error("[Camera] Error:", error);
+              setMountError(error.message);
+            }}
+          />
+        )
+      )}
 
-      {}
+      {/* UNMISSABLE BUILD MARKER */}
+      <View style={styles.buildMarkerBanner}>
+        <Text style={styles.buildMarkerText}>
+          BUILD-MARK-1 | app/(main)/camera/index.tsx VISION-CAMERA | {BUILD_MARKER_TIMESTAMP_VISION}
+        </Text>
+      </View>
+
+      {/* DEV STATUS LINE */}
+      {__DEV__ && (
+        <View style={styles.devStatus}>
+          <Text style={styles.devStatusText}>
+            BUILD-V5-{cameraKey} | {CAMERA_USE_EXPO_CAMERA ? "expo" : "vision"} | {CAMERA_USE_EXPO_CAMERA ? "n/a" : "compatible"} | 
+            Cam:{cameraPermission.status.substring(0,3)} Mic:{micPermission.status.substring(0,3)} | 
+            Init:{cameraReady?"✓":"✗"} | Err:{mountError?.substring(0,20) || "none"}
+          </Text>
+        </View>
+      )}
+
       {isRecording && (
         <View style={styles.recordingIndicatorsContainer}>
           <View style={styles.recordingTimerContainer}>
@@ -835,7 +775,7 @@ export default function TikTokCameraScreen() {
         </View>
       )}
 
-      {}
+      {/* Mode Selector */}
       <View style={styles.modeSelector}>
         <ScrollView
           horizontal
@@ -861,82 +801,7 @@ export default function TikTokCameraScreen() {
         </ScrollView>
       </View>
 
-      {}
-      <Animated.View style={[styles.leftToolbar, { opacity: toolbarOpacity }]}>
-        <TouchableOpacity style={styles.toolbarButton} onPress={toggleFlash}>
-          <FlashIcon filled={flashEnabled !== "off"} size={22} />
-        </TouchableOpacity>
-
-        <View ref={timerButtonRef}>
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleTimerPress}>
-            <TimerIcon size={22} />
-            <Text style={styles.toolbarLabel}>{maxRecordingDuration}s</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View ref={speedButtonRef}>
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleSpeedPress}>
-            <SpeedIcon size={22} />
-            <Text style={styles.toolbarLabel}>{selectedSpeed}x</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View ref={musicButtonRef}>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={() => {
-              console.log("[CAMERA] Music button pressed - opening full screen picker");
-              setShowMusicPickerModal(true);
-            }}
-          >
-            <MusicIcon size={22} />
-            {selectedMusicTrack && (
-              <Text style={styles.toolbarLabel} numberOfLines={1}>
-                ♪
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View ref={hdButtonRef}>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={() => {
-              if (hdButtonRef.current) {
-                hdButtonRef.current.measureInWindow((x, y, w, h) => {
-                  setHDPopupPos({
-                    x: x + w + 8,
-                    y: y,
-                  });
-                  setShowHDPopup(true);
-                });
-              }
-            }}
-          >
-            <Text style={styles.hdText}>
-              {selectedCameraFormat.resolution} {selectedCameraFormat.frameRate}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <View ref={filterButtonRef}>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={() => {
-              setShowFilterGrid(true);
-            }}
-          >
-            <FilterIcon size={22} />
-            {selectedFilter && (
-              <Text style={styles.toolbarLabel} numberOfLines={1}>
-                {selectedFilter.name.substring(0, 6)}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-
-      {}
+      {/* Close Button */}
       <TouchableOpacity
         style={styles.closeButton}
         onPress={() => {
@@ -961,165 +826,190 @@ export default function TikTokCameraScreen() {
           }
         }}
       >
-        <CloseIcon size={22} />
+        <CloseIcon size={24} color="#fff" />
       </TouchableOpacity>
 
-      {}
-      <TouchableOpacity
-        style={[styles.galleryButton, { bottom: 100 + bottomOffset }]}
-        onPress={() => {
-          console.warn("[GALLERY] BUTTON PRESSED!!!");
-          pickFromGallery();
-        }}
-        activeOpacity={0.7}
-        disabled={false}
-      >
-        <View style={styles.galleryThumbnail}>
-          <GalleryIcon size={18} />
-        </View>
-      </TouchableOpacity>
-
-      {}
-      <View style={[styles.recordButtonArea, { bottom: 100 + bottomOffset }]}>
-        {}
-        {!isRecording && (
-          <View style={styles.zoomSelectorContainer} {...zoomPanResponder.panHandlers}>
-            {}
-            <View
-              style={{
-                flexDirection: "row",
-                width: SLIDER_WIDTH,
-                justifyContent: "space-between",
-                marginBottom: 8,
-              }}
-            >
-              {supportedZoomLevels.map((zoom) => (
-                <Text
-                  key={zoom}
-                  style={[
-                    {
-                      color: "rgba(255,255,255,0.6)",
-                      fontSize: 12,
-                      fontWeight: "600",
-                      width: 20,
-                      textAlign: "center",
-                    },
-                    currentZoom === zoom && {
-                      color: "#fff",
-                      fontWeight: "bold",
-                    },
-                  ]}
-                >
-                  {zoom}x
-                </Text>
-              ))}
-            </View>
-
-            {}
-            <View
-              style={{
-                width: SLIDER_WIDTH,
-                height: 2,
-                backgroundColor: "rgba(255, 255, 255, 0.3)",
-                position: "relative",
-                justifyContent: "center",
-              }}
-            >
-              {supportedZoomLevels.map((_, index) => (
-                <View
-                  key={index}
-                  style={{
-                    position: "absolute",
-                    left: index * STEP_WIDTH - 2,
-                    width: 4,
-                    height: 4,
-                    borderRadius: 2,
-                    backgroundColor: "rgba(255,255,255,0.5)",
-                  }}
-                />
-              ))}
-
-              {}
-              <Animated.View
-                style={{
-                  position: "absolute",
-                  left: -10,
-                  width: 20,
-                  height: 20,
-                  borderRadius: 10,
-                  backgroundColor: "#EC9A15",
-                  transform: [{ translateX: zoomThumbTranslateX }],
-                }}
-              />
-            </View>
-          </View>
-        )}
-
-        {}
+      {/* Diagnostic Button */}
+      {__DEV__ && (
         <TouchableOpacity
-          style={styles.recordButtonContainer}
-          onPress={handleRecordPress}
-          activeOpacity={0.8}
+          style={[styles.closeButton, { top: Platform.OS === 'ios' ? 120 : 100 }]}
+          onPress={() => router.push('/(main)/camera-diag')}
         >
-          {}
-          {isRecording && (
-            <View style={styles.progressRing}>
-              <Svg width={100} height={100} style={styles.progressSvg}>
-                <Circle
-                  cx="50"
-                  cy="50"
-                  r="45"
-                  stroke="rgba(255, 255, 255, 0.3)"
-                  strokeWidth="4"
-                  fill="none"
-                />
-              </Svg>
-              <Animated.View
-                style={[
-                  styles.progressRingIndicator,
-                  {
-                    transform: [
-                      {
-                        rotate: progressAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0deg", "360deg"],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <View style={styles.progressRingDot} />
-              </Animated.View>
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>DIAG</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Vision Camera Test Button */}
+      {__DEV__ && (
+        <TouchableOpacity
+          style={[styles.closeButton, { top: Platform.OS === 'ios' ? 170 : 150 }]}
+          onPress={() => router.push('/(main)/camera-vision-test')}
+        >
+          <Text style={{ color: '#fff', fontSize: 10, fontWeight: 'bold' }}>VISION</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Floating Left Sidebar */}
+      <Animated.View style={[styles.leftToolbar, { opacity: toolbarOpacity }]}>
+        <View ref={musicButtonRef}>
+          <TouchableOpacity
+            style={styles.toolbarButton}
+            onPress={() => setShowMusicPickerModal(true)}
+          >
+            <MusicIcon size={28} color="#fff" />
+            {selectedMusicTrack && (
+              <Text style={styles.toolbarLabel} numberOfLines={1}>
+                ♪
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View ref={filterButtonRef}>
+          <TouchableOpacity style={styles.toolbarButton} onPress={() => setShowFilterGrid(true)}>
+            <FilterIcon size={28} color="#fff" />
+            {selectedFilter && (
+              <Text style={styles.toolbarLabel} numberOfLines={1}>
+                {selectedFilter.name.substring(0, 6)}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        <View ref={timerButtonRef}>
+          <TouchableOpacity style={styles.toolbarButton} onPress={handleTimerPress}>
+            <TimerIcon size={28} color="#fff" />
+            <Text style={styles.toolbarLabel}>{maxRecordingDuration}s</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View ref={speedButtonRef}>
+          <TouchableOpacity style={styles.toolbarButton} onPress={handleSpeedPress}>
+            <Text style={styles.toolbarText}>{selectedSpeed}x</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View ref={hdButtonRef}>
+          <TouchableOpacity
+            style={styles.toolbarButton}
+            onPress={() => {
+              if (hdButtonRef.current) {
+                hdButtonRef.current.measureInWindow((x, y, w, h) => {
+                  setHDPopupPos({
+                    x: x + w + 8,
+                    y: y,
+                  });
+                  setShowHDPopup(true);
+                });
+              }
+            }}
+          >
+            <Text style={styles.toolbarText}>
+              {selectedCameraFormat.resolution}
+              {"\n"}
+              {selectedCameraFormat.frameRate}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+
+      {/* Bottom Controls Area */}
+      <View style={[styles.bottomControlsContainer, { bottom: 30 + bottomOffset }]}>
+        {/* Left Side: Flash & Gallery */}
+        <View style={styles.bottomSideGroup}>
+          {facing === "back" && (
+            <TouchableOpacity style={styles.bottomActionBtn} onPress={toggleFlash}>
+              <FlashIcon filled={flashEnabled !== "off"} size={26} color="#fff" />
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.bottomActionBtn} onPress={pickFromGallery}>
+            <GalleryIcon size={26} color="#fff" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Center: Zoom Dial & Record Button */}
+        <View style={styles.captureCenterGroup}>
+          {!isRecording && (
+            <View style={styles.curvedZoomDial}>
+              {supportedZoomLevels.map((zoom) => (
+                <TouchableOpacity
+                  key={zoom}
+                  style={[styles.zoomPill, currentZoom === zoom && styles.zoomPillActive]}
+                  onPress={() => handleZoomChange(zoom)}
+                >
+                  <Text
+                    style={[styles.zoomPillText, currentZoom === zoom && styles.zoomPillTextActive]}
+                  >
+                    {zoom}x
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
           )}
 
-          <View style={[styles.recordButton, isRecording && styles.recordButtonRecording]}>
-            {isRecording ? (
-              <View style={styles.recordButtonSquare} />
-            ) : (
-              <View style={styles.recordButtonCircle} />
+          <TouchableOpacity
+            style={styles.recordButtonContainer}
+            onPress={handleRecordPress}
+            activeOpacity={0.8}
+          >
+            {isRecording && (
+              <View style={styles.progressRing}>
+                <Svg width={100} height={100} style={styles.progressSvg}>
+                  <Circle
+                    cx="50"
+                    cy="50"
+                    r="45"
+                    stroke="rgba(255, 255, 255, 0.3)"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                </Svg>
+                <Animated.View
+                  style={[
+                    styles.progressRingIndicator,
+                    {
+                      transform: [
+                        {
+                          rotate: progressAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: ["0deg", "360deg"],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.progressRingDot} />
+                </Animated.View>
+              </View>
             )}
-          </View>
-        </TouchableOpacity>
+
+            <View style={[styles.recordButton, isRecording && styles.recordButtonRecording]}>
+              {isRecording ? (
+                <View style={styles.recordButtonSquare} />
+              ) : (
+                <View style={styles.recordButtonCircle} />
+              )}
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Right Side: Flip Camera */}
+        <View style={styles.bottomSideGroupRight}>
+          <TouchableOpacity style={styles.bottomActionBtn} onPress={toggleCamera}>
+            <CameraFlipIcon size={28} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {}
-      <TouchableOpacity
-        style={[styles.flipButton, { bottom: 100 + bottomOffset }]}
-        onPress={toggleCamera}
-      >
-        <CameraFlipIcon size={22} />
-      </TouchableOpacity>
-
-      {}
+      {/* Clip Timeline & Next Button */}
       {recordedClips.length > 0 && (
         <Animated.View
           style={[
             styles.clipTimeline,
             {
               transform: [{ translateY: clipBarTranslateY }],
-              bottom: 20 + bottomOffset,
+              bottom: 130 + bottomOffset,
             },
           ]}
         >
@@ -1150,7 +1040,7 @@ export default function TikTokCameraScreen() {
                   style={styles.deleteClipButton}
                   onPress={() => deleteClip(clip.id)}
                 >
-                  <CloseIcon size={10} />
+                  <CloseIcon size={10} color="#fff" />
                 </TouchableOpacity>
               </TouchableOpacity>
             ))}
@@ -1161,37 +1051,34 @@ export default function TikTokCameraScreen() {
         </Animated.View>
       )}
 
+      {/* MODALS */}
       <View style={styles.overlay} pointerEvents="box-none">
-
-      {}
-      <Modal
-        visible={showHDPopup}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowHDPopup(false)}
-      >
-        <TouchableOpacity
-          style={styles.popupOverlay}
-          activeOpacity={1}
-          onPress={() => setShowHDPopup(false)}
+        <Modal
+          visible={showHDPopup}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setShowHDPopup(false)}
         >
-          <View
-            style={[
-              styles.hdPopup,
-              {
-                left: hdPopupPos.x,
-                top: hdPopupPos.y,
-              },
-            ]}
-            onStartShouldSetResponder={() => true}
+          <TouchableOpacity
+            style={styles.popupOverlay}
+            activeOpacity={1}
+            onPress={() => setShowHDPopup(false)}
           >
-            <View style={styles.hdPopupArrow} />
-            <View style={styles.hdPopupSection}>
-              <Text style={styles.hdPopupLabel}>Resolution</Text>
-              <View style={styles.hdPopupOptionsRow}>
-                {supportedResolutions.map((res) => {
-                  
-                  return (
+            <View
+              style={[
+                styles.hdPopup,
+                {
+                  left: hdPopupPos.x,
+                  top: hdPopupPos.y,
+                },
+              ]}
+              onStartShouldSetResponder={() => true}
+            >
+              <View style={styles.hdPopupArrow} />
+              <View style={styles.hdPopupSection}>
+                <Text style={styles.hdPopupLabel}>Resolution</Text>
+                <View style={styles.hdPopupOptionsRow}>
+                  {supportedResolutions.map((res) => (
                     <TouchableOpacity
                       key={res}
                       style={[
@@ -1204,7 +1091,6 @@ export default function TikTokCameraScreen() {
                           resolution: res,
                         }));
                         setShowHDPopup(false);
-                        console.log(`[RESOLUTION] Selected: ${res}`);
                       }}
                     >
                       <Text
@@ -1216,16 +1102,13 @@ export default function TikTokCameraScreen() {
                         {res}
                       </Text>
                     </TouchableOpacity>
-                  );
-                })}
+                  ))}
+                </View>
               </View>
-            </View>
-            <View style={styles.hdPopupSection}>
-              <Text style={styles.hdPopupLabel}>Frame Rate</Text>
-              <View style={styles.hdPopupOptionsRow}>
-                {supportedFrameRates.map((fps) => {
-                  
-                  return (
+              <View style={styles.hdPopupSection}>
+                <Text style={styles.hdPopupLabel}>Frame Rate</Text>
+                <View style={styles.hdPopupOptionsRow}>
+                  {supportedFrameRates.map((fps) => (
                     <TouchableOpacity
                       key={fps}
                       style={[
@@ -1238,7 +1121,6 @@ export default function TikTokCameraScreen() {
                           frameRate: fps,
                         }));
                         setShowHDPopup(false);
-                        console.log(`[FRAME_RATE] Selected: ${fps}fps`);
                       }}
                     >
                       <Text
@@ -1250,219 +1132,174 @@ export default function TikTokCameraScreen() {
                         {fps}
                       </Text>
                     </TouchableOpacity>
-                  );
-                })}
+                  ))}
+                </View>
               </View>
             </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+          </TouchableOpacity>
+        </Modal>
 
-      {}
-      {showSpeedPopup && (
-        <Modal
-          visible={showSpeedPopup}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowSpeedPopup(false)}
-        >
-          <TouchableOpacity
-            style={styles.popupOverlay}
-            activeOpacity={1}
-            onPress={() => setShowSpeedPopup(false)}
+        {showSpeedPopup && (
+          <Modal
+            visible={showSpeedPopup}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowSpeedPopup(false)}
           >
-            <View
-              style={[
-                styles.smallPopup,
-                {
-                  left: speedPopupPos.x,
-                  top: speedPopupPos.y,
-                },
-              ]}
-              onStartShouldSetResponder={() => true}
+            <TouchableOpacity
+              style={styles.popupOverlay}
+              activeOpacity={1}
+              onPress={() => setShowSpeedPopup(false)}
             >
-              <View style={styles.popupArrow} />
-              <View style={styles.smallPopupContent}>
-                {([0.3, 0.5, 1, 1.5, 2, 3] as any[]).map((speed, index, array) => {
-                  const isSupported = [0.5, 1, 1.5, 2].includes(speed);
-                  const isLast = index === array.length - 1;
-                  return (
+              <View
+                style={[
+                  styles.smallPopup,
+                  {
+                    left: speedPopupPos.x,
+                    top: speedPopupPos.y,
+                  },
+                ]}
+                onStartShouldSetResponder={() => true}
+              >
+                <View style={styles.popupArrow} />
+                <View style={styles.smallPopupContent}>
+                  {([0.3, 0.5, 1, 1.5, 2, 3] as any[]).map((speed, index, array) => {
+                    const isSupported = [0.5, 1, 1.5, 2].includes(speed);
+                    const isLast = index === array.length - 1;
+                    return (
+                      <TouchableOpacity
+                        key={speed}
+                        style={[
+                          styles.smallPopupOption,
+                          selectedSpeed === speed && styles.smallPopupOptionActive,
+                          !isSupported && { opacity: 0.5 },
+                          isLast && { borderBottomWidth: 0 },
+                        ]}
+                        onPress={() => {
+                          if (isSupported) {
+                            setSelectedSpeed(speed as SpeedOption);
+                            setShowSpeedPopup(false);
+                          }
+                        }}
+                        disabled={!isSupported}
+                      >
+                        <Text
+                          style={[
+                            styles.smallPopupOptionText,
+                            selectedSpeed === speed && styles.smallPopupOptionTextActive,
+                          ]}
+                        >
+                          {speed}x
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
+
+        {showTimerPopup && (
+          <Modal
+            visible={showTimerPopup}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowTimerPopup(false)}
+          >
+            <TouchableOpacity
+              style={styles.popupOverlay}
+              activeOpacity={1}
+              onPress={() => setShowTimerPopup(false)}
+            >
+              <View
+                style={[
+                  styles.smallPopup,
+                  {
+                    left: timerPopupPos.x,
+                    top: timerPopupPos.y,
+                  },
+                ]}
+                onStartShouldSetResponder={() => true}
+              >
+                <View style={styles.popupArrow} />
+                <View style={styles.smallPopupContent}>
+                  {([15, 30, 60] as TimerOption[]).map((duration, index) => (
                     <TouchableOpacity
-                      key={speed}
+                      key={duration}
                       style={[
                         styles.smallPopupOption,
-                        selectedSpeed === speed && styles.smallPopupOptionActive,
-                        !isSupported && {
-                          opacity: 0.5,
-                        },
-                        isLast && {
-                          borderBottomWidth: 0,
-                        },
+                        maxRecordingDuration === duration && styles.smallPopupOptionActive,
+                        index === 2 && { borderBottomWidth: 0 },
                       ]}
                       onPress={() => {
-                        if (isSupported) {
-                          setSelectedSpeed(speed as SpeedOption);
-                          setShowSpeedPopup(false);
-                        }
+                        setMaxRecordingDuration(duration);
+                        setShowTimerPopup(false);
                       }}
-                      disabled={!isSupported}
                     >
                       <Text
                         style={[
                           styles.smallPopupOptionText,
-                          selectedSpeed === speed && styles.smallPopupOptionTextActive,
+                          maxRecordingDuration === duration && styles.smallPopupOptionTextActive,
                         ]}
                       >
-                        {speed}x
+                        {duration}s
                       </Text>
                     </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {}
-      {showTimerPopup && (
-        <Modal
-          visible={showTimerPopup}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowTimerPopup(false)}
-        >
-          <TouchableOpacity
-            style={styles.popupOverlay}
-            activeOpacity={1}
-            onPress={() => setShowTimerPopup(false)}
-          >
-            <View
-              style={[
-                styles.smallPopup,
-                {
-                  left: timerPopupPos.x,
-                  top: timerPopupPos.y,
-                },
-              ]}
-              onStartShouldSetResponder={() => true}
-            >
-              <View style={styles.popupArrow} />
-              <View style={styles.smallPopupContent}>
-                {([15, 30, 60] as TimerOption[]).map((duration, index) => (
-                  <TouchableOpacity
-                    key={duration}
-                    style={[
-                      styles.smallPopupOption,
-                      maxRecordingDuration === duration && styles.smallPopupOptionActive,
-                      index === 2 && {
-                        borderBottomWidth: 0,
-                      }, 
-                    ]}
-                    onPress={() => {
-                      setMaxRecordingDuration(duration);
-                      setShowTimerPopup(false);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.smallPopupOptionText,
-                        maxRecordingDuration === duration && styles.smallPopupOptionTextActive,
-                      ]}
-                    >
-                      {duration}s
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {}
-      <MusicLibraryModal
-        visible={showMusicPickerModal}
-        onCancel={() => setShowMusicPickerModal(false)}
-        onSelect={(music: any) => {
-          setSelectedMusicTrack(music);
-          console.log("[MUSIC] Selected from picker:", music.title);
-        }}
-        selectedMusic={selectedMusicTrack}
-      />
-
-      {}
-      {showFilterGrid && (
-        <Modal
-          visible={showFilterGrid}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowFilterGrid(false)}
-        >
-          <TouchableOpacity
-            style={styles.fullOverlay}
-            activeOpacity={1}
-            onPress={() => setShowFilterGrid(false)}
-          >
-            <View
-              style={styles.filterGridContainer}
-              onStartShouldSetResponder={() => true}
-            >
-              <View style={styles.filterGridHeader}>
-                <Text style={styles.filterGridTitle}>Filters</Text>
-                <TouchableOpacity onPress={() => setShowFilterGrid(false)}>
-                  <CloseIcon size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-
-              {loadingFilters ? (
-                <View style={styles.filterGridLoading}>
-                  <Text style={styles.filterGridLoadingText}>Loading filters...</Text>
+                  ))}
                 </View>
-              ) : (
-                <ScrollView
-                  scrollEnabled
-                  showsVerticalScrollIndicator={false}
-                  style={styles.filterGridScroll}
-                >
-                  <View style={styles.filterGrid}>
-                    {}
-                    <TouchableOpacity
-                      style={[
-                        styles.filterGridTile,
-                        !selectedFilter && styles.filterGridTileSelected,
-                      ]}
-                      onPress={() => {
-                        setSelectedFilter(null);
-                        console.log("[FILTER] Grid: None selected");
-                        setShowFilterGrid(false);
-                        showFilterLabelBriefly();
-                      }}
-                    >
-                      <View
-                        style={[
-                          styles.filterGridThumbnail,
-                          !selectedFilter && styles.filterGridThumbnailSelected,
-                        ]}
-                      >
-                        <Text style={styles.filterGridThumbnailText}>◯</Text>
-                      </View>
-                      <Text style={styles.filterGridTileName} numberOfLines={2}>
-                        None
-                      </Text>
-                    </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
 
-                    {}
-                    {filterList.map((filter) => (
+        <MusicLibraryModal
+          visible={showMusicPickerModal}
+          onCancel={() => setShowMusicPickerModal(false)}
+          onSelect={(music: any) => {
+            setSelectedMusicTrack(music);
+          }}
+          selectedMusic={selectedMusicTrack}
+        />
+
+        {showFilterGrid && (
+          <Modal
+            visible={showFilterGrid}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowFilterGrid(false)}
+          >
+            <TouchableOpacity
+              style={styles.fullOverlay}
+              activeOpacity={1}
+              onPress={() => setShowFilterGrid(false)}
+            >
+              <View style={styles.filterGridContainer} onStartShouldSetResponder={() => true}>
+                <View style={styles.filterGridHeader}>
+                  <Text style={styles.filterGridTitle}>Filters</Text>
+                  <TouchableOpacity onPress={() => setShowFilterGrid(false)}>
+                    <CloseIcon size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+
+                {loadingFilters ? (
+                  <View style={styles.filterGridLoading}>
+                    <Text style={styles.filterGridLoadingText}>Loading filters...</Text>
+                  </View>
+                ) : (
+                  <ScrollView
+                    scrollEnabled
+                    showsVerticalScrollIndicator={false}
+                    style={styles.filterGridScroll}
+                  >
+                    <View style={styles.filterGrid}>
                       <TouchableOpacity
-                        key={filter.id}
                         style={[
                           styles.filterGridTile,
-                          selectedFilter?.id === filter.id && styles.filterGridTileSelected,
+                          !selectedFilter && styles.filterGridTileSelected,
                         ]}
                         onPress={() => {
-                          setSelectedFilter(filter);
-                          console.log("[FILTER] Grid: selected", filter.name);
+                          setSelectedFilter(null);
                           setShowFilterGrid(false);
                           showFilterLabelBriefly();
                         }}
@@ -1470,103 +1307,120 @@ export default function TikTokCameraScreen() {
                         <View
                           style={[
                             styles.filterGridThumbnail,
-                            selectedFilter?.id === filter.id && styles.filterGridThumbnailSelected,
+                            !selectedFilter && styles.filterGridThumbnailSelected,
                           ]}
                         >
-                          <Text style={styles.filterGridThumbnailText}>
-                            {filter.name.charAt(0).toUpperCase()}
-                          </Text>
+                          <Text style={styles.filterGridThumbnailText}>◯</Text>
                         </View>
                         <Text style={styles.filterGridTileName} numberOfLines={2}>
-                          {filter.name}
+                          None
                         </Text>
                       </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              )}
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
 
-      {}
-      {showFilterPopup && (
-        <Modal
-          visible={showFilterPopup}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowFilterPopup(false)}
-        >
-          <TouchableOpacity
-            style={styles.popupOverlay}
-            activeOpacity={1}
-            onPress={() => setShowFilterPopup(false)}
+                      {filterList.map((filter) => (
+                        <TouchableOpacity
+                          key={filter.id}
+                          style={[
+                            styles.filterGridTile,
+                            selectedFilter?.id === filter.id && styles.filterGridTileSelected,
+                          ]}
+                          onPress={() => {
+                            setSelectedFilter(filter);
+                            setShowFilterGrid(false);
+                            showFilterLabelBriefly();
+                          }}
+                        >
+                          <View
+                            style={[
+                              styles.filterGridThumbnail,
+                              selectedFilter?.id === filter.id &&
+                                styles.filterGridThumbnailSelected,
+                            ]}
+                          >
+                            <Text style={styles.filterGridThumbnailText}>
+                              {filter.name.charAt(0).toUpperCase()}
+                            </Text>
+                          </View>
+                          <Text style={styles.filterGridTileName} numberOfLines={2}>
+                            {filter.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </ScrollView>
+                )}
+              </View>
+            </TouchableOpacity>
+          </Modal>
+        )}
+
+        {showFilterPopup && (
+          <Modal
+            visible={showFilterPopup}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setShowFilterPopup(false)}
           >
-            <View
-              style={[
-                styles.smallPopup,
-                {
-                  left: filterPopupPos.x,
-                  top: filterPopupPos.y,
-                },
-              ]}
-              onStartShouldSetResponder={() => true}
+            <TouchableOpacity
+              style={styles.popupOverlay}
+              activeOpacity={1}
+              onPress={() => setShowFilterPopup(false)}
             >
-              <View style={styles.popupArrow} />
-              <View style={styles.smallPopupContent}>
-                {loadingFilters ? (
-                  <Text style={styles.smallPopupOptionText}>Loading filters...</Text>
-                ) : (
-                  <>
-                    <TouchableOpacity
-                      style={[
-                        styles.smallPopupOption,
-                        !selectedFilter && {
-                          backgroundColor: "#FF006E",
-                        },
-                      ]}
-                      onPress={() => {
-                        setSelectedFilter(null);
-                        console.log("[FILTER] None selected");
-                        setShowFilterPopup(false);
-                      }}
-                    >
-                      <Text style={styles.smallPopupOptionText}>None</Text>
-                    </TouchableOpacity>
-                    {filterList.map((filter, index) => (
+              <View
+                style={[
+                  styles.smallPopup,
+                  {
+                    left: filterPopupPos.x,
+                    top: filterPopupPos.y,
+                  },
+                ]}
+                onStartShouldSetResponder={() => true}
+              >
+                <View style={styles.popupArrow} />
+                <View style={styles.smallPopupContent}>
+                  {loadingFilters ? (
+                    <Text style={styles.smallPopupOptionText}>Loading filters...</Text>
+                  ) : (
+                    <>
                       <TouchableOpacity
-                        key={filter.id}
                         style={[
                           styles.smallPopupOption,
-                          selectedFilter?.id === filter.id && {
-                            backgroundColor: "#FF006E",
-                          },
-                          index === filterList.length - 1 && {
-                            borderBottomWidth: 0,
-                          },
+                          !selectedFilter && { backgroundColor: "#EC9A15" },
                         ]}
                         onPress={() => {
-                          setSelectedFilter(filter);
-                          console.log("[FILTER] Selected:", filter.name);
+                          setSelectedFilter(null);
                           setShowFilterPopup(false);
                         }}
                       >
-                        <Text style={styles.smallPopupOptionText} numberOfLines={1}>
-                          {filter.name}
-                        </Text>
+                        <Text style={styles.smallPopupOptionText}>None</Text>
                       </TouchableOpacity>
-                    ))}
-                  </>
-                )}
+                      {filterList.map((filter, index) => (
+                        <TouchableOpacity
+                          key={filter.id}
+                          style={[
+                            styles.smallPopupOption,
+                            selectedFilter?.id === filter.id && { backgroundColor: "#EC9A15" },
+                            index === filterList.length - 1 && { borderBottomWidth: 0 },
+                          ]}
+                          onPress={() => {
+                            setSelectedFilter(filter);
+                            setShowFilterPopup(false);
+                          }}
+                        >
+                          <Text style={styles.smallPopupOptionText} numberOfLines={1}>
+                            {filter.name}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </>
+                  )}
+                </View>
               </View>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
+            </TouchableOpacity>
+          </Modal>
+        )}
       </View>
 
-      {}
       {showVideoEditor && isVideoEditorLoaded && VideoEditorModule && (
         <View style={StyleSheet.absoluteFill} pointerEvents="auto">
           <VideoEditorModule
@@ -1580,7 +1434,6 @@ export default function TikTokCameraScreen() {
         </View>
       )}
 
-      {}
       {showFilterLabel && selectedFilter && (
         <Animated.View
           style={[
@@ -1616,17 +1469,47 @@ export default function TikTokCameraScreen() {
 }
 
 const styles = StyleSheet.create({
+  buildMarkerBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FF0000',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    zIndex: 99999,
+    elevation: 99999,
+  },
+  buildMarkerText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: "transparent",
   },
-  camera: {
-    flex: 1,
+  devStatus: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 60 : 50,
+    left: 10,
+    right: 10,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    padding: 4,
+    borderRadius: 4,
+    zIndex: 9999,
+  },
+  devStatusText: {
+    color: "#EC9A15",
+    fontSize: 9,
+    fontFamily: Platform.OS === "ios" ? "Courier" : "monospace",
   },
   overlay: {
-    ...StyleSheet.absoluteFill,
+        ...StyleSheet.absoluteFill,
     zIndex: 100,
-    pointerEvents: 'box-none',
+    pointerEvents: "box-none",
   },
   permissionContainer: {
     flex: 1,
@@ -1650,7 +1533,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   permissionButton: {
-    backgroundColor: "#FF0080",
+    backgroundColor: "#EC9A15",
     paddingHorizontal: 30,
     paddingVertical: 15,
     borderRadius: 25,
@@ -1723,8 +1606,8 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.2)",
   },
   modeButtonActive: {
-    backgroundColor: "rgba(255, 0, 128, 0.3)",
-    borderColor: "#FF0080",
+    backgroundColor: "rgba(236, 154, 21, 0.3)",
+    borderColor: "#EC9A15",
   },
   modeText: {
     color: "rgba(255, 255, 255, 0.7)",
@@ -1735,108 +1618,119 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
   },
+  closeButton: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 60 : 40,
+    left: 20,
+    zIndex: 50,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.8,
+    shadowRadius: 2,
+  },
   leftToolbar: {
     position: "absolute",
-    left: 20,
-    top: Platform.OS === "ios" ? 120 : 100,
+    left: 15,
+    top: Platform.OS === "ios" ? 140 : 120,
     alignItems: "center",
-    gap: 20,
+    gap: 24,
     zIndex: 10,
   },
   toolbarButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    width: 44,
+    height: 44,
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
+    backgroundColor: "transparent",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.8,
+    shadowRadius: 2,
   },
   toolbarLabel: {
     color: "#fff",
     fontSize: 9,
     marginTop: 2,
     fontWeight: "600",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  hdText: {
+  toolbarText: {
     color: "#fff",
-    fontSize: 10,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "bold",
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  closeButton: {
-    position: "absolute",
-    top: Platform.OS === "ios" ? 50 : 40,
-    right: 20,
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  galleryButton: {
-    position: "absolute",
-    left: 20,
-    zIndex: 10,
-  },
-  galleryThumbnail: {
-    width: 52,
-    height: 52,
-    borderRadius: 10,
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.3)",
-  },
-  recordButtonArea: {
+  bottomControlsContainer: {
     position: "absolute",
     left: 0,
     right: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 10,
-  },
-  zoomSelectorContainer: {
-    marginBottom: 20,
-    alignItems: "center",
-  },
-  zoomSelectorTrack: {
     flexDirection: "row",
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    borderRadius: 25,
-    padding: 4,
-    gap: 4,
-    minWidth: 200,
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    paddingHorizontal: 25,
+    zIndex: 20,
   },
-  zoomOption: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+  bottomSideGroup: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    minWidth: 45,
+    gap: 20,
+    paddingBottom: 25,
   },
-  zoomOptionActive: {
+  bottomSideGroupRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    paddingBottom: 25,
+    width: 80,
+  },
+  bottomActionBtn: {
+    width: 44,
+    height: 44,
+    justifyContent: "center",
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.8,
+    shadowRadius: 2,
+  },
+  captureCenterGroup: {
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  curvedZoomDial: {
+    flexDirection: "row",
+    backgroundColor: "rgba(30, 30, 30, 0.7)",
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "space-evenly",
+    paddingHorizontal: 4,
+    marginBottom: 15,
+  },
+  zoomPill: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+  },
+  zoomPillActive: {
     backgroundColor: "#fff",
   },
-  zoomOptionText: {
+  zoomPillText: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 12,
+    fontWeight: "bold",
   },
-  zoomOptionTextActive: {
+  zoomPillTextActive: {
     color: "#000",
-    fontWeight: "700",
   },
   recordButtonContainer: {
-    width: 100,
-    height: 100,
+    width: 90,
+    height: 90,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -1884,29 +1778,16 @@ const styles = StyleSheet.create({
     shadowColor: "#EC9A15",
   },
   recordButtonCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 66,
+    height: 66,
+    borderRadius: 33,
     backgroundColor: "#EC9A15",
   },
   recordButtonSquare: {
-    width: 42,
-    height: 42,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     backgroundColor: "#EC9A15",
-  },
-  flipButton: {
-    position: "absolute",
-    right: 20,
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: "rgba(0, 0, 0, 0.4)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 10,
-    borderWidth: 1.5,
-    borderColor: "rgba(255, 255, 255, 0.2)",
   },
   clipTimeline: {
     position: "absolute",
@@ -1970,14 +1851,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.7)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
   popupOverlay: {
-    ...StyleSheet.absoluteFill,
+        ...StyleSheet.absoluteFill,
     zIndex: 1000,
   },
   hdPopup: {
@@ -2031,9 +1906,6 @@ const styles = StyleSheet.create({
   hdPopupOptionActive: {
     backgroundColor: "#EC9A15",
   },
-  hdPopupOptionDisabled: {
-    opacity: 0.3,
-  },
   hdPopupOptionText: {
     color: "#fff",
     fontSize: 14,
@@ -2041,9 +1913,6 @@ const styles = StyleSheet.create({
   },
   hdPopupOptionTextActive: {
     fontWeight: "700",
-  },
-  hdPopupOptionTextDisabled: {
-    opacity: 0.5,
   },
   smallPopup: {
     position: "absolute",
@@ -2099,7 +1968,7 @@ const styles = StyleSheet.create({
     color: "#EC9A15",
   },
   fullOverlay: {
-    ...StyleSheet.absoluteFill,
+        ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0, 0, 0, 0.85)",
     justifyContent: "flex-end",
     zIndex: 1001,
@@ -2147,8 +2016,8 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
   },
   filterGridTileSelected: {
-    borderColor: "#FF0080",
-    backgroundColor: "rgba(255, 0, 128, 0.15)",
+    borderColor: "#EC9A15",
+    backgroundColor: "rgba(236, 154, 21, 0.15)",
   },
   filterGridThumbnail: {
     width: "100%",
@@ -2160,7 +2029,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   filterGridThumbnailSelected: {
-    backgroundColor: "rgba(255, 0, 128, 0.3)",
+    backgroundColor: "rgba(236, 154, 21, 0.3)",
   },
   filterGridThumbnailText: {
     color: "#fff",
