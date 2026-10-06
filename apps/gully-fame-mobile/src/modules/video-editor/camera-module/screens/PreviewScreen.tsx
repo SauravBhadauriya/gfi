@@ -1,5 +1,6 @@
 import React, { useCallback, useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, SafeAreaView } from 'react-native';
+import { StyleSheet, View, Text, SafeAreaView, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 import ExportScreen from '../components/ExportScreen';
 import TimelineEditor from '../components/timeline/TimelineEditor';
 import { useUndoRedo } from '../hooks/useUndoRedo';
@@ -7,7 +8,6 @@ import { cameraStyles } from '../styles/cameraStyles';
 import { calculateTimelinePositions } from '../utils/timelineHelpers';
 import type { CameraClip, CameraClipArray } from '../types/camera.types';
 
-// Dynamic transformable overlays ka contract type structure
 interface ActiveOverlay {
   id: string;
   type: 'image' | 'emoji';
@@ -33,62 +33,34 @@ const PreviewScreen: React.FC<PreviewScreenProps> = ({
   const [updatedClips, setUpdatedClips] = useState<CameraClipArray>(clips);
   const [showExport, setShowExport] = useState(false);
   
-  // 🔥 GESTURE ENGINE STATES: Multiple stickers ko handle aur active overlay track karne ke liye
   const [overlays, setOverlays] = useState<ActiveOverlay[]>([]);
   const [activeOverlayId, setActiveOverlayId] = useState<string | null>(null);
-  const overlayCounterRef = useRef(0); // Counter to ensure unique IDs
+  const overlayCounterRef = useRef(0);
 
   const undoRedo = useUndoRedo(clips);
 
   useEffect(() => {
-    console.log('🎬 PreviewScreen: clips received from parent:', clips?.length ?? 0, 'clips');
     if (clips && clips.length > 0) {
-      console.log('📹 PreviewScreen: First clip details:', JSON.stringify(clips[0], null, 2));
-      console.log('📹 PreviewScreen: All clips:', JSON.stringify(clips, null, 2));
       setUpdatedClips(clips);
       undoRedo.reset(clips);
-    } else {
-      console.warn('⚠️ PreviewScreen: Empty clips array!');
-      console.warn('⚠️ clips prop value:', clips);
     }
   }, [clips]); 
 
-  // 🔥 STICKER/EMOJI ADDING HANDLER: `StickerButton` se data lekar direct canvas me feed karega
   const handleSelectOverlay = useCallback((type: 'image' | 'emoji', content: string | number) => {
     overlayCounterRef.current += 1;
     const newOverlay: ActiveOverlay = {
-      id: `overlay-${Date.now()}-${overlayCounterRef.current}`, // UNIQUE ID with counter to avoid duplicates
+      id: `overlay-${Date.now()}-${overlayCounterRef.current}`,
       type,
       content,
     };
-    console.log(`🎨 New overlay added: ${newOverlay.id}`);
     setOverlays(prev => [...prev, newOverlay]);
-    setActiveOverlayId(newOverlay.id); // Add karte hi active pointer focus karega
+    setActiveOverlayId(newOverlay.id);
   }, []);
 
-  // 🔥 STICKER REMOVE HANDLER: Active cross button par click hote hi delete karega
   const handleDeleteOverlay = useCallback((id: string) => {
     setOverlays(prev => prev.filter(item => item.id !== id));
     setActiveOverlayId(null);
   }, []);
-
-  const handleDelete = useCallback(() => {
-    if (updatedClips.length === 0) return;
-    
-    undoRedo.addToHistory({ clips: updatedClips });
-    const newClips = updatedClips.filter((_, index) => index !== currentClipIndex);
-    const positionedClips = calculateTimelinePositions(newClips);
-    
-    setUpdatedClips(positionedClips);
-    onClipUpdate?.(positionedClips);
-    
-    if (positionedClips.length === 0) {
-      onBack?.();
-      return;
-    }
-
-    setCurrentClipIndex(prev => (prev > 0 ? prev - 1 : 0));
-  }, [currentClipIndex, updatedClips, onBack, onClipUpdate, undoRedo]);
 
   const handleAddClip = useCallback((source: 'camera' | 'gallery') => {
     onAddClip?.(source);
@@ -135,17 +107,60 @@ const PreviewScreen: React.FC<PreviewScreenProps> = ({
     setShowExport(true);
   }, []);
 
-  const handleExportComplete = useCallback(() => {
+  // 🛠️ FIX: Receives exported video URI and updates parent before navigating to post screen
+  const handleExportComplete = useCallback((exportedVideoUri?: string) => {
+    if (__DEV__) console.log(`[FLOW] PreviewScreen.handleExportComplete called: exportedUri=${exportedVideoUri?.substring(0, 50)}..., clips=${updatedClips.length}`);
     setShowExport(false);
-    onExportComplete?.();
-    onBack?.();
-  }, [onBack, onExportComplete]);
+
+    if (exportedVideoUri && updatedClips.length > 0) {
+      // Validate exported file exists before proceeding
+      if (__DEV__) console.log(`[FLOW] Validating export file exists: ${exportedVideoUri.substring(0, 50)}...`);
+      FileSystem.getInfoAsync(exportedVideoUri)
+        .then((fileInfo) => {
+          if (!fileInfo.exists) {
+            if (__DEV__) console.error(`[FLOW] Export file does not exist: ${exportedVideoUri}`);
+            Alert.alert(
+              "Export Failed",
+              "The exported video file was not found. Please try exporting again.",
+              [{ text: "OK", onPress: () => setShowExport(true) }]
+            );
+            return;
+          }
+          
+          if (__DEV__) console.log(`[FLOW] Export file validated: size=${fileInfo.size} bytes`);
+          const exportReadyClips = updatedClips.map((clip, idx) =>
+            idx === 0 ? { ...clip, uri: exportedVideoUri } : clip
+          );
+          if (__DEV__) console.log(`[FLOW] Updated first clip with export uri`);
+          onClipUpdate?.(exportReadyClips);
+
+          if (__DEV__) console.log('[FLOW] PreviewScreen: Calling onExportComplete (will navigate to post)');
+          onExportComplete?.();
+        })
+        .catch((error) => {
+          if (__DEV__) console.error('[FLOW] File validation error:', error);
+          Alert.alert(
+            "Export Validation Error",
+            "Could not verify the exported video file. Please try again.",
+            [{ text: "OK", onPress: () => setShowExport(true) }]
+          );
+        });
+    } else {
+      if (__DEV__) console.warn('[FLOW] Export complete but no uri or no clips');
+      if (!exportedVideoUri) {
+        Alert.alert(
+          "Export Failed",
+          "The video export did not produce an output file. Please try again.",
+          [{ text: "OK", onPress: () => setShowExport(true) }]
+        );
+      } else {
+        if (__DEV__) console.log('[FLOW] PreviewScreen: Calling onExportComplete (will navigate to post)');
+        onExportComplete?.();
+      }
+    }
+  }, [updatedClips, onClipUpdate, onExportComplete]);
 
   if (!clips?.length || !updatedClips[currentClipIndex]) {
-    console.warn('⚠️ PreviewScreen: Cannot render - clips:', clips?.length ?? 0, 'updatedClips:', updatedClips?.length ?? 0, 'currentClipIndex:', currentClipIndex);
-    if (updatedClips.length > 0) {
-      console.log('📹 PreviewScreen: Available clips in updatedClips:', updatedClips.map(c => ({id: c.id, uri: c.uri?.substring(0, 50)})));
-    }
     return (
       <SafeAreaView style={[cameraStyles.previewContainer, styles.emptyContainer]}>
         <Text style={styles.emptyText}>No media found</Text>
@@ -157,6 +172,7 @@ const PreviewScreen: React.FC<PreviewScreenProps> = ({
     return (
       <ExportScreen
         clips={updatedClips}
+        overlays={overlays}
         onBack={() => setShowExport(false)}
         onComplete={handleExportComplete}
       />
@@ -181,7 +197,6 @@ const PreviewScreen: React.FC<PreviewScreenProps> = ({
         canUndo={undoRedo.canUndo}
         canRedo={undoRedo.canRedo}
         
-        // 🔥 INJECTING STATE LAYERS: Ye data niche TimelineEditor ke canvas layer me pass hoga
         overlays={overlays}
         activeOverlayId={activeOverlayId}
         onSelectOverlay={handleSelectOverlay}

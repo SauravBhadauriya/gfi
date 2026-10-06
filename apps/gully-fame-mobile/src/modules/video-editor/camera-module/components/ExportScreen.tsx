@@ -8,24 +8,23 @@ import {
   SafeAreaView,
   Animated,
   Alert,
-  Platform,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
-import * as MediaLibrary from 'expo-media-library';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import Svg, { Path } from 'react-native-svg';
-import type { CameraClip, CameraClipArray } from '../types/camera.types';
+import type { CameraClipArray } from '../types/camera.types';
 import { exportAndCombineClips } from '../utils/videoExporter';
 
 interface ExportScreenProps {
   clips: CameraClipArray;
   onBack: () => void;
-  onComplete?: () => void;
+  onComplete?: (exportedUri: string) => void;
+  overlays?: any[];
 }
 
 /**
- * Export screen with progress indicator and save to gallery
+ * Export screen with progress indicator & direct handoff to Share Reel screen
  */
-const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }) => {
+const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete, overlays = [] }) => {
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Preparing export...');
@@ -38,18 +37,14 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
       try {
         const { status } = await MediaLibrary.requestPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert(
-            'Permission Required',
-            'We need permission to save videos to your gallery.',
-            [{ text: 'OK', onPress: onBack }]
-          );
+          console.warn('Media Library permission not granted');
         }
       } catch (error) {
         console.warn('Permission error:', error);
       }
     };
     requestPermission();
-  }, [onBack]);
+  }, []);
 
   // Animate progress bar
   useEffect(() => {
@@ -68,49 +63,51 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
     setStatus('Initializing export...');
     setExportedUri(null);
 
+    if (__DEV__) console.log(`[FLOW] ExportScreen: Starting export of ${clips.length} clips`);
+
     try {
-      // Update progress
       setProgress(0.1);
       setStatus('Processing clips...');
 
-      // Export and combine clips
+      // Export and combine clips + stickers
       const outputUri = await exportAndCombineClips(
         clips,
         (currentProgress: number, currentStatus: string) => {
           setProgress(currentProgress);
           setStatus(currentStatus);
-        }
+        },
+        overlays
       );
 
-      setProgress(0.9);
-      setStatus('Saving to gallery...');
+      setProgress(0.95);
+      setStatus('Finalizing video...');
 
-      // Save to gallery
       if (outputUri) {
-        const asset = await MediaLibrary.createAssetAsync(outputUri);
-        await MediaLibrary.createAlbumAsync('Video Editor', asset, false);
+        if (__DEV__) console.log(`[FLOW] Export complete: output=${outputUri.substring(0, 50)}...`);
+        
+        // Save to gallery silently in background
+        try {
+          const asset = await MediaLibrary.createAssetAsync(outputUri);
+          await MediaLibrary.createAlbumAsync('Gully Fame', asset, false);
+        } catch (e) {
+          console.warn('Background gallery save skipped:', e);
+        }
 
         setProgress(1);
         setStatus('Export complete!');
         setExportedUri(outputUri);
 
-        Alert.alert(
-          'Success!',
-          'Video saved to gallery successfully!',
-          [
-            {
-              text: 'Done',
-              onPress: () => {
-                onComplete?.();
-                onBack();
-              },
-            },
-          ]
-        );
+        // 🛠️ DIRECT HANDOFF: Bypass gallery alert & navigate to post screen
+        if (onComplete) {
+          if (__DEV__) console.log('[FLOW] ExportScreen: Calling onComplete with exported uri');
+          onComplete(outputUri);
+        }
       } else {
+        if (__DEV__) console.error('[FLOW] Export failed: No output file');
         throw new Error('Export failed: No output file');
       }
     } catch (error: any) {
+      if (__DEV__) console.error('[FLOW] Export error:', error.message || error);
       console.error('Export error:', error);
       Alert.alert(
         'Export Failed',
@@ -124,7 +121,7 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
     } finally {
       setExporting(false);
     }
-  }, [clips, exporting, onBack, onComplete]);
+  }, [clips, exporting, onBack, onComplete, overlays]);
 
   // Auto-start export when screen loads
   useEffect(() => {
@@ -134,7 +131,7 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
   }, []);
 
   const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 100],
+    inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
 
@@ -153,66 +150,28 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
             />
           </Svg>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Exporting</Text>
+        <Text style={styles.headerTitle}>Exporting Video</Text>
         <View style={styles.backButton} />
       </View>
 
       {/* Content */}
       <View style={styles.content}>
-        {exporting ? (
-          <>
-            {/* Progress Indicator */}
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBarBackground}>
-                <Animated.View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: progressWidth,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
-            </View>
-
-            {/* Status Text */}
-            <Text style={styles.statusText}>{status}</Text>
-
-            {/* Spinner */}
-            <ActivityIndicator size="large" color="#ec9a15" style={styles.spinner} />
-          </>
-        ) : exportedUri ? (
-          <>
-            <View style={styles.successContainer}>
-              <Svg width={80} height={80} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M22 11.08V12a10 10 0 1 1-5.93-9.14"
-                  stroke="#4CAF50"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <Path
-                  d="M22 4L12 14.01l-3-3"
-                  stroke="#4CAF50"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-              <Text style={styles.successTitle}>Video Saved!</Text>
-              <Text style={styles.successSubtitle}>Your video has been saved to gallery</Text>
-            </View>
-          </>
-        ) : (
-          <View style={styles.readyContainer}>
-            <Text style={styles.readyText}>Ready to export</Text>
-            <TouchableOpacity style={styles.exportButton} onPress={handleExport}>
-              <Text style={styles.exportButtonText}>Start Export</Text>
-            </TouchableOpacity>
+        <View style={styles.progressContainer}>
+          <View style={styles.progressBarBackground}>
+            <Animated.View
+              style={[
+                styles.progressBarFill,
+                {
+                  width: progressWidth,
+                },
+              ]}
+            />
           </View>
-        )}
+          <Text style={styles.progressText}>{Math.round(progress * 100)}%</Text>
+        </View>
+
+        <Text style={styles.statusText}>{status}</Text>
+        <ActivityIndicator size="large" color="#EC9A15" style={styles.spinner} />
       </View>
     </SafeAreaView>
   );
@@ -228,7 +187,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 50,
+    paddingTop: 16,
     paddingBottom: 16,
     backgroundColor: 'rgba(10, 10, 10, 0.95)',
     borderBottomWidth: 1,
@@ -265,64 +224,24 @@ const styles = StyleSheet.create({
   },
   progressBarFill: {
     height: '100%',
-    backgroundColor: '#ec9a15',
+    backgroundColor: '#EC9A15',
     borderRadius: 4,
   },
   progressText: {
     color: '#ffffff',
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     textAlign: 'center',
   },
   statusText: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
+    fontSize: 15,
     textAlign: 'center',
-    marginBottom: 32,
-  },
-  spinner: {
-    marginTop: 24,
-  },
-  successContainer: {
-    alignItems: 'center',
-  },
-  successTitle: {
-    color: '#ffffff',
-    fontSize: 24,
-    fontWeight: '700',
-    marginTop: 24,
-    marginBottom: 8,
-  },
-  successSubtitle: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  readyContainer: {
-    alignItems: 'center',
-  },
-  readyText: {
-    color: '#ffffff',
-    fontSize: 18,
     marginBottom: 24,
   },
-  exportButton: {
-    backgroundColor: '#ec9a15',
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    borderRadius: 24,
-    shadowColor: '#ec9a15',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  exportButtonText: {
-    color: '#000000',
-    fontSize: 16,
-    fontWeight: '700',
+  spinner: {
+    marginTop: 12,
   },
 });
 
 export default ExportScreen;
-

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import PreviewScreen from '@modules/video-editor/camera-module/screens/PreviewScreen';
 import type { CameraClipArray } from '@modules/video-editor/camera-module/types/camera.types';
@@ -13,41 +13,72 @@ import type { CameraClipArray } from '@modules/video-editor/camera-module/types/
 export default function EditorScreen() {
   const params = useLocalSearchParams();
   const [clips, setClips] = useState<CameraClipArray>([]);
+  const [isParsing, setIsReadyParsing] = useState(true);
+  const [parseError, setParseError] = useState<string | null>(null);
 
+  // Parse incoming clips safely
   useEffect(() => {
     if (params.clips) {
       try {
-        const parsedClips = JSON.parse(params.clips as string);
-        console.log('[EditorScreen] Parsed clips from params:', parsedClips?.length ?? 0, 'clips');
-        setClips(parsedClips);
+        const parsedClips = typeof params.clips === 'string' 
+          ? JSON.parse(params.clips) 
+          : params.clips;
+
+        if (__DEV__) console.log(`[FLOW] EditorScreen: Parsed ${parsedClips?.length ?? 0} clips from router params`);
+        if (Array.isArray(parsedClips)) {
+          // Validate all clips have uris
+          const hasValidUris = parsedClips.every(c => c?.uri && typeof c.uri === 'string');
+          if (!hasValidUris) {
+            if (__DEV__) console.error('[FLOW] EditorScreen: Some clips missing valid uris');
+            setParseError('One or more clips are missing video files. Please re-record.');
+            setIsReadyParsing(false);
+            return;
+          }
+          setClips(parsedClips);
+          setParseError(null);
+          if (__DEV__) console.log(`[FLOW] EditorScreen: State updated with ${parsedClips.length} clips`);
+        } else {
+          if (__DEV__) console.error('[FLOW] EditorScreen: Parsed clips is not an array');
+          setParseError('Invalid clip data received. Please re-record.');
+        }
       } catch (e) {
-        console.error('[EditorScreen] Failed to parse clips:', e);
+        if (__DEV__) console.error('[FLOW] EditorScreen: Failed to parse clips:', e);
+        setParseError('Failed to parse video data. Please re-record and try again.');
         const clipStrings = String(params.clips).split(",");
-        setClips(clipStrings.map((uri, index) => ({ 
-          id: String(index), 
-          uri,
-          duration: 0,
-          type: 'video' as const,
-          source: 'camera' as const
-        })));
+        setClips(
+          clipStrings.map((uri, index) => ({ 
+            id: `clip-${Date.now()}-${index}`, 
+            uri: uri.trim(),
+            duration: 0,
+            type: 'video' as const,
+            source: 'camera' as const
+          }))
+        );
+      } finally {
+        setIsReadyParsing(false);
       }
+    } else {
+      if (__DEV__) console.log('[FLOW] EditorScreen: No clips in params');
+      setParseError('No video clips received. Please re-record.');
+      setIsReadyParsing(false);
     }
   }, [params.clips]);
 
-  const handleEditorBack = () => {
+  const handleEditorBack = useCallback(() => {
     console.log('[EditorScreen] User cancelled editing, going back');
     router.back();
-  };
+  }, []);
 
-  const handleEditorComplete = () => {
-    console.log('[EditorScreen] User exported edited video, navigating to post screen');
+  const handleEditorComplete = useCallback(() => {
+    if (__DEV__) console.log(`[FLOW] EditorScreen.onExportComplete called: navigating to post with ${clips.length} clips`);
     
     // Parse route params (competition info, etc)
     const competitionId = params.competitionId ? String(params.competitionId) : null;
     const competitionName = params.competitionName ? String(params.competitionName) : null;
     const entryFee = params.entryFee ? String(params.entryFee) : null;
 
-    // Navigate to post/share screen with edited clips
+    // Navigate to post/share screen with complete edited clips payload
+    if (__DEV__) console.log('[FLOW] Navigating to /(main)/upload/post');
     router.push({
       pathname: '/(main)/upload/post',
       params: {
@@ -57,15 +88,31 @@ export default function EditorScreen() {
         ...(entryFee && { entryFee }),
       },
     });
-  };
+  }, [clips, params]);
 
-  const handleClipUpdate = (updatedClips: CameraClipArray) => {
+  const handleClipUpdate = useCallback((updatedClips: CameraClipArray) => {
     console.log('[EditorScreen] Clips updated during editing:', updatedClips?.length ?? 0, 'clips');
     setClips(updatedClips);
-  };
+  }, []);
 
-  if (!clips || clips.length === 0) {
-    return <View style={{ flex: 1, backgroundColor: '#000' }} />;
+  if (isParsing || !clips || clips.length === 0) {
+    if (parseError) {
+      return (
+        <View style={styles.loadingContainer}>
+          <Text style={{ color: '#fff', fontSize: 16, marginHorizontal: 20, textAlign: 'center' }}>
+            {parseError}
+          </Text>
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 20, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#EC9A15', borderRadius: 8 }}>
+            <Text style={{ color: '#000', fontWeight: 'bold' }}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#EC9A15" />
+      </View>
+    );
   }
 
   return (
@@ -77,3 +124,12 @@ export default function EditorScreen() {
     />
   );
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
