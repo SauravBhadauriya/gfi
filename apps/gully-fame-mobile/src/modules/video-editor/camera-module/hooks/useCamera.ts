@@ -80,25 +80,31 @@ export const useCamera = (mode: CameraModeEnum, _flash: unknown): UseCameraResul
       }
 
       try {
-        const options: CameraRecordingOptions = {};
+        const options: CameraRecordingOptions = {
+          // Ensure recording actually produces frames on problematic devices
+          quality: 1, // Max quality
+          mute: false, // Allow audio
+          videoBitrate: 5000000, // 5 Mbps
+        };
+        if (__DEV__) console.warn(`[useCamera.startRecording] recordAsync called with options:`, options);
         recordAsyncStartedAtRef.current = performance.now();
         const recordingPromise = cameraRef.current.recordAsync(options);
 
-        // Set up auto-stop timer if maxDuration is provided
-        // GUARD: Wait 1000ms before starting timer to ensure first frame is written
-        if (maxDurationSeconds && maxDurationSeconds > 0) {
-          maxDurationTimerRef.current = setTimeout(async () => {
-            if (cameraRef.current && isRecordingRef.current) {
-              const elapsedMs = performance.now() - (recordAsyncStartedAtRef.current ?? 0);
-              if (__DEV__) console.log(`[useCamera] Auto-stop timer fired after ${elapsedMs.toFixed(0)}ms (${maxDurationSeconds}s limit)`);
-              try {
-                await cameraRef.current.stopRecording();
-              } catch (error) {
-                if (__DEV__) console.warn('[useCamera] Failed to auto-stop recording', error);
-              }
-            }
-          }, (maxDurationSeconds * 1000) + 100); // Add 100ms buffer to ensure minimum recording
-        }
+        // DISABLED: Auto-stop timer causes "stopped before any data" errors on some devices
+        // User can tap the button again to stop recording instead
+        // if (maxDurationSeconds && maxDurationSeconds > 0) {
+        //   maxDurationTimerRef.current = setTimeout(async () => {
+        //     if (cameraRef.current && isRecordingRef.current) {
+        //       const elapsedMs = performance.now() - (recordAsyncStartedAtRef.current ?? 0);
+        //       if (__DEV__) console.log(`[useCamera] Auto-stop timer fired after ${elapsedMs.toFixed(0)}ms (${maxDurationSeconds}s limit)`);
+        //       try {
+        //         await cameraRef.current.stopRecording();
+        //       } catch (error) {
+        //         if (__DEV__) console.warn('[useCamera] Failed to auto-stop recording', error);
+        //       }
+        //     }
+        //   }, (maxDurationSeconds * 1000) + 100);
+        // }
 
         recordingPromise
           .then((video: any) => {
@@ -108,6 +114,7 @@ export const useCamera = (mode: CameraModeEnum, _flash: unknown): UseCameraResul
               clearTimeout(maxDurationTimerRef.current);
               maxDurationTimerRef.current = null;
             }
+            if (__DEV__) console.warn(`[useCamera.recordAsync] RESOLVED after ${elapsedMs.toFixed(0)}ms, calling setIsRecording(false)`);
             setIsRecording(false);
             isRecordingRef.current = false;
             const uri = (video as { uri?: string }).uri ?? '';
@@ -116,8 +123,10 @@ export const useCamera = (mode: CameraModeEnum, _flash: unknown): UseCameraResul
             if (__DEV__) console.log(`[useCamera.recordAsync] RESOLVED after ${elapsedMs.toFixed(0)}ms: uri=${uri ? 'present' : 'missing'}, duration=${duration}`);
 
             if (!uri) {
+              if (__DEV__) console.warn(`[useCamera.recordAsync] NO URI returned, calling onFinished(null)`);
               void onFinished(null);
             } else {
+              if (__DEV__) console.warn(`[useCamera.recordAsync] ✅ SUCCESS: uri present, calling onFinished with clip`);
               void onFinished({
                 id: makeId(),
                 uri,
@@ -203,6 +212,7 @@ export const useCamera = (mode: CameraModeEnum, _flash: unknown): UseCameraResul
         } catch (error) {
           if (__DEV__) console.warn('[useCamera.stopRecording] Exception during delayed stop:', error);
         }
+        if (__DEV__) console.warn(`[useCamera.stopRecording] Delayed stop: calling setIsRecording(false)`);
         setIsRecording(false);
       }, delayNeeded);
       
@@ -223,6 +233,7 @@ export const useCamera = (mode: CameraModeEnum, _flash: unknown): UseCameraResul
     } catch (error) {
       if (__DEV__) console.warn('[useCamera.stopRecording] Exception:', error);
     }
+    if (__DEV__) console.warn(`[useCamera.stopRecording] Calling setIsRecording(false) after successful stop`);
     setIsRecording(false);
   }, []);
 

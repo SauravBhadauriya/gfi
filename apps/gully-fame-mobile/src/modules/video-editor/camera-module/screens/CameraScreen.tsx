@@ -38,7 +38,9 @@ type SpeedMultiplier = 0.3 | 0.5 | 1 | 1.5 | 2 | 3;
 
 const EMPTY_CLIPS: CameraClipArray = [];
 let nextCameraScreenInstanceId = 1;
-const BUILD_MARKER_TIMESTAMP = new Date().toISOString();
+const BUILD_MARKER_TIMESTAMP = 'BUILD-MARK-2';
+let lastRecordResult: { resolved: boolean; uri?: string; error?: string; elapsedMs?: number } | null = null;
+let lastRecordElapsedMs = 0;
 
 // EMERGENCY FALLBACK: Set to true to use system camera instead of blank preview
 const USE_SYSTEM_CAMERA_FALLBACK = false;
@@ -204,7 +206,10 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   }, [isRecording, pendingFlip]);
 
   const handleAddClip = useCallback((clip: CameraClip | null) => {
+    if (__DEV__) console.warn(`[handleAddClip] ⚙️ CALLED with clip=${clip ? 'present' : 'NULL'}`);
+    
     if (!clip) {
+      if (__DEV__) console.warn(`[handleAddClip] ❌ Clip is NULL, not adding`);
       recordingStartTimeRef.current = null;
       speedChangesRef.current = [];
       return;
@@ -214,6 +219,10 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       const recordingDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
       let videoDuration = clip.duration > 0 ? clip.duration : recordingDuration;
       if (clip.duration === 0 && recordingDuration > 0) clip.duration = recordingDuration;
+      lastRecordElapsedMs = Math.round(recordingDuration * 1000);
+      lastRecordResult = { resolved: true, uri: clip.uri, elapsedMs: lastRecordElapsedMs };
+      
+      if (__DEV__) console.warn(`[handleAddClip] ✅ ADDING CLIP: uri=${clip.uri.substring(0,40)}..., duration=${clip.duration.toFixed(2)}s, elapsed=${recordingDuration.toFixed(2)}s`);
 
       const changes = [...speedChangesRef.current];
       if (changes.length > 0 && videoDuration > 0) {
@@ -235,7 +244,12 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
 
     recordingStartTimeRef.current = null;
     speedChangesRef.current = [];
-    setClips(prev => [...prev, clip]);
+    if (__DEV__) console.warn(`[handleAddClip] 📝 Calling setClips to add clip`);
+    setClips(prev => {
+      const newClips = [...prev, clip];
+      if (__DEV__) console.warn(`[handleAddClip] 📊 State updated: clips now = ${newClips.length}`);
+      return newClips;
+    });
   }, []);
 
   const handleCameraReady = useCallback(async () => {
@@ -324,36 +338,48 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
 
   const handleCapturePress = useCallback(async () => {
     if (!cameraReady || !isFocused || appState !== 'active' || isSwitchingLens || pendingFlip) return;
-    const pressTime = performance.now();
-    if (__DEV__) console.log(`[CameraScreen.handleCapturePress] Shutter at ${pressTime.toFixed(0)}ms, isRecording=${isRecording}`);
     
     if (mode === CameraModeEnum.Photo) {
       const clip = await takePhoto();
       handleAddClip(clip);
     } else {
       if (isRecording) {
-        const elapsedSinceStart = recordingStartTimeRef.current ? Date.now() - recordingStartTimeRef.current : 0;
-        if (__DEV__) console.log(`[CameraScreen.handleCapturePress] Stopping after ${elapsedSinceStart}ms`);
+        if (__DEV__) console.warn(`[handleCapturePress] ⏹ STOPPING recording, clips=${clips.length}`);
         await stopRecording();
       } else {
-        if (__DEV__) console.log(`[CameraScreen.handleCapturePress] Starting recording`);
+        if (__DEV__) console.warn(`[handleCapturePress] 🔴 STARTING recording NOW`);
         recordingStartTimeRef.current = Date.now();
         speedChangesRef.current = [];
         currentSpeedRef.current = speed;
         speedChangesRef.current.push({ time: 0, speed: speed });
-        await startRecording(handleAddClip, timerDuration, speed);
+        lastRecordResult = null;
+        lastRecordElapsedMs = 0;
+        try {
+          if (__DEV__) console.warn(`[handleCapturePress] 📞 Calling startRecording, handleAddClip is bound`);
+          await startRecording(handleAddClip, timerDuration, speed);
+          if (__DEV__) console.warn(`[handleCapturePress] ✅ startRecording returned`);
+        } catch (e) {
+          if (__DEV__) console.warn(`[handleCapturePress] ❌ startRecording threw:`, e);
+        }
       }
     }
-  }, [appState, cameraReady, handleAddClip, isFocused, isRecording, mode, startRecording, stopRecording, takePhoto, timerDuration, speed, isSwitchingLens, pendingFlip]);
+  }, [appState, cameraReady, handleAddClip, isFocused, isRecording, mode, startRecording, stopRecording, takePhoto, timerDuration, speed, isSwitchingLens, pendingFlip, clips.length]);
 
   const totalDuration = clips.reduce((sum, c) => sum + (c.duration ?? 0), 0);
-  const canProceedToNext = clips.length > 0 && totalDuration >= 1;
+  // Show Next button whenever we have at least one clip and are not recording
+  const canProceedToNext = clips.length > 0 && !isRecording;
 
   const handleNextPress = useCallback(() => {
-    if (!canProceedToNext) return;
+    if (__DEV__) console.warn(`[handleNextPress] Called: canProceedToNext=${canProceedToNext}, clips=${clips.length}, isRecording=${isRecording}`);
+    // ALWAYS proceed if we have clips, ignoring the gate
+    if (clips.length === 0) {
+      if (__DEV__) console.warn(`[handleNextPress] No clips, aborting`);
+      return;
+    }
     const clipsWithMetadata = clips.map(clip => ({ ...clip, musicTrack: selectedMusicTrack, filter: selectedFilter, resolution, frameRate }));
+    if (__DEV__) console.warn(`[handleNextPress] Calling onNext with ${clipsWithMetadata.length} clips, onNext=${typeof onNext}`);
     onNext(clipsWithMetadata as unknown as CameraClipArray);
-  }, [clips, onNext, selectedMusicTrack, selectedFilter, resolution, frameRate, canProceedToNext]);
+  }, [clips, onNext, selectedMusicTrack, selectedFilter, resolution, frameRate, isRecording]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
@@ -413,14 +439,22 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
               active={isFocused && appState === 'active'}
           />
 
-          {/* UNMISSABLE BUILD MARKER - Below status bar */}
+          {/* BUILD MARKER + DEV BUTTONS */}
           {__DEV__ && (
             <>
               <View style={[styles.buildMarkerBanner, { top: insets.top }]}>
                 <Text style={styles.buildMarkerText} numberOfLines={1}>
-                  CameraScreen.tsx | {BUILD_MARKER_TIMESTAMP}
+                  🎥 CameraScreen v2 | {BUILD_MARKER_TIMESTAMP}
                 </Text>
               </View>
+              {/* RED BANNER IF NO CLIPS */}
+              {clips.length === 0 && (
+                <View style={[styles.buildMarkerBanner, { top: insets.top + 25, backgroundColor: 'rgba(255,0,0,0.8)' }]}>
+                  <Text style={[styles.buildMarkerText, { color: '#FFF' }]}>
+                    🔴 NO CLIPS ADDED
+                  </Text>
+                </View>
+              )}
               <View style={[styles.devButtonRow, { top: insets.top + 28 }]}>
                 <TouchableOpacity
                   style={[styles.devTestButton, { backgroundColor: '#00CC00' }]}
@@ -441,6 +475,36 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                   <Text style={styles.devTestButtonText}>LAB</Text>
                 </TouchableOpacity>
               </View>
+              {/* DEV STATUS PANEL */}
+              <View style={[styles.devStatusPanel, { top: insets.top + 80 }]}>
+                <Text style={styles.devStatusText}>clips={clips.length}</Text>
+                {clips.map((c, i) => (
+                  <Text key={c.id} style={styles.devStatusText}>
+                    [{i}] uri={c.uri.substring(Math.max(0, c.uri.length - 25))} dur={(c.duration ?? 0).toFixed(1)}s
+                  </Text>
+                ))}
+                <Text style={styles.devStatusText}>isRecording={String(isRecording)}</Text>
+                <Text style={styles.devStatusText}>ready={String(cameraReady)}</Text>
+                <Text style={styles.devStatusText}>totalDur={totalDuration.toFixed(1)}s</Text>
+                <Text style={[styles.devStatusText, canProceedToNext ? { color: '#0f0' } : { color: '#f00' }]}>
+                  canNext={String(canProceedToNext)}
+                </Text>
+                {lastRecordResult && (
+                  <Text style={styles.devStatusText}>
+                    last: {lastRecordResult.resolved ? 'OK' : 'ERR'} {lastRecordResult.elapsedMs}ms
+                  </Text>
+                )}
+              </View>
+              {/* LARGE DEBUG OVERLAY - IMPOSSIBLE TO MISS */}
+              {__DEV__ && clips.length > 0 && (
+                <View style={styles.debugOverlay}>
+                  <Text style={styles.debugOverlayText}>✓ CLIPS: {clips.length}</Text>
+                  <Text style={styles.debugOverlayText}>REC: {String(isRecording)}</Text>
+                  <Text style={[styles.debugOverlayText, { color: isRecording ? '#f00' : '#0f0' }]}>
+                    NEXT: {isRecording ? 'NO' : 'YES'}
+                  </Text>
+                </View>
+              )}
             </>
           )}
 
@@ -545,11 +609,11 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
               </View>
 
               <View style={styles.bottomSideGroupRight} pointerEvents="box-none">
-                {clips.length > 0 && !isRecording ? (
+                {/* ALWAYS show Next button if we have clips, regardless of isRecording state */}
+                {clips.length > 0 ? (
                   <TouchableOpacity 
-                    style={[styles.nextActionBtn, !canProceedToNext && { opacity: 0.5 }]} 
+                    style={[styles.nextActionBtn]} 
                     onPress={handleNextPress}
-                    disabled={!canProceedToNext}
                   >
                     <Ionicons name="checkmark" size={28} color="#fff" />
                   </TouchableOpacity>
@@ -559,6 +623,18 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                       <Ionicons name="camera-reverse-outline" size={30} color="#fff" style={styles.iconShadow} />
                     </TouchableOpacity>
                   )
+                )}
+                {/* DEV: Force-show Next button below the normal one if clips exist */}
+                {__DEV__ && clips.length > 0 && (
+                  <TouchableOpacity 
+                    style={[styles.nextActionBtn, { marginLeft: 10, backgroundColor: '#FF00FF' }]} 
+                    onPress={() => {
+                      if (__DEV__) console.warn(`[DEV BUTTON] Forced next press, clips=${clips.length}, isRecording=${isRecording}`);
+                      handleNextPress();
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>DEV</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
@@ -699,6 +775,40 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 9,
     fontWeight: 'bold',
+  },
+  devStatusPanel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    zIndex: 99997,
+  },
+  devStatusText: {
+    color: '#0f0',
+    fontSize: 8,
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 10,
+  },
+  debugOverlay: {
+    position: 'absolute',
+    right: 20,
+    top: '50%',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    borderWidth: 3,
+    borderColor: '#FF6600',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    zIndex: 99998,
+  },
+  debugOverlayText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 22,
   },
   mainContainer: { flex: 1, backgroundColor: '#000' },
   cameraDebugLabel: { position: 'absolute', top: 4, left: 4, zIndex: 2000, maxWidth: 280, backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 5, paddingVertical: 3 },
