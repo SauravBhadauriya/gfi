@@ -75,3 +75,5 @@ exported_videos/
 
 # Misc
 .turbo/
+*.apk
+build-*.apk
