@@ -45,7 +45,9 @@ import Svg, { Path } from "react-native-svg";
 import BottomNav from "@components/layout/BottomNav";
 import DrawerMenu from "@components/layout/DrawerMenu";
 import SupportModal from "@/components/modals/SupportModal/SupportModal";
+import InsufficientBalanceModal from "@/components/modals/InsufficientBalanceModal/InsufficientBalanceModal";
 import { ReelViewer } from "@components/reel/ReelViewer";
+import { useWalletBalance } from "@/hooks/useWalletBalance";
 import {
   scale,
   getFontSize,
@@ -160,6 +162,9 @@ export default function GullyReelScreen() {
 
   const threeDotsSlideAnim = useRef(new Animated.Value(height)).current;
   const [tipModalVisible, setTipModalVisible] = useState(false);
+  const [insufficientBalanceModalVisible, setInsufficientBalanceModalVisible] = useState(false);
+  const [isFetchingBalance, setIsFetchingBalance] = useState(false);
+  const walletBalance = useWalletBalance();
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [selectedReelForDownload, setSelectedReelForDownload] = useState<any>(null);
@@ -897,6 +902,28 @@ export default function GullyReelScreen() {
     }
   };
 
+  const handleSupportPress = useCallback(async (reelId: number, creatorId: string | undefined) => {
+    try {
+      setIsFetchingBalance(true);
+      const balance = await walletBalance.fetchBalance();
+
+      if (balance < 1) {
+        setCurrentTipReelId(reelId);
+        setCurrentTipCreatorId(creatorId);
+        setInsufficientBalanceModalVisible(true);
+      } else {
+        setCurrentTipReelId(reelId);
+        setCurrentTipCreatorId(creatorId);
+        setTipModalVisible(true);
+      }
+    } catch (error) {
+      console.error("[handleSupportPress] Error:", error);
+      Alert.alert("Error", "Failed to check balance. Please try again.");
+    } finally {
+      setIsFetchingBalance(false);
+    }
+  }, [walletBalance]);
+
   const tabs = [
     { name: "Home", icon: HomeIconSVG, label: "Home" },
     { name: "Reel", icon: ReelIconSVG, label: "GullyReel" },
@@ -1107,15 +1134,22 @@ export default function GullyReelScreen() {
               <View style={styles.bottomButtonsRow}>
                 <View style={styles.flexButtonWrapper}>
                   <TouchableOpacity
-                    style={styles.tipButton}
+                    style={[styles.tipButton, isFetchingBalance && { opacity: 0.6 }]}
                     onPress={() => {
-                      setCurrentTipReelId(reel.id);
-                      setCurrentTipCreatorId(reel.userId);
-                      setTipModalVisible(true);
+                      if (!isFetchingBalance) {
+                        handleSupportPress(reel.id, reel.userId);
+                      }
                     }}
+                    disabled={isFetchingBalance}
                   >
-                    <CoinIcon size={16} color="#fff" />
-                    <Text style={styles.tipButtonText}>Support</Text>
+                    {isFetchingBalance ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <CoinIcon size={16} color="#fff" />
+                        <Text style={styles.tipButtonText}>Support</Text>
+                      </>
+                    )}
                   </TouchableOpacity>
                 </View>
 
@@ -1189,6 +1223,8 @@ export default function GullyReelScreen() {
       handleDoubleTap,
       handleLike,
       handleSave,
+      handleSupportPress,
+      reels,
     ]
   );
 
@@ -1992,6 +2028,15 @@ export default function GullyReelScreen() {
       />
 
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
+
+      <InsufficientBalanceModal
+        visible={insufficientBalanceModalVisible}
+        onDismiss={() => {
+          setInsufficientBalanceModalVisible(false);
+          setCurrentTipReelId(null);
+          setCurrentTipCreatorId(undefined);
+        }}
+      />
 
       {currentTipReelId !== null && (
         <SupportModal

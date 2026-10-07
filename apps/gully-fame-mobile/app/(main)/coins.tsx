@@ -245,21 +245,6 @@ export default function CoinsScreen() {
               <Text style={{ color: "#999", fontSize: 16 }}>No transactions yet</Text>
             </View>
           )}
-
-          {/* Add Coins Button */}
-          <TouchableOpacity 
-            style={styles.addCoinsButton}
-            onPress={handleAddMoney}
-          >
-            <LinearGradient
-              colors={["#FF6B35", "#FF8C00"]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.addCoinsGradient}
-            >
-              <Text style={styles.addCoinsText}>+ Add GFI Coins</Text>
-            </LinearGradient>
-          </TouchableOpacity>
         </ScrollView>
       )}
 
@@ -650,15 +635,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
     borderRadius: 12,
     overflow: "hidden",
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   addMoneyGradient: {
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     alignItems: "center",
+    minHeight: 48,
   },
   addMoneyText: {
     color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    fontSize: 17,
+    fontWeight: "700",
+    letterSpacing: 0.5,
   },
   transactionMeta: {
     flexDirection: "row",

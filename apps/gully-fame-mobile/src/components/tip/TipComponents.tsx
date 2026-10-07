@@ -374,8 +374,14 @@ export const TipPopup = ({
       try {
         const response = await getWalletBalance();
         if (response.success && response.data) {
-          setCoinBalance(response.data.coins || 0);
-          console.log('[TipPopup] Coin balance loaded:', response.data.coins);
+          const balance = response.data.coins || 0;
+          setCoinBalance(balance);
+          console.log('[TipPopup] Coin balance loaded:', balance);
+          
+          // If participant and balance is 0, auto-show insufficient modal
+          if (balance === 0) {
+            console.log('[TipPopup] Balance is 0 - will show insufficient coins modal');
+          }
         } else {
           console.warn('[TipPopup] Failed to load coin balance, defaulting to 0');
           setCoinBalance(0);

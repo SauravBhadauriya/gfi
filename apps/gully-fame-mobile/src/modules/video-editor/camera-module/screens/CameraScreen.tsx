@@ -37,10 +37,6 @@ type TimerDuration = 0 | 15 | 30 | 60;
 type SpeedMultiplier = 0.3 | 0.5 | 1 | 1.5 | 2 | 3;
 
 const EMPTY_CLIPS: CameraClipArray = [];
-let nextCameraScreenInstanceId = 1;
-const BUILD_MARKER_TIMESTAMP = 'PHASE-1-FIX-RECORDING';
-let lastRecordResult: { resolved: boolean; uri?: string; error?: string; elapsedMs?: number } | null = null;
-let lastRecordElapsedMs = 0;
 
 // EMERGENCY FALLBACK: Set to true to use system camera instead of blank preview
 const USE_SYSTEM_CAMERA_FALLBACK = false;
@@ -62,13 +58,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   const [appState, setAppState] = useState(AppState.currentState);
   const [isCameraReadyToMount, setIsCameraReadyToMount] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const [mountCount, setMountCount] = useState(0);
-  const [lastMountError, setLastMountError] = useState('none');
   const cameraWasMountedRef = useRef(false);
-  const debugInstanceIdRef = useRef(0);
-  if (__DEV__ && debugInstanceIdRef.current === 0) {
-    debugInstanceIdRef.current = nextCameraScreenInstanceId++;
-  }
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', nextState => {
@@ -145,7 +135,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   useEffect(() => {
     if (shouldRenderCamera && !cameraWasMountedRef.current) {
       cameraWasMountedRef.current = true;
-      setMountCount(count => count + 1);
     } else if (!shouldRenderCamera) {
       cameraWasMountedRef.current = false;
       setCameraReady(false);
@@ -225,8 +214,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       const recordingDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
       let videoDuration = clip.duration > 0 ? clip.duration : recordingDuration;
       if (clip.duration === 0 && recordingDuration > 0) clip.duration = recordingDuration;
-      lastRecordElapsedMs = Math.round(recordingDuration * 1000);
-      lastRecordResult = { resolved: true, uri: clip.uri, elapsedMs: lastRecordElapsedMs };
       
       if (__DEV__) console.warn(`[handleAddClip] ✅ ADDING CLIP: uri=${clip.uri.substring(0,40)}..., duration=${clip.duration.toFixed(2)}s, elapsed=${recordingDuration.toFixed(2)}s`);
 
@@ -261,7 +248,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   const handleCameraReady = useCallback(async () => {
     console.log('[CameraScreen] onCameraReady');
     setCameraReady(true);
-    setLastMountError('none');
     if (shouldResumeRecordingRef.current) {
       shouldResumeRecordingRef.current = false;
       setTimeout(async () => {
@@ -280,7 +266,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
   const handleCameraMountError = useCallback((error: { message?: string }) => {
     const message = error?.message ?? String(error);
     console.error('[CameraScreen] onMountError:', message);
-    setLastMountError(message);
     setCameraReady(false);
   }, []);
 
@@ -367,8 +352,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
           speedChangesRef.current = [];
           currentSpeedRef.current = speed;
           speedChangesRef.current.push({ time: 0, speed: speed });
-          lastRecordResult = null;
-          lastRecordElapsedMs = 0;
           try {
             if (__DEV__) console.warn(`[handleCapturePress] 📞 Calling startRecording, handleAddClip is bound`);
             await startRecording(handleAddClip, timerDuration, speed);
@@ -455,83 +438,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
               active={isFocused && appState === 'active'}
           />
 
-          {/* BUILD MARKER + DEV BUTTONS */}
-          {__DEV__ && (
-            <>
-              <View style={[styles.buildMarkerBanner, { top: insets.top }]}>
-                <Text style={styles.buildMarkerText} numberOfLines={1}>
-                  🎥 CameraScreen v2 | {BUILD_MARKER_TIMESTAMP}
-                </Text>
-              </View>
-              {/* RED BANNER IF NO CLIPS */}
-              {clips.length === 0 && (
-                <View style={[styles.buildMarkerBanner, { top: insets.top + 25, backgroundColor: 'rgba(255,0,0,0.8)' }]}>
-                  <Text style={[styles.buildMarkerText, { color: '#FFF' }]}>
-                    🔴 NO CLIPS ADDED
-                  </Text>
-                </View>
-              )}
-              <View style={[styles.devButtonRow, { top: insets.top + 28 }]}>
-                <TouchableOpacity
-                  style={[styles.devTestButton, { backgroundColor: '#00CC00' }]}
-                  onPress={() => router.push('/(main)/cam-expo-min')}
-                >
-                  <Text style={styles.devTestButtonText}>EXPO</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.devTestButton, { backgroundColor: '#0066CC' }]}
-                  onPress={() => router.push('/(main)/camera-vision-test')}
-                >
-                  <Text style={styles.devTestButtonText}>VISION</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.devTestButton, { backgroundColor: '#CC6600' }]}
-                  onPress={() => router.push('/(main)/camera-lab')}
-                >
-                  <Text style={styles.devTestButtonText}>LAB</Text>
-                </TouchableOpacity>
-              </View>
-              {/* DEV STATUS PANEL */}
-              <View style={[styles.devStatusPanel, { top: insets.top + 80 }]}>
-                <Text style={styles.devStatusText}>clips={clips.length}</Text>
-                {clips.map((c, i) => (
-                  <Text key={c.id} style={styles.devStatusText}>
-                    [{i}] uri={c.uri.substring(Math.max(0, c.uri.length - 25))} dur={(c.duration ?? 0).toFixed(1)}s
-                  </Text>
-                ))}
-                <Text style={styles.devStatusText}>isRecording={String(isRecording)}</Text>
-                <Text style={styles.devStatusText}>ready={String(cameraReady)}</Text>
-                <Text style={styles.devStatusText}>totalDur={totalDuration.toFixed(1)}s</Text>
-                <Text style={[styles.devStatusText, canProceedToNext ? { color: '#0f0' } : { color: '#f00' }]}>
-                  canNext={String(canProceedToNext)}
-                </Text>
-                {lastRecordResult && (
-                  <Text style={styles.devStatusText}>
-                    last: {lastRecordResult.resolved ? 'OK' : 'ERR'} {lastRecordResult.elapsedMs}ms
-                  </Text>
-                )}
-              </View>
-              {/* LARGE DEBUG OVERLAY - IMPOSSIBLE TO MISS */}
-              {__DEV__ && clips.length > 0 && (
-                <View style={styles.debugOverlay}>
-                  <Text style={styles.debugOverlayText}>✓ CLIPS: {clips.length}</Text>
-                  <Text style={styles.debugOverlayText}>REC: {String(isRecording)}</Text>
-                  <Text style={[styles.debugOverlayText, { color: isRecording ? '#f00' : '#0f0' }]}>
-                    NEXT: {isRecording ? 'NO' : 'YES'}
-                  </Text>
-                </View>
-              )}
-            </>
-          )}
-
           <SafeAreaView style={StyleSheet.absoluteFill} pointerEvents="box-none">
-            {__DEV__ && (
-              <View pointerEvents="none" style={styles.cameraDebugLabel}>
-                <Text numberOfLines={2} style={styles.cameraDebugText}>
-                  screen={debugInstanceIdRef.current} permission={String(hasPermission)} focus={String(isFocused)} ready={String(cameraReady)} mounts={mountCount} error={lastMountError}
-                </Text>
-              </View>
-            )}
             {isSwitchingLens && (
               <View style={styles.switchingOverlay}>
                 <ActivityIndicator color="#ffffff" size="large" />
@@ -640,18 +547,6 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
                     </TouchableOpacity>
                   )
                 )}
-                {/* DEV: Force-show Next button below the normal one if clips exist */}
-                {__DEV__ && clips.length > 0 && (
-                  <TouchableOpacity 
-                    style={[styles.nextActionBtn, { marginLeft: 10, backgroundColor: '#FF00FF' }]} 
-                    onPress={() => {
-                      if (__DEV__) console.warn(`[DEV BUTTON] Forced next press, clips=${clips.length}, isRecording=${isRecording}`);
-                      handleNextPress();
-                    }}
-                  >
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>DEV</Text>
-                  </TouchableOpacity>
-                )}
               </View>
             </View>
 
@@ -755,80 +650,7 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
 };
 
 const styles = StyleSheet.create({
-  buildMarkerBanner: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    backgroundColor: '#FF0000',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    zIndex: 99999,
-    elevation: 99999,
-  },
-  buildMarkerText: {
-    color: '#FFFFFF',
-    fontSize: 9,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  devButtonRow: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 6,
-    zIndex: 99998,
-    elevation: 99998,
-  },
-  devTestButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  devTestButtonText: {
-    color: '#FFF',
-    fontSize: 9,
-    fontWeight: 'bold',
-  },
-  devStatusPanel: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.85)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    zIndex: 99997,
-  },
-  devStatusText: {
-    color: '#0f0',
-    fontSize: 8,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    lineHeight: 10,
-  },
-  debugOverlay: {
-    position: 'absolute',
-    right: 20,
-    top: '50%',
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    borderWidth: 3,
-    borderColor: '#FF6600',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    zIndex: 99998,
-  },
-  debugOverlayText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    lineHeight: 22,
-  },
   mainContainer: { flex: 1, backgroundColor: '#000' },
-  cameraDebugLabel: { position: 'absolute', top: 4, left: 4, zIndex: 2000, maxWidth: 280, backgroundColor: 'rgba(0,0,0,0.72)', paddingHorizontal: 5, paddingVertical: 3 },
-  cameraDebugText: { color: '#fff', fontSize: 9 },
   permissionContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000', padding: 20 },
   permissionText: { color: '#fff', textAlign: 'center', marginTop: 20, marginBottom: 20 },
   permissionButton: { backgroundColor: '#EC9A15', padding: 15, borderRadius: 8 },

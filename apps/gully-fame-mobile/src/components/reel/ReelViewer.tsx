@@ -282,6 +282,7 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
   const [replyingToComment, setReplyingToComment] = useState<number | null>(null);
   const [expandedReplies, setExpandedReplies] = useState<Set<number>>(new Set());
   const [commentLikes, setCommentLikes] = useState<Map<number, { likes: number; isLiked: boolean }>>(new Map());
+  const [avatarError, setAvatarError] = useState<{[id: number]: boolean}>({});
   
   const reelFlatListRef = useRef<FlatList>(null);
   const videoRefs = useRef<Map<number, LegacyVideoHandle>>(new Map());
@@ -835,8 +836,9 @@ export const ReelViewer: React.FC<ReelViewerProps> = ({
                 activeOpacity={0.7}
               >
                 <Image 
-                  source={require('../../assets/images/user1.png')}
+                  source={reel.profileImage && !avatarError[reel.id] ? { uri: reel.profileImage } : require('../../assets/images/userp.png')}
                   style={styles.profileImage}
+                  onError={() => setAvatarError(prev => ({ ...prev, [reel.id]: true }))}
                 />
                 <View style={styles.followButton}>
                   <Text style={styles.followButtonText}>+</Text>

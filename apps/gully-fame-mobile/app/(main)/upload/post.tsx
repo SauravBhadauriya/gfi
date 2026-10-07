@@ -203,7 +203,15 @@ export default function PostReelScreen() {
           return;
         }
         
-        if (__DEV__) console.log(`[FLOW] handlePost: File validated, size=${fileInfo.size} bytes`);
+        const fileSize = (fileInfo.exists && !fileInfo.isDirectory && fileInfo.size) ? fileInfo.size : 0;
+        if (__DEV__) console.log(`[FLOW] handlePost: File validated, size=${fileSize} bytes`);
+        
+        if (fileSize === 0) {
+          if (__DEV__) console.error(`[FLOW] handlePost: File size is 0, file may be invalid`);
+          Alert.alert("Error", "The video file appears to be empty. Please re-record and try again.");
+          return;
+        }
+        
         setIsUploading(true);
         if (__DEV__) console.log('[FLOW] handlePost: Upload started, button disabled');
         Alert.alert("Uploading", "Please wait while we upload your reel...", undefined, { cancelable: false });

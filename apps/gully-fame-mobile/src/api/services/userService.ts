@@ -337,6 +337,39 @@ export async function getWalletBalance(): Promise<ApiResponse<WalletBalance>> {
   }
 }
 
+export async function toggleFollowUser(userId: string): Promise<ApiResponse<any>> {
+  try {
+    console.log('[userService] POST user follow for userId:', userId);
+    
+    const response = await apiClient.post<any>(`user/${userId}/follow`, {});
+    const responseData = response.data as any;
+
+    if (responseData.code === 1) {
+      console.log('[userService] POST user follow - Success:', responseData.data);
+      return {
+        success: true,
+        data: responseData.data,
+        message: responseData.message || 'Follow status updated successfully',
+      };
+    }
+
+    return {
+      success: false,
+      message: responseData.message || 'Failed to update follow status',
+      error: 'API returned unsuccessful response',
+      data: undefined,
+    };
+  } catch (error: any) {
+    console.error('[userService] POST user follow error:', error.message);
+    return {
+      success: false,
+      message: error.response?.data?.message || error.message || 'Network error occurred',
+      error: error.message || 'Network error',
+      data: undefined,
+    };
+  }
+}
+
 export const userService = {
   getCurrentUser,
   getPublicUserProfile,
@@ -344,6 +377,7 @@ export const userService = {
   getUserKycStatus,
   getUserEarnings,
   getWalletBalance,
+  toggleFollowUser,
 };
 
 

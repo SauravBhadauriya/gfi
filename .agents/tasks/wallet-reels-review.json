@@ -1,0 +1,13 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "issue": "Wrong navigation on insufficient coins",
+      "description": "TipPopup's `handleBuyCoins` routes to `/(main)/history` but should route to `/(main)/coins` to show the wallet balance card and Add Money button to the user.",
+      "severity": "blocking",
+      "file": "src/components/tip/TipComponents.tsx",
+      "line": 576
+    }
+  ],
+  "reviewDoc": "/Users/dhruvkathuria/Gullyfame.com/Gullyfame/.agents/tasks/wallet-reels-review.md"
+}

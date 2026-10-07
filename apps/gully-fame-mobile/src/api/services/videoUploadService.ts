@@ -338,7 +338,7 @@ export async function createReelFromUpload(
     const payload = {
       video_url: videoUrl,
       thumbnail_url: request.thumbnail || "",
-      caption: request.description || request.title || "",
+      caption: request.description || "",
       competitionId: request.competitionId || "",
       music: request.music
         ? { id: request.music.trackId, name: request.music.title }

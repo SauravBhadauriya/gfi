@@ -152,6 +152,15 @@ export default function HistoryScreen() {
           
           <View style={styles.walletActions}>
             <TouchableOpacity 
+              style={styles.addMoneyButton} 
+              activeOpacity={0.8}
+              onPress={() => router.push("/(main)/add-money" as any)}
+            >
+              <Ionicons name="add-circle" size={20} color="#fff" />
+              <Text style={styles.addMoneyButtonText}>Add Money</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
               style={styles.withdrawButton} 
               activeOpacity={0.8}
               onPress={() => router.push("/(main)/coins" as any)}
@@ -307,9 +316,33 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     width: "100%",
     gap: 12,
+    flexWrap: "wrap",
+    justifyContent: "center",
+  },
+  addMoneyButton: {
+    flex: 1,
+    minWidth: 100,
+    backgroundColor: "#FF6B35",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: "#FF6B35",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  addMoneyButtonText: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
   },
   withdrawButton: {
     flex: 1,
+    minWidth: 100,
     backgroundColor: "#EC9A15",
     flexDirection: "row",
     alignItems: "center",
@@ -325,6 +358,7 @@ const styles = StyleSheet.create({
   },
   earnMoreButton: {
     flex: 1,
+    minWidth: 100,
     backgroundColor: "transparent",
     flexDirection: "row",
     alignItems: "center",
