@@ -423,6 +423,17 @@ export const TipPopup = ({
 
   const isParticipant = userRole === 'participant' || userRole === 'participants';
 
+  // Check for zero balance on open
+  useEffect(() => {
+    if (visible && isParticipant && coinBalance === 0 && userRole) {
+      // Auto-show insufficient coins modal after animation completes
+      console.log('[TipPopup] Auto-showing insufficient coins modal - balance:', coinBalance);
+      setTimeout(() => {
+        setShowInsufficientCoins(true);
+      }, 600);
+    }
+  }, [visible, coinBalance, isParticipant, userRole]);
+
   const handleAmountSelect = (amount: number) => {
     setSelectedAmount(amount);
     setCustomAmount('');
