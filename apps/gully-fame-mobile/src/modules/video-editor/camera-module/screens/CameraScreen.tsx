@@ -38,7 +38,7 @@ type SpeedMultiplier = 0.3 | 0.5 | 1 | 1.5 | 2 | 3;
 
 const EMPTY_CLIPS: CameraClipArray = [];
 let nextCameraScreenInstanceId = 1;
-const BUILD_MARKER_TIMESTAMP = 'BUILD-MARK-2';
+const BUILD_MARKER_TIMESTAMP = 'PHASE-1-FIX-RECORDING';
 let lastRecordResult: { resolved: boolean; uri?: string; error?: string; elapsedMs?: number } | null = null;
 let lastRecordElapsedMs = 0;
 
@@ -215,6 +215,12 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       return;
     }
 
+    // PHASE 1 FIX: Verify file size > 10KB in case it slipped through
+    if (clip.type === 'video' && clip.uri) {
+      // File size is already validated in useCamera, so just log it
+      if (__DEV__) console.warn(`[handleAddClip] ✅ File validation passed in useCamera, adding clip`);
+    }
+
     if (clip.type === 'video' && recordingStartTimeRef.current !== null) {
       const recordingDuration = (Date.now() - recordingStartTimeRef.current) / 1000;
       let videoDuration = clip.duration > 0 ? clip.duration : recordingDuration;
@@ -343,23 +349,33 @@ const CameraScreen: React.FC<CameraScreenProps> = ({ onBack, onNext, initialClip
       const clip = await takePhoto();
       handleAddClip(clip);
     } else {
-      if (isRecording) {
-        if (__DEV__) console.warn(`[handleCapturePress] ⏹ STOPPING recording, clips=${clips.length}`);
-        await stopRecording();
+      // Video mode (but CameraView may still be in picture mode due to FORCE_PICTURE_MODE_FOR_VIDEO)
+      if (FORCE_PICTURE_MODE_FOR_VIDEO) {
+        // CameraView is forced to picture mode; fallback to system camera for video recording
+        if (__DEV__) console.warn(`[handleCapturePress] 🔴 CameraView in picture mode, using system camera fallback`);
+        const { recordVideoWithSystemCamera } = await import('@/modules/video-editor/camera-module/services/systemCameraFallback');
+        const clip = await recordVideoWithSystemCamera();
+        handleAddClip(clip);
       } else {
-        if (__DEV__) console.warn(`[handleCapturePress] 🔴 STARTING recording NOW`);
-        recordingStartTimeRef.current = Date.now();
-        speedChangesRef.current = [];
-        currentSpeedRef.current = speed;
-        speedChangesRef.current.push({ time: 0, speed: speed });
-        lastRecordResult = null;
-        lastRecordElapsedMs = 0;
-        try {
-          if (__DEV__) console.warn(`[handleCapturePress] 📞 Calling startRecording, handleAddClip is bound`);
-          await startRecording(handleAddClip, timerDuration, speed);
-          if (__DEV__) console.warn(`[handleCapturePress] ✅ startRecording returned`);
-        } catch (e) {
-          if (__DEV__) console.warn(`[handleCapturePress] ❌ startRecording threw:`, e);
+        // Normal expo-camera video recording
+        if (isRecording) {
+          if (__DEV__) console.warn(`[handleCapturePress] ⏹ STOPPING recording, clips=${clips.length}`);
+          await stopRecording();
+        } else {
+          if (__DEV__) console.warn(`[handleCapturePress] 🔴 STARTING recording NOW`);
+          recordingStartTimeRef.current = Date.now();
+          speedChangesRef.current = [];
+          currentSpeedRef.current = speed;
+          speedChangesRef.current.push({ time: 0, speed: speed });
+          lastRecordResult = null;
+          lastRecordElapsedMs = 0;
+          try {
+            if (__DEV__) console.warn(`[handleCapturePress] 📞 Calling startRecording, handleAddClip is bound`);
+            await startRecording(handleAddClip, timerDuration, speed);
+            if (__DEV__) console.warn(`[handleCapturePress] ✅ startRecording returned`);
+          } catch (e) {
+            if (__DEV__) console.warn(`[handleCapturePress] ❌ startRecording threw:`, e);
+          }
         }
       }
     }

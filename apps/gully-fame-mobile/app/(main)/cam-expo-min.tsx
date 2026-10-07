@@ -1,221 +1,298 @@
-import React, { useRef, useState } from 'react';
+/**
+ * cam-expo-min.tsx - Minimal expo-camera v57 recording test matrix
+ * Tests 8 variants of CameraView props and recordAsync options
+ * Each variant records 3 seconds and logs: name, resolved/rejected, error code, uri, file size, elapsed ms
+ * 
+ * PROTECTED: Do not modify CameraView, props, or mount logic in the active CameraScreen.tsx
+ */
+
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-  Image,
   ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  StyleSheet,
+  Alert,
 } from 'react-native';
-import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
-import * as FileSystem from 'expo-file-system';
-import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
+import { CameraView, type CameraViewProps } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Clipboard from 'expo-clipboard';
 
-const BUILD_TIMESTAMP = new Date().toISOString();
+interface TestVariant {
+  name: string;
+  props: Partial<CameraViewProps>;
+  recordOptions: Record<string, any>;
+}
 
-export default function CamExpoMinScreen() {
-  const cameraRef = useRef<any>(null);
-  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+interface TestResult {
+  variant: string;
+  status: 'pending' | 'recording' | 'resolved' | 'rejected';
+  error?: { code: string; message: string };
+  uri?: string;
+  fileSizeKB?: number;
+  elapsedMs?: number;
+}
+
+export default function CamExpoMin() {
+  const insets = useSafeAreaInsets();
+  const [camPermission, requestCamPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
-  
-  const [cameraReady, setCameraReady] = useState(false);
-  const [mountError, setMountError] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  
-  const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [photoSize, setPhotoSize] = useState<{ width: number; height: number } | null>(null);
-  
-  const [videoUri, setVideoUri] = useState<string | null>(null);
-  const [videoFileSize, setVideoFileSize] = useState<number | null>(null);
+  const cameraRef = useRef<any>(null);
+  const [currentVariant, setCurrentVariant] = useState<number | null>(null);
+  const [results, setResults] = useState<TestResult[]>([]);
+  const [running, setRunning] = useState(false);
+  const cameraReadyRef = useRef(false);
 
-  const handleCameraReady = () => {
-    console.log('[CamExpoMin] onCameraReady fired');
-    setCameraReady(true);
-  };
+  const variants: TestVariant[] = [
+    {
+      name: 'V1: mode="video", mute=true',
+      props: { mode: 'video', mute: true, facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V2: mode="video", mute=false (mic granted)',
+      props: { mode: 'video', mute: false, facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V3: mode="video", mute=true, videoQuality="720p"',
+      props: { mode: 'video', mute: true, videoQuality: '720p', facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V4: mode="video", mute=true, videoQuality="480p"',
+      props: { mode: 'video', mute: true, videoQuality: '480p', facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V5: mode="video", mute=true, videoQuality="1080p"',
+      props: { mode: 'video', mute: true, videoQuality: '1080p', facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V6: V3 but facing="front"',
+      props: { mode: 'video', mute: true, videoQuality: '720p', facing: 'front' },
+      recordOptions: {},
+    },
+    {
+      name: 'V7: Active screen props (picture mode, no quality)',
+      props: { mode: 'picture', facing: 'back' },
+      recordOptions: {},
+    },
+    {
+      name: 'V8: V3 + recordAsync { maxDuration: 3 }',
+      props: { mode: 'video', mute: true, videoQuality: '720p', facing: 'back' },
+      recordOptions: { maxDuration: 3 },
+    },
+  ];
 
-  const handleMountError = (error: any) => {
-    console.error('[CamExpoMin] onMountError:', error);
-    setMountError(error?.message || String(error));
-  };
-
-  const handleTakePicture = async () => {
-    if (!cameraRef.current || !cameraReady) {
-      console.log('[CamExpoMin] Camera not ready');
-      return;
-    }
-
-    try {
-      console.log('[CamExpoMin] Taking picture...');
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 1,
-        base64: false,
-        skipProcessing: false,
-      });
-      
-      console.log('[CamExpoMin] Photo taken:', photo);
-      setPhotoUri(photo.uri);
-      setPhotoSize({ width: photo.width, height: photo.height });
-    } catch (error: any) {
-      console.error('[CamExpoMin] takePictureAsync error:', error);
-      setMountError('Photo error: ' + error.message);
-    }
-  };
-
-  const handleRecord3s = async () => {
-    if (!cameraRef.current || !cameraReady) {
-      console.log('[CamExpoMin] Camera not ready');
-      return;
-    }
-
-    if (!micPermission?.granted) {
-      const granted = await requestMicPermission();
-      if (!granted) {
-        setMountError('Mic permission denied');
-        return;
+  useEffect(() => {
+    const requestPerms = async () => {
+      const cam = await requestCamPermission();
+      const mic = await requestMicPermission();
+      if (!cam.granted || !mic.granted) {
+        Alert.alert('Permissions Required', 'Camera and microphone permissions are needed');
       }
-    }
-
-    try {
-      console.log('[CamExpoMin] Starting 3s recording...');
-      setIsRecording(true);
-      setVideoUri(null);
-      setVideoFileSize(null);
-
-      const video = await cameraRef.current.recordAsync({
-        maxDuration: 3,
-        mute: false,
-      });
-      
-      setIsRecording(false);
-      console.log('[CamExpoMin] Video recorded:', video);
-      setVideoUri(video.uri);
-
-      // Get file size
-      const fileInfo = await FileSystem.getInfoAsync(video.uri);
-      if (fileInfo.exists && 'size' in fileInfo) {
-        setVideoFileSize(fileInfo.size);
-      }
-    } catch (error: any) {
-      setIsRecording(false);
-      console.error('[CamExpoMin] recordAsync error:', error);
-      setMountError('Video error: ' + error.message);
-    }
-  };
-
-  const handleStopRecording = () => {
-    if (cameraRef.current && isRecording) {
-      console.log('[CamExpoMin] Stopping recording early');
-      cameraRef.current.stopRecording();
-    }
-  };
-
-  // Request permissions on mount
-  React.useEffect(() => {
-    (async () => {
-      if (!cameraPermission?.granted) {
-        await requestCameraPermission();
-      }
-      if (!micPermission?.granted) {
-        await requestMicPermission();
-      }
-    })();
+    };
+    requestPerms();
   }, []);
 
-  if (!cameraPermission?.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.statusText}>Camera permission required</Text>
-        <TouchableOpacity onPress={requestCameraPermission} style={styles.button}>
-          <Text style={styles.buttonText}>Grant Camera Permission</Text>
-        </TouchableOpacity>
-      </View>
+  const handleCameraReady = () => {
+    cameraReadyRef.current = true;
+  };
+
+  const testVariant = async (index: number) => {
+    const variant = variants[index];
+    setCurrentVariant(index);
+    setResults((prev) => [
+      ...prev,
+      { variant: variant.name, status: 'pending' },
+    ]);
+
+    if (!cameraRef.current) {
+      setResults((prev) =>
+        prev.map((r, i) =>
+          i === prev.length - 1
+            ? { ...r, status: 'rejected', error: { code: 'NO_CAMERA', message: 'Camera ref not ready' } }
+            : r
+        )
+      );
+      return;
+    }
+
+    // Wait for camera to be ready
+    cameraReadyRef.current = false;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+
+    if (!cameraReadyRef.current) {
+      setResults((prev) =>
+        prev.map((r, i) =>
+          i === prev.length - 1
+            ? { ...r, status: 'rejected', error: { code: 'CAMERA_NOT_READY', message: 'onCameraReady not called' } }
+            : r
+        )
+      );
+      setCurrentVariant(null);
+      return;
+    }
+
+    setResults((prev) =>
+      prev.map((r, i) => (i === prev.length - 1 ? { ...r, status: 'recording' } : r))
     );
-  }
+
+    const startMs = performance.now();
+    const recordAsyncStartMs = performance.now();
+
+    try {
+      const recordingPromise = cameraRef.current.recordAsync(variant.recordOptions);
+
+      // Stop after 3 seconds
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await cameraRef.current.stopRecording();
+
+      const video = await recordingPromise;
+      const elapsedMs = Math.round(performance.now() - recordAsyncStartMs);
+
+      const uri = video?.uri || '';
+      let fileSizeKB = 0;
+
+      if (uri) {
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(uri);
+          if (fileInfo.exists && fileInfo.isDirectory === false) {
+            fileSizeKB = fileInfo.size ? Math.round(fileInfo.size / 1024) : 0;
+          }
+        } catch (err) {
+          console.warn('[cam-expo-min] Failed to get file size:', err);
+        }
+      }
+
+      setResults((prev) =>
+        prev.map((r, i) =>
+          i === prev.length - 1
+            ? {
+                ...r,
+                status: 'resolved',
+                uri: uri ? uri.substring(Math.max(0, uri.length - 40)) : undefined,
+                fileSizeKB,
+                elapsedMs,
+              }
+            : r
+        )
+      );
+    } catch (error: any) {
+      const elapsedMs = Math.round(performance.now() - recordAsyncStartMs);
+      setResults((prev) =>
+        prev.map((r, i) =>
+          i === prev.length - 1
+            ? {
+                ...r,
+                status: 'rejected',
+                error: {
+                  code: error?.code || 'UNKNOWN',
+                  message: error?.message || String(error),
+                },
+                elapsedMs,
+              }
+            : r
+        )
+      );
+    }
+
+    setCurrentVariant(null);
+  };
+
+  const runAllTests = async () => {
+    setRunning(true);
+    setResults([]);
+
+    for (let i = 0; i < variants.length; i++) {
+      await testVariant(i);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    setRunning(false);
+  };
+
+  const copyReport = async () => {
+    const report = results
+      .map(
+        (r) =>
+          `${r.variant}: ${r.status} | ${r.error ? `${r.error.code}: ${r.error.message}` : 'OK'} | ${r.uri ? `uri=${r.uri}` : ''} | ${r.fileSizeKB}KB | ${r.elapsedMs}ms`
+      )
+      .join('\n');
+
+    await Clipboard.setStringAsync(report);
+    Alert.alert('Report copied to clipboard', report);
+  };
 
   return (
-    <View style={styles.container}>
-      {/* Red Banner */}
-      <View style={styles.buildMarkerBanner}>
-        <Text style={styles.buildMarkerText}>
-          BUILD-MARK-1 | app/(main)/cam-expo-min.tsx MINIMAL | {BUILD_TIMESTAMP}
-        </Text>
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Camera preview (always mounts V3 props for consistency) */}
+      {currentVariant !== null && (
+        <View style={styles.cameraPreview}>
+          <CameraView
+            ref={cameraRef}
+            style={StyleSheet.absoluteFill}
+            onCameraReady={handleCameraReady}
+            {...variants[currentVariant].props}
+          />
+          <View style={styles.cameraOverlay}>
+            <Text style={styles.cameraOverlayText}>{variants[currentVariant]?.name}</Text>
+            <ActivityIndicator size="large" color="#fff" />
+          </View>
+        </View>
+      )}
 
-      {/* Opaque Black Container */}
-      <View style={{ flex: 1, backgroundColor: '#000' }}>
-        {/* CameraView - absoluteFill, no children, minimal props */}
-        <CameraView
-          ref={cameraRef}
-          style={StyleSheet.absoluteFill}
-          facing="back"
-          mode="picture"
-          onCameraReady={handleCameraReady}
-          onMountError={handleMountError}
-        />
-      </View>
+      {/* Results */}
+      <ScrollView style={styles.resultsContainer} contentContainerStyle={{ paddingBottom: 20 }}>
+        <Text style={styles.title}>expo-camera v57 Record Matrix</Text>
 
-      {/* Status Overlay */}
-      <View style={styles.statusOverlay}>
-        <ScrollView style={styles.statusScroll}>
-          <Text style={styles.statusText}>Camera Ready: {cameraReady ? '✓' : '✗'}</Text>
-          <Text style={styles.statusText}>Recording: {isRecording ? '✓' : '✗'}</Text>
-          {mountError && (
-            <Text style={[styles.statusText, { color: '#FF6B6B' }]}>Error: {mountError}</Text>
-          )}
-          
-          {photoUri && photoSize && (
-            <>
-              <Text style={styles.statusText}>
-                Photo: {photoSize.width}x{photoSize.height}
+        {results.length === 0 ? (
+          <Text style={styles.placeholder}>No tests run yet. Tap "Run All" to start.</Text>
+        ) : (
+          results.map((result, idx) => (
+            <View key={idx} style={styles.resultItem}>
+              <Text style={styles.resultVariant}>{result.variant}</Text>
+              <Text style={[styles.resultStatus, { color: result.status === 'resolved' ? '#0f0' : '#f00' }]}>
+                {result.status.toUpperCase()}
               </Text>
-              <Image source={{ uri: photoUri }} style={styles.thumbnail} />
-            </>
-          )}
+              {result.error && (
+                <Text style={styles.resultError}>
+                  {result.error.code}: {result.error.message}
+                </Text>
+              )}
+              {result.uri && <Text style={styles.resultUri}>uri={result.uri}</Text>}
+              {result.fileSizeKB !== undefined && (
+                <Text style={styles.resultSize}>{result.fileSizeKB}KB</Text>
+              )}
+              {result.elapsedMs !== undefined && (
+                <Text style={styles.resultElapsed}>{result.elapsedMs}ms</Text>
+              )}
+            </View>
+          ))
+        )}
+      </ScrollView>
 
-          {videoUri && (
-            <>
-              <Text style={styles.statusText}>
-                Video: {videoUri.substring(videoUri.lastIndexOf('/') + 1)}
-              </Text>
-              <Text style={styles.statusText}>
-                Size: {videoFileSize ? `${(videoFileSize / 1024).toFixed(1)} KB` : 'unknown'}
-              </Text>
-              <Text style={[styles.statusText, { color: '#00FF00' }]}>
-                ✓ Video file created successfully
-              </Text>
-            </>
-          )}
-        </ScrollView>
-      </View>
-
-      {/* Control Buttons */}
+      {/* Controls */}
       <View style={styles.controlsContainer}>
         <TouchableOpacity
-          onPress={handleTakePicture}
-          disabled={!cameraReady}
-          style={[styles.button, !cameraReady && styles.buttonDisabled]}
+          style={[styles.button, running && styles.buttonDisabled]}
+          onPress={runAllTests}
+          disabled={running || currentVariant !== null}
         >
-          <Text style={styles.buttonText}>Take Picture</Text>
+          <Text style={styles.buttonText}>{running ? 'Running...' : 'Run All'}</Text>
         </TouchableOpacity>
 
-        {!isRecording ? (
-          <TouchableOpacity
-            onPress={handleRecord3s}
-            disabled={!cameraReady}
-            style={[styles.button, !cameraReady && styles.buttonDisabled]}
-          >
-            <Text style={styles.buttonText}>Record 3s</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity onPress={handleStopRecording} style={[styles.button, styles.stopButton]}>
-            <Text style={styles.buttonText}>Stop Recording</Text>
+        {results.length > 0 && (
+          <TouchableOpacity style={styles.button} onPress={copyReport}>
+            <Text style={styles.buttonText}>Copy Report</Text>
           </TouchableOpacity>
         )}
-
-        <TouchableOpacity onPress={() => router.back()} style={[styles.button, styles.closeButton]}>
-          <Text style={styles.buttonText}>Close</Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -226,76 +303,98 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  buildMarkerBanner: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#FF0000',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    zIndex: 99999,
-    elevation: 99999,
+  cameraPreview: {
+    height: 200,
+    backgroundColor: '#1a1a1a',
+    overflow: 'hidden',
   },
-  buildMarkerText: {
-    color: '#FFFFFF',
-    fontSize: 11,
-    fontWeight: 'bold',
+  cameraOverlay: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+  },
+  cameraOverlayText: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 20,
     textAlign: 'center',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    fontWeight: 'bold',
   },
-  statusOverlay: {
-    position: 'absolute',
-    top: 60,
-    right: 10,
-    width: 200,
-    maxHeight: 300,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 8,
-    padding: 8,
-    zIndex: 1000,
+  resultsContainer: {
+    flex: 1,
+    padding: 16,
   },
-  statusScroll: {
-    maxHeight: 280,
+  title: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
   },
-  statusText: {
-    color: '#FFF',
-    fontSize: 11,
-    marginBottom: 4,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  placeholder: {
+    color: '#888',
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 20,
   },
-  thumbnail: {
-    width: 180,
-    height: 120,
-    marginVertical: 8,
+  resultItem: {
+    backgroundColor: '#1a1a1a',
+    borderLeftWidth: 4,
+    borderLeftColor: '#EC9A15',
+    padding: 12,
+    marginBottom: 12,
     borderRadius: 4,
   },
+  resultVariant: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  resultStatus: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  resultError: {
+    color: '#ff6b6b',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  resultUri: {
+    color: '#aaa',
+    fontSize: 10,
+    fontFamily: 'monospace',
+    marginBottom: 2,
+  },
+  resultSize: {
+    color: '#0f0',
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  resultElapsed: {
+    color: '#888',
+    fontSize: 10,
+  },
   controlsContainer: {
-    position: 'absolute',
-    bottom: 30,
-    left: 20,
-    right: 20,
-    gap: 10,
-    zIndex: 1000,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    padding: 16,
+    backgroundColor: '#1a1a1a',
   },
   button: {
     backgroundColor: '#EC9A15',
-    paddingVertical: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderRadius: 8,
-    alignItems: 'center',
   },
   buttonDisabled: {
-    backgroundColor: '#666',
-  },
-  stopButton: {
-    backgroundColor: '#FF4444',
-  },
-  closeButton: {
-    backgroundColor: '#333',
+    opacity: 0.5,
   },
   buttonText: {
-    color: '#FFF',
+    color: '#000',
+    fontWeight: 'bold',
     fontSize: 14,
-    fontWeight: '600',
   },
 });

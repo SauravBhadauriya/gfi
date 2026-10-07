@@ -106,8 +106,8 @@
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				5407F493FE0949C79C8682DA /* Upload Debug Symbols to Sentry */,
-				B94816DC608E46C49D40FC4A /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
+				051168D338CA4CD99C39E7C8 /* Upload Debug Symbols to Sentry */,
+				5AE733D48C9E4AF79A530645 /* [Expo Dev Launcher] Strip Local Network Keys for Release */,
 			);
 			buildRules = (
 			);
@@ -224,7 +224,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-GullyFame/Pods-GullyFame-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		5407F493FE0949C79C8682DA /* Upload Debug Symbols to Sentry */ = {
+		051168D338CA4CD99C39E7C8 /* Upload Debug Symbols to Sentry */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -238,7 +238,7 @@
 			shellPath = /bin/sh;
 			shellScript = "/bin/sh `${NODE_BINARY:-node} --print \"require('path').dirname(require.resolve('@sentry/react-native/package.json')) + '/scripts/sentry-xcode-debug-files.sh'\"`";
 		};
-		B94816DC608E46C49D40FC4A /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
+		5AE733D48C9E4AF79A530645 /* [Expo Dev Launcher] Strip Local Network Keys for Release */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
