@@ -163,7 +163,22 @@ export default function CoinsScreen() {
                 </View>
               </View>
 
-              {}
+              {/* Add Money Button - Inside Balance Card */}
+              <TouchableOpacity
+                style={styles.addMoneyButton}
+                onPress={handleAddMoney}
+              >
+                <LinearGradient
+                  colors={["#FF6B35", "#FF8C00"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.addMoneyGradient}
+                >
+                  <Text style={styles.addMoneyText}>+ Add GFI Coins</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              {/* Withdraw Button */}
               {availableBalance > 0 && (
                 <TouchableOpacity
                   style={styles.withdrawButton}
@@ -627,6 +642,20 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   withdrawButtonText: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  addMoneyButton: {
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+  addMoneyGradient: {
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  addMoneyText: {
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",

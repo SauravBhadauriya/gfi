@@ -8,9 +8,10 @@ import {
   View,
   TouchableOpacity,
   StatusBar,
+  Alert,
 } from 'react-native';
-import { getReels } from '../api/services/reelsService';
-import type { Reel } from '../types/reels';
+import { getReels, type Reel } from '../api/services/reelsService';
+import { userService } from '../api/services/userService';
 import { VideoView, useVideoPlayer } from 'expo-video';
 // Importing the newly updated Support Popup
 import { TipPopup } from '../components/tip/TipComponents';
@@ -43,10 +44,12 @@ const ReelsScreen = () => {
   const [loading, setLoading] = useState(true);
   const [reels, setReels] = useState<Reel[]>([]);
   const [error, setError] = useState('');
+  const [followStates, setFollowStates] = useState<{ [key: string]: boolean }>({});
 
   // States for Support Modal flow
   const [isSupportVisible, setIsSupportVisible] = useState(false);
   const [selectedReelId, setSelectedReelId] = useState<number | null>(null);
+  const [selectedReelCreatorId, setSelectedReelCreatorId] = useState<string | null>(null);
 
   const [activeReelIndex, setActiveReelIndex] = useState(0);
 
@@ -71,6 +74,13 @@ const ReelsScreen = () => {
       const response = await getReels(10);
       const fetchedReels = (response.data?.reels as any) || [];
       setReels(fetchedReels);
+      
+      // Initialize follow states
+      const initialFollowStates: { [key: string]: boolean } = {};
+      fetchedReels.forEach((reel: any) => {
+        initialFollowStates[reel.id] = reel.isFollowed || false;
+      });
+      setFollowStates(initialFollowStates);
     } catch (err: any) {
       setError(err?.message || 'Failed to load reels');
     } finally {
@@ -78,9 +88,28 @@ const ReelsScreen = () => {
     }
   };
 
-  const handleSupportPress = (reelId: any) => {
+  const handleFollowToggle = async (reelId: string, creatorId: string) => {
+    try {
+      const response = await userService.toggleFollowUser(creatorId);
+      if (response.success) {
+        setFollowStates(prev => ({
+          ...prev,
+          [reelId]: !prev[reelId]
+        }));
+        console.log(`[ReelsScreen] Follow toggled for creator ${creatorId}`);
+      } else {
+        Alert.alert('Error', response.message || 'Failed to update follow status');
+      }
+    } catch (error) {
+      console.error('[ReelsScreen] Error toggling follow:', error);
+      Alert.alert('Error', 'An error occurred while updating follow status');
+    }
+  };
+
+  const handleSupportPress = (reelId: any, creatorId: string) => {
     // Parsing ID to number as expected by the component
     setSelectedReelId(Number(reelId) || 0);
+    setSelectedReelCreatorId(creatorId);
     setIsSupportVisible(true);
   };
 
@@ -91,7 +120,8 @@ const ReelsScreen = () => {
   const renderItem = ({ item, index }: { item: Reel, index: number }) => {
     const isActive = activeReelIndex === index;
     const isNearby = Math.abs(activeReelIndex - index) <= 1;
-    const videoSource = (item as any).videoUrl;
+    const videoSource = item.video?.uri;
+    const isFollowed = followStates[item.id] || false;
 
     return (
       <View style={styles.reelItem}>
@@ -109,11 +139,11 @@ const ReelsScreen = () => {
         <View style={styles.rightSidebar}>
           <TouchableOpacity style={styles.sidebarButton}>
             <Text style={styles.sidebarIconText}>💬</Text>
-            <Text style={styles.sidebarCount}>45</Text>
+            <Text style={styles.sidebarCount}>{item.comments || 0}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sidebarButton}>
             <Text style={styles.sidebarIconText}>➡️</Text>
-            <Text style={styles.sidebarCount}>23</Text>
+            <Text style={styles.sidebarCount}>{item.shares || 0}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.sidebarButton}>
             <Text style={styles.sidebarIconText}>📥</Text>
@@ -125,9 +155,14 @@ const ReelsScreen = () => {
           {/* User Info Row */}
           <View style={styles.userInfoRow}>
             <View style={styles.avatarMock} />
-            <Text style={styles.username}>@{item.user.username || 'DancerPro'}</Text>
-            <TouchableOpacity style={styles.followButton}>
-              <Text style={styles.followButtonText}>Follow</Text>
+            <Text style={styles.username}>@{item.username || 'Unknown'}</Text>
+            <TouchableOpacity 
+              style={[styles.followButton, isFollowed && styles.followButtonFollowing]}
+              onPress={() => handleFollowToggle(item.id.toString(), item.userId)}
+            >
+              <Text style={styles.followButtonText}>
+                {isFollowed ? 'Following' : 'Follow'}
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -138,7 +173,7 @@ const ReelsScreen = () => {
 
           {/* Audio Track Info */}
           <Text style={styles.audioTrack}>
-            🎵 Original Sound - {item.user.username || 'DancerPro'}
+            🎵 Original Sound - {item.username || 'Unknown'}
           </Text>
 
           {/* Main Action Buttons Row (Matching the screenshot layout) */}
@@ -147,7 +182,7 @@ const ReelsScreen = () => {
             <TouchableOpacity
               style={styles.supportButton}
               activeOpacity={0.8}
-              onPress={() => handleSupportPress(item.id)}
+              onPress={() => handleSupportPress(item.id, item.userId)}
             >
               <View style={styles.coinIconWrapper}>
                 <Text style={styles.coinDollarSymbol}>$</Text>
@@ -212,6 +247,7 @@ const ReelsScreen = () => {
           visible={isSupportVisible}
           onClose={() => setIsSupportVisible(false)}
           reelId={selectedReelId}
+          creatorId={selectedReelCreatorId || undefined}
           onTipSuccess={handleSupportSuccess}
         />
       )}
@@ -301,6 +337,11 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     paddingHorizontal: 12,
     borderRadius: 6,
+  },
+  followButtonFollowing: {
+    backgroundColor: 'rgba(236, 154, 21, 0.3)',
+    borderWidth: 1,
+    borderColor: '#EC9A15',
   },
   followButtonText: {
     color: '#fff',

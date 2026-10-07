@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
+import { router } from 'expo-router';
 import Svg, { Path, Circle, G, Rect } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { scale, scaleVertical, getFontSize, wp, hp, spacing } from '../../utils/responsive';
@@ -562,7 +563,8 @@ export const TipPopup = ({
 
   const handleBuyCoins = () => {
     setShowInsufficientCoins(false);
-    Alert.alert('Buy Coins', 'Redirecting to coin purchase...');
+    onClose();
+    router.push('/(main)/coins');
   };
 
   return (
@@ -742,7 +744,7 @@ export const TipPopup = ({
                 style={styles.buyCoinsButton}
                 onPress={handleBuyCoins}
               >
-                <Text style={styles.buyCoinsButtonText}>Buy Coins</Text>
+                <Text style={styles.buyCoinsButtonText}>Add Money</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.cancelButton}

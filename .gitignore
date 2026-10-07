@@ -33,6 +33,8 @@ out/
 .expo-shared/
 .gradle/
 .m2/
+android/app/.cxx/
+android/build/
 
 # Testing
 coverage/
@@ -42,10 +44,13 @@ coverage/
 # Logs
 logs/
 *.log
+*-logcat.txt
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+activity-*.txt
+camera-*.txt
 
 # OS
 Thumbs.db
