@@ -1,355 +1,658 @@
-import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { useState, useEffect } from "react";
-import { LeaderboardStyles as styles } from "@/components/TopTenLeaderboard/styles";
+import React, { useState, useEffect, useCallback } from "react";
 import {
-  Dimensions,
-  Image,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
-  ActivityIndicator
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Image,
+  FlatList,
+  Dimensions,
+  StatusBar,
+  RefreshControl,
+  Alert,
 } from "react-native";
-import BottomNav from "@components/layout/BottomNav";
-import {
-  BackIcon,
-  CommunityIcon,
-  HomeIcon,
-  ReelIcon,
-  UserIconSVG,
-} from "@/icons";
-import Svg, { Path, Rect, G } from "react-native-svg";
-import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from '@expo/vector-icons';
-import { apiClient } from "@/api";
-import { BASE_URL } from "@/api/axios";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { router } from "expo-router";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
 
-const { width, height } = Dimensions.get("window");
+const { width } = Dimensions.get("window");
+const GRID_COLUMNS = 3;
+const ITEM_SIZE = width / GRID_COLUMNS;
 
-const tabs = [
-  { name: "Home", icon: HomeIcon, label: "" },
-  { name: "Reel", icon: ReelIcon, label: "GullyReel" },
-  { name: "Upload", icon: null, label: "UPLOAD" },
-  { name: "Community", icon: CommunityIcon, label: "" },
-  { name: "MyFame", icon: UserIconSVG, label: "" },
-];
+interface UserPost {
+  id: string;
+  type: "video" | "photo";
+  uri: string;
+  thumbnail?: string;
+  caption?: string;
+  likes: number;
+  comments: number;
+  createdAt: string;
+}
 
-export default function MyFameScreen() {
-  const [activeTab, setActiveTab] = useState("MyFame");
-  const [isLoading, setIsLoading] = useState(true);
-  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+interface UserProfile {
+  id: string;
+  username: string;
+  displayName: string;
+  bio: string;
+  avatar: string;
+  followers: number;
+  following: number;
+  posts: number;
+  verified: boolean;
+}
+
+export default function ProfileScreen() {
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userPosts, setUserPosts] = useState<UserPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   useEffect(() => {
-    let isMounted = true;
-
-    const initializeData = async () => {
-      try {
-        const [isLoggedIn, token, storedUser] = await Promise.all([
-          AsyncStorage.getItem("isLoggedIn"),
-          AsyncStorage.getItem("authToken"),
-          AsyncStorage.getItem("user")
-        ]);
-
-        if (isMounted) {
-          if (isLoggedIn !== "true" && !token) {
-            router.replace("/auth/signin" as any);
-            return;
-          }
-
-          let myId = null;
-          if (storedUser) {
-            const user = JSON.parse(storedUser);
-            myId = user._id || user.id;
-            setCurrentUserId(myId);
-          }
-
-          // Fetch Global Leaderboard Data
-          try {
-            const resp = await apiClient.get('/user/leaderboard', { params: { limit: 50 } });
-            
-            if (resp.data && resp.data.code === 1 && resp.data.data) {
-              const formattedData = resp.data.data.map((entry: any, index: number) => {
-                const rank = entry.rank || index + 1;
-                return {
-                  rank,
-                  isTop: rank <= 3,
-                  name: `${entry.firstName || ''} ${entry.lastName || ''}`.trim() || entry.username || 'Unknown',
-                  firstName: entry.firstName || '',
-                  lastName: entry.lastName || '',
-                  role: entry.role || 'participants',
-                  userId: entry._id || entry.userId,
-                  isYou: (entry._id || entry.userId) === myId,
-                  points: entry.points || entry.fameCoins || entry.votes || 0,
-                  profileImage: entry.profileImage ? { uri: `${BASE_URL}${entry.profileImage}` } : require("@assets/images/user1.png"),
-                };
-              });
-
-              // Ensure data is sorted by rank
-              formattedData.sort((a: any, b: any) => a.rank - b.rank);
-              setLeaderboardData(formattedData);
-            }
-          } catch (apiError) {
-            console.error("Failed to fetch global leaderboard:", apiError);
-          }
-
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error("Error checking login status:", error);
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    initializeData();
-
-    return () => {
-      isMounted = false;
-    };
+    loadUserProfile();
+    loadUserPosts();
   }, []);
 
-  const topThree = leaderboardData.filter((item) => item.isTop);
-  const restOfList = leaderboardData.filter((item) => !item.isTop);
+  const loadUserProfile = async () => {
+    try {
+      // Mock user profile - replace with API call
+      const mockProfile: UserProfile = {
+        id: "user-123",
+        username: "johndoe",
+        displayName: "John Doe",
+        bio: "Content Creator 🎬 | Digital Marketing Enthusiast 📱",
+        avatar: "https://via.placeholder.com/150",
+        followers: 1250,
+        following: 345,
+        posts: 28,
+        verified: true,
+      };
+      setUserProfile(mockProfile);
+    } catch (error) {
+      console.error("[Profile] Failed to load profile:", error);
+    }
+  };
 
-  if (isLoading) {
-    return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <StatusBar barStyle="light-content" />
-        <ActivityIndicator size="large" color="#EC9A15" />
+  const loadUserPosts = async () => {
+    try {
+      setLoading(true);
+      // Mock posts - replace with API call
+      const mockPosts: UserPost[] = [
+        {
+          id: "post-1",
+          type: "video",
+          uri: "https://via.placeholder.com/300x400",
+          thumbnail: "https://via.placeholder.com/300x400",
+          caption: "Amazing digital marketing tips!",
+          likes: 245,
+          comments: 32,
+          createdAt: "2 days ago",
+        },
+        {
+          id: "post-2",
+          type: "photo",
+          uri: "https://via.placeholder.com/300x300",
+          caption: "Coffee and code",
+          likes: 156,
+          comments: 18,
+          createdAt: "3 days ago",
+        },
+        {
+          id: "post-3",
+          type: "video",
+          uri: "https://via.placeholder.com/300x400",
+          thumbnail: "https://via.placeholder.com/300x400",
+          caption: "New reel is live!",
+          likes: 432,
+          comments: 89,
+          createdAt: "5 days ago",
+        },
+        {
+          id: "post-4",
+          type: "photo",
+          uri: "https://via.placeholder.com/300x300",
+          caption: "Beautiful sunset",
+          likes: 523,
+          comments: 67,
+          createdAt: "1 week ago",
+        },
+      ];
+      setUserPosts(mockPosts);
+    } catch (error) {
+      console.error("[Profile] Failed to load posts:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    loadUserProfile();
+    loadUserPosts();
+    setRefreshing(false);
+  }, []);
+
+  const handleUploadPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const newPost: UserPost = {
+          id: `post-${Date.now()}`,
+          type: "photo",
+          uri: result.assets[0].uri,
+          caption: "",
+          likes: 0,
+          comments: 0,
+          createdAt: "now",
+        };
+        setUserPosts([newPost, ...userPosts]);
+        Alert.alert("Success", "Photo uploaded successfully!");
+      }
+    } catch (error) {
+      console.error("[Profile] Upload photo error:", error);
+      Alert.alert("Error", "Failed to upload photo");
+    }
+  };
+
+  const handleUploadVideo = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const newPost: UserPost = {
+          id: `post-${Date.now()}`,
+          type: "video",
+          uri: result.assets[0].uri,
+          thumbnail: result.assets[0].uri,
+          caption: "",
+          likes: 0,
+          comments: 0,
+          createdAt: "now",
+        };
+        setUserPosts([newPost, ...userPosts]);
+        Alert.alert("Success", "Video uploaded successfully!");
+      }
+    } catch (error) {
+      console.error("[Profile] Upload video error:", error);
+      Alert.alert("Error", "Failed to upload video");
+    }
+  };
+
+  const renderGridItem = ({ item }: { item: UserPost }) => (
+    <TouchableOpacity
+      style={styles.gridItem}
+      onPress={() =>
+        router.push({
+          pathname: "/(main)/profile/post-detail",
+          params: { postId: item.id },
+        })
+      }
+    >
+      <Image
+        source={{ uri: item.thumbnail || item.uri }}
+        style={styles.gridImage}
+      />
+      {item.type === "video" && (
+        <View style={styles.videoOverlay}>
+          <Ionicons name="play-circle" size={40} color="#fff" />
+        </View>
+      )}
+      <View style={styles.gridStats}>
+        <View style={styles.statItem}>
+          <Ionicons name="heart" size={14} color="#fff" />
+          <Text style={styles.statText}>{item.likes}</Text>
+        </View>
+        <View style={styles.statItem}>
+          <Ionicons name="chatbubble" size={14} color="#fff" />
+          <Text style={styles.statText}>{item.comments}</Text>
+        </View>
       </View>
-    );
-  }
+    </TouchableOpacity>
+  );
+
+  const renderListItem = ({ item }: { item: UserPost }) => (
+    <TouchableOpacity
+      style={styles.listItem}
+      onPress={() =>
+        router.push({
+          pathname: "/(main)/profile/post-detail",
+          params: { postId: item.id },
+        })
+      }
+    >
+      <Image
+        source={{ uri: item.thumbnail || item.uri }}
+        style={styles.listImage}
+      />
+      <View style={styles.listContent}>
+        <View style={styles.listHeader}>
+          {item.type === "video" && (
+            <MaterialCommunityIcons
+              name="video"
+              size={16}
+              color="#EC9A15"
+              style={styles.typeIcon}
+            />
+          )}
+          <Text style={styles.caption} numberOfLines={2}>
+            {item.caption || `${item.type === "video" ? "Video" : "Photo"}`}
+          </Text>
+        </View>
+        <Text style={styles.date}>{item.createdAt}</Text>
+        <View style={styles.listStats}>
+          <View style={styles.statItem}>
+            <Ionicons name="heart" size={14} color="#EC9A15" />
+            <Text style={styles.statCount}>{item.likes}</Text>
+          </View>
+          <View style={styles.statItem}>
+            <Ionicons name="chatbubble" size={14} color="#EC9A15" />
+            <Text style={styles.statCount}>{item.comments}</Text>
+          </View>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={styles.container} edges={["top"]}>
+      <StatusBar barStyle="light-content" backgroundColor="#000" />
 
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <BackIcon color="white" size={24} />
-        </TouchableOpacity>
-        
-        <Text style={styles.headerTitle}>Leaderboard</Text>
-        
-        <TouchableOpacity
-          onPress={() => router.push("/(main)/invite-friend" as any)}
-          style={styles.backButton}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="gift-outline" size={26} color="#EC9A15" />
-        </TouchableOpacity>
-      </View>
-
-      <Text style={styles.subtitle}>
-        🔥 Who's ruling the gullies right now?
-      </Text>
-
-      {leaderboardData.length === 0 ? (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-          <Text style={{ color: '#999', fontSize: 16 }}>No rankings available yet.</Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.podiumContainer}>
-            <View style={styles.topThreeContainer}>
-              {topThree[1] && (
-                <TouchableOpacity
-                  style={styles.podiumItem}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(main)/profile/[id]",
-                      params: {
-                        id: topThree[1].userId,
-                        userId: topThree[1].userId,
-                        firstName: topThree[1].firstName,
-                        lastName: topThree[1].lastName,
-                        role: topThree[1].role,
-                        bio: topThree[1].bio,
-                      },
-                    } as any)
-                  }
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.avatarContainer}>
-                    <Image source={topThree[1].profileImage} style={styles.avatar} />
-                    <LinearGradient colors={["#C0C0C0", "#A8A8A8"]} style={[styles.rankBadgeCircle, styles.rankBadge2]}>
-                      <Text style={styles.rankBadgeText}>2</Text>
-                    </LinearGradient>
-                  </View>
-                  <Text style={styles.podiumName} numberOfLines={1}>
-                    {topThree[1].name}
-                  </Text>
-                  <View style={styles.pointsRow}>
-                    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                      <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#C0C0C0" />
-                    </Svg>
-                    <Text style={styles.podiumPoints}>{topThree[1].points}</Text>
-                  </View>
+      <FlatList
+        data={userPosts}
+        renderItem={viewMode === "grid" ? renderGridItem : renderListItem}
+        keyExtractor={(item) => item.id}
+        numColumns={viewMode === "grid" ? GRID_COLUMNS : 1}
+        key={viewMode}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#EC9A15"
+          />
+        }
+        ListHeaderComponent={
+          <View>
+            {/* Header */}
+            <View style={styles.header}>
+              <Text style={styles.headerTitle}>Profile</Text>
+              <View style={styles.headerActions}>
+                <TouchableOpacity style={styles.iconButton}>
+                  <Ionicons name="settings-outline" size={24} color="#fff" />
                 </TouchableOpacity>
-              )}
-
-              {topThree[0] && (
                 <TouchableOpacity
-                  style={[styles.podiumItem, styles.podiumFirst]}
+                  style={styles.iconButton}
                   onPress={() =>
-                    router.push({
-                      pathname: "/(main)/profile/[id]",
-                      params: {
-                        id: topThree[0].userId,
-                        userId: topThree[0].userId,
-                        firstName: topThree[0].firstName,
-                        lastName: topThree[0].lastName,
-                        role: topThree[0].role,
-                        bio: topThree[0].bio,
-                      },
-                    } as any)
+                    router.push("/(main)/profile/edit")
                   }
-                  activeOpacity={0.8}
                 >
-                  <View style={styles.avatarContainer}>
-                    <Svg width={35} height={35} viewBox="0 0 24 24" fill="none" style={styles.crownIcon}>
-                      <Path d="M12 2l3 6 6-2-3 10H6L3 6l6 2 3-6z" fill="#FFD700" stroke="#FFA500" strokeWidth={1.5} />
-                    </Svg>
-                    <Image source={topThree[0].profileImage} style={styles.avatarLarge} />
-                    <LinearGradient colors={["#FFD700", "#FFA500"]} style={[styles.rankBadgeCircle, styles.rankBadge1]}>
-                      <Text style={[styles.rankBadgeText, styles.rankBadgeText1]}>1</Text>
-                    </LinearGradient>
-                  </View>
-                  <Text style={[styles.podiumName, styles.podiumName1]} numberOfLines={1}>
-                    {topThree[0].name}
-                  </Text>
-                  <View style={styles.pointsRow}>
-                    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-                      <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#FFD700" />
-                    </Svg>
-                    <Text style={[styles.podiumPoints, styles.podiumPoints1]}>{topThree[0].points}</Text>
-                  </View>
+                  <Ionicons name="pencil" size={24} color="#fff" />
                 </TouchableOpacity>
-              )}
-
-              {topThree[2] && (
-                <TouchableOpacity
-                  style={styles.podiumItem}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(main)/profile/[id]",
-                      params: {
-                        id: topThree[2].userId,
-                        userId: topThree[2].userId,
-                        firstName: topThree[2].firstName,
-                        lastName: topThree[2].lastName,
-                        role: topThree[2].role,
-                        bio: topThree[2].bio,
-                      },
-                    } as any)
-                  }
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.avatarContainer}>
-                    <Image source={topThree[2].profileImage} style={styles.avatar} />
-                    <LinearGradient colors={["#CD7F32", "#8B4513"]} style={[styles.rankBadgeCircle, styles.rankBadge3]}>
-                      <Text style={styles.rankBadgeText}>3</Text>
-                    </LinearGradient>
-                  </View>
-                  <Text style={styles.podiumName} numberOfLines={1}>
-                    {topThree[2].name}
-                  </Text>
-                  <View style={styles.pointsRow}>
-                    <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
-                      <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#CD7F32" />
-                    </Svg>
-                    <Text style={styles.podiumPoints}>{topThree[2].points}</Text>
-                  </View>
-                </TouchableOpacity>
-              )}
+              </View>
             </View>
-          </View>
 
-          <View style={styles.leaderboardSection}>
-            <View style={styles.leaderboardListContainer}>
-              <ScrollView contentContainerStyle={styles.leaderboardContent} showsVerticalScrollIndicator={false}>
-                {restOfList.map((item, index) => (
-                  <TouchableOpacity
-                    key={item.rank}
-                    style={[
-                      styles.leaderboardItem,
-                      item.isYou && styles.leaderboardItemYou,
-                      index !== restOfList.length - 1 && styles.leaderboardItemBorder,
-                    ]}
-                    onPress={async () => {
-                      if (item.isYou) {
-                        router.push({
-                          pathname: "/(main)/profile/own/fan",
-                        } as any);
-                      } else if (item.userId) {
-                        router.push({
-                          pathname: "/(main)/profile/[id]",
-                          params: {
-                            id: item.userId,
-                            userId: item.userId,
-                            firstName: item.firstName,
-                            lastName: item.lastName,
-                            role: item.role,
-                            bio: item.bio,
-                          },
-                        } as any);
-                      }
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.rankBadgeContainer, item.isYou && styles.rankBadgeYou]}>
-                      <Text style={[styles.rankNumber, item.isYou && styles.rankNumberYou]}>
-                        {item.rank}
-                      </Text>
-                    </View>
-
-                    <View style={styles.leaderboardAvatarWrapper}>
-                      <Image source={item.profileImage} style={styles.leaderboardAvatarImage} />
-                      {item.isYou && (
-                        <View style={styles.yourBadge}>
-                          <Text style={styles.yourBadgeText}>YOU</Text>
-                        </View>
-                      )}
-                    </View>
-
-                    <View style={styles.leaderboardInfo}>
-                      <Text style={[styles.leaderboardName, item.isYou && styles.leaderboardNameYou]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <View style={styles.pointsRowList}>
-                        <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
-                          <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill={item.isYou ? "#000" : "#EC9A15"} />
-                        </Svg>
-                        <Text style={[styles.leaderboardPoints, item.isYou && styles.leaderboardPointsYou]}>
-                          {item.points} pts
-                        </Text>
-                      </View>
-                    </View>
-
-                    {item.isYou && (
-                      <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-                        <Path d="M9 18l6-6-6-6" stroke="#000" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
-                      </Svg>
+            {/* Profile Info */}
+            {userProfile && (
+              <View style={styles.profileInfo}>
+                <Image
+                  source={{ uri: userProfile.avatar }}
+                  style={styles.avatar}
+                />
+                <View style={styles.profileDetails}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.displayName}>
+                      {userProfile.displayName}
+                    </Text>
+                    {userProfile.verified && (
+                      <MaterialCommunityIcons
+                        name="check-decagram"
+                        size={18}
+                        color="#EC9A15"
+                      />
                     )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+                  </View>
+                  <Text style={styles.username}>
+                    @{userProfile.username}
+                  </Text>
+                  <Text style={styles.bio}>{userProfile.bio}</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Stats */}
+            <View style={styles.stats}>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>
+                  {userProfile?.posts || 0}
+                </Text>
+                <Text style={styles.statLabel}>Posts</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>
+                  {userProfile?.followers || 0}
+                </Text>
+                <Text style={styles.statLabel}>Followers</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statNumber}>
+                  {userProfile?.following || 0}
+                </Text>
+                <Text style={styles.statLabel}>Following</Text>
+              </View>
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                style={styles.uploadButton}
+                onPress={handleUploadPhoto}
+              >
+                <Ionicons name="image" size={20} color="#000" />
+                <Text style={styles.uploadButtonText}>Upload Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.uploadButtonSecondary}
+                onPress={handleUploadVideo}
+              >
+                <Ionicons name="videocam" size={20} color="#fff" />
+                <Text style={styles.uploadButtonSecondaryText}>
+                  Upload Video
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* View Mode Toggle */}
+            <View style={styles.viewModeToggle}>
+              <TouchableOpacity
+                style={[
+                  styles.viewModeButton,
+                  viewMode === "grid" && styles.viewModeButtonActive,
+                ]}
+                onPress={() => setViewMode("grid")}
+              >
+                <Ionicons
+                  name="grid"
+                  size={20}
+                  color={viewMode === "grid" ? "#EC9A15" : "#888"}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.viewModeButton,
+                  viewMode === "list" && styles.viewModeButtonActive,
+                ]}
+                onPress={() => setViewMode("list")}
+              >
+                <Ionicons
+                  name="list"
+                  size={20}
+                  color={viewMode === "list" ? "#EC9A15" : "#888"}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Posts Header */}
+            <View style={styles.postsHeader}>
+              <Text style={styles.postsTitle}>
+                {viewMode === "grid" ? "Posts" : "Timeline"}
+              </Text>
             </View>
           </View>
-        </>
-      )}
-
-      <BottomNav
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        tabs={tabs}
-        onOpenDrawer={() => {}}
+        }
+        scrollEnabled={true}
+        contentContainerStyle={
+          viewMode === "grid" ? styles.gridContent : undefined
+        }
       />
-    </View>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a1a",
+  },
+  headerTitle: {
+    color: "#fff",
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  headerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  iconButton: {
+    padding: 8,
+  },
+  profileInfo: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 16,
+  },
+  avatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "#1a1a1a",
+  },
+  profileDetails: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  displayName: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  username: {
+    color: "#888",
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  bio: {
+    color: "#aaa",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  stats: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#1a1a1a",
+  },
+  statBox: {
+    alignItems: "center",
+  },
+  statNumber: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  statLabel: {
+    color: "#888",
+    fontSize: 12,
+    marginTop: 4,
+  },
+  actionButtons: {
+    flexDirection: "row",
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  uploadButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EC9A15",
+    borderRadius: 8,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  uploadButtonText: {
+    color: "#000",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  uploadButtonSecondary: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1a1a1a",
+    borderRadius: 8,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  uploadButtonSecondaryText: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  viewModeToggle: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a1a",
+  },
+  viewModeButton: {
+    padding: 8,
+  },
+  viewModeButtonActive: {
+    backgroundColor: "transparent",
+  },
+  postsHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  postsTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  gridContent: {
+    paddingHorizontal: 2,
+  },
+  gridItem: {
+    width: ITEM_SIZE - 2,
+    height: ITEM_SIZE - 2,
+    margin: 1,
+    backgroundColor: "#1a1a1a",
+    borderRadius: 4,
+    overflow: "hidden",
+    position: "relative",
+  },
+  gridImage: {
+    width: "100%",
+    height: "100%",
+  },
+  videoOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.3)",
+  },
+  gridStats: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    flexDirection: "row",
+    gap: 4,
+  },
+  statItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "600",
+  },
+  statCount: {
+    color: "#EC9A15",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  listItem: {
+    flexDirection: "row",
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#1a1a1a",
+    gap: 12,
+  },
+  listImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#1a1a1a",
+  },
+  listContent: {
+    flex: 1,
+    justifyContent: "space-between",
+  },
+  listHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 6,
+  },
+  typeIcon: {
+    marginTop: 2,
+  },
+  caption: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+    flex: 1,
+  },
+  date: {
+    color: "#666",
+    fontSize: 12,
+  },
+  listStats: {
+    flexDirection: "row",
+    gap: 12,
+  },
+});

@@ -101,7 +101,7 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
         params: { id: "me" },
       });
     } else if (tabName === "Upload") {
-      router.replace("/(main)/upload");
+      router.replace("/(main)/camera");
     } else if (tabName === "Reel") {
       router.replace("/(main)/reel");
     }

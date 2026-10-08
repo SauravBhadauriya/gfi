@@ -2,21 +2,21 @@ import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import HomeScreen from './screens/HomeScreen';
 import CameraScreen from './screens/CameraScreen';
-import PreviewScreen from './screens/PreviewScreen';
+import EditorScreen from './screens/EditorScreen';
 import type { CameraClipArray, CameraModuleScreenName } from './types/camera.types';
 
 /**
  * Root entry point for the self-contained camera module.
  *
- * This component owns ONLY navigation and data passed to Preview:
- * - Home → Camera → Preview
+ * This component owns ONLY navigation and data passed to Editor:
+ * - Home → Camera → Editor (new Instagram Edits-style editor)
  *
  * Camera-specific UI state (mode, flash, clips) lives inside `CameraScreen`.
- * PreviewScreen receives a snapshot of clips when the user presses Next.
+ * EditorScreen receives a snapshot of clips when the user presses Next.
  */
 const CameraModule: React.FC = () => {
   const [screen, setScreen] = useState<CameraModuleScreenName>('Home');
-  const [previewClips, setPreviewClips] = useState<CameraClipArray>([]);
+  const [editorClips, setEditorClips] = useState<CameraClipArray>([]);
   const [cameraClips, setCameraClips] = useState<CameraClipArray>([]);
 
   const handleOpenCamera = useCallback(() => {
@@ -37,28 +37,33 @@ const CameraModule: React.FC = () => {
       console.log('📹 CameraModule: First clip:', JSON.stringify(clips[0], null, 2));
     }
     setCameraClips(clips);
-    setPreviewClips(clips);
+    setEditorClips(clips);
     setScreen('Preview');
   }, []);
 
-  const handleAddClipFromPreview = useCallback((source: 'camera' | 'gallery') => {
+  const handleAddClipFromEditor = useCallback((source: 'camera' | 'gallery') => {
     if (source === 'camera') {
       // Navigate back to camera screen to record new clip
       // Pass existing clips so they're preserved
       setScreen('Camera');
     }
-    // Gallery is handled in PreviewScreen via onAddClipFromGallery
+    // Gallery is handled in EditorScreen via onAddClipFromGallery
   }, []);
 
-  const handleBackFromPreview = useCallback(() => {
+  const handleBackFromEditor = useCallback(() => {
     // Go back to camera screen (not home) so user can continue adding clips
     // Pass existing clips so they're preserved (use cameraClips which should be synced)
     setScreen('Camera');
   }, []);
 
-  const handleClipUpdateFromPreview = useCallback((clips: CameraClipArray) => {
-    setPreviewClips(clips);
+  const handleClipUpdateFromEditor = useCallback((clips: CameraClipArray) => {
+    setEditorClips(clips);
     setCameraClips(clips);
+  }, []);
+  
+  const handleNextFromEditor = useCallback((editedClips: CameraClipArray) => {
+    console.log('✅ EditorScreen: Export completed with', editedClips?.length ?? 0, 'clips');
+    // TODO: Navigate to upload screen or handle export
   }, []);
 
   return (
@@ -72,11 +77,10 @@ const CameraModule: React.FC = () => {
         />
       )}
       {screen === 'Preview' && (
-        <PreviewScreen
-          clips={previewClips}
-          onBack={handleBackFromPreview}
-          onClipUpdate={handleClipUpdateFromPreview}
-          onAddClip={handleAddClipFromPreview}
+        <EditorScreen
+          clips={editorClips}
+          onBack={handleBackFromEditor}
+          onNext={handleNextFromEditor}
         />
       )}
     </View>

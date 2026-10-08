@@ -1,0 +1,460 @@
+import React, { useState, useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Audio } from "expo-audio";
+import apiClient from "@/api/axios";
+
+interface SoundEffect {
+  _id: string;
+  name: string;
+  url: string;
+  category: string;
+  duration: number;
+  isActive: boolean;
+}
+
+interface SoundFXToolPanelProps {
+  onClose: () => void;
+  onAddSoundFX: (soundFX: {
+    id: string;
+    name: string;
+    url: string;
+    duration: number;
+  }) => void;
+  currentTime: number;
+}
+
+// Predefined sound effects (fallback if API returns empty)
+const PREDEFINED_SOUND_FX: SoundEffect[] = [
+  {
+    _id: "whoosh",
+    name: "Whoosh",
+    url: "https://example.com/whoosh.mp3",
+    category: "transitions",
+    duration: 1.2,
+    isActive: true,
+  },
+  {
+    _id: "ding",
+    name: "Ding",
+    url: "https://example.com/ding.mp3",
+    category: "notifications",
+    duration: 0.5,
+    isActive: true,
+  },
+  {
+    _id: "pop",
+    name: "Pop",
+    url: "https://example.com/pop.mp3",
+    category: "ui",
+    duration: 0.3,
+    isActive: true,
+  },
+  {
+    _id: "boom",
+    name: "Boom",
+    url: "https://example.com/boom.mp3",
+    category: "impact",
+    duration: 1.5,
+    isActive: true,
+  },
+  {
+    _id: "click",
+    name: "Click",
+    url: "https://example.com/click.mp3",
+    category: "ui",
+    duration: 0.2,
+    isActive: true,
+  },
+  {
+    _id: "swipe",
+    name: "Swipe",
+    url: "https://example.com/swipe.mp3",
+    category: "transitions",
+    duration: 0.8,
+    isActive: true,
+  },
+];
+
+const CATEGORIES = ["All", "Transitions", "UI", "Impact", "Notifications"];
+
+export default function SoundFXToolPanel({
+  onClose,
+  onAddSoundFX,
+  currentTime,
+}: SoundFXToolPanelProps) {
+  const [soundEffects, setSoundEffects] = useState<SoundEffect[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState("All");
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+
+  useEffect(() => {
+    fetchSoundEffects();
+    return () => {
+      if (sound) {
+        sound.unloadAsync();
+      }
+    };
+  }, []);
+
+  const fetchSoundEffects = async () => {
+    try {
+      setLoading(true);
+      const response = await apiClient.get("/public/soundfx");
+
+      if (response.data.code === 1 && response.data.data.length > 0) {
+        setSoundEffects(response.data.data);
+      } else {
+        // Use predefined sound effects as fallback
+        setSoundEffects(PREDEFINED_SOUND_FX);
+      }
+    } catch (error) {
+      console.error("[SoundFXToolPanel] Failed to fetch sound effects:", error);
+      setSoundEffects(PREDEFINED_SOUND_FX);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredSoundEffects = soundEffects.filter((sfx) => {
+    const matchesSearch = sfx.name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    const matchesCategory =
+      selectedCategory === "All" ||
+      sfx.category.toLowerCase() === selectedCategory.toLowerCase();
+    return matchesSearch && matchesCategory;
+  });
+
+  const handlePreview = async (sfx: SoundEffect) => {
+    try {
+      if (sound) {
+        await sound.unloadAsync();
+        setSound(null);
+      }
+
+      if (previewingId === sfx._id) {
+        setPreviewingId(null);
+      } else {
+        const { sound: newSound } = await Audio.Sound.createAsync(
+          { uri: sfx.url },
+          { shouldPlay: true, volume: 0.8 }
+        );
+        setSound(newSound);
+        setPreviewingId(sfx._id);
+
+        newSound.setOnPlaybackStatusUpdate((status) => {
+          if (status.isLoaded && status.didJustFinish) {
+            setPreviewingId(null);
+          }
+        });
+      }
+    } catch (error) {
+      console.error("[SoundFXToolPanel] Preview error:", error);
+      Alert.alert("Error", "Failed to preview sound effect");
+    }
+  };
+
+  const handleAddSoundFX = async (sfx: SoundEffect) => {
+    if (sound) {
+      await sound.unloadAsync();
+      setSound(null);
+      setPreviewingId(null);
+    }
+
+    onAddSoundFX({
+      id: sfx._id,
+      name: sfx.name,
+      url: sfx.url,
+      duration: sfx.duration,
+    });
+  };
+
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.title}>SOUND FX</Text>
+        <TouchableOpacity onPress={onClose}>
+          <Ionicons name="close" size={24} color="#fff" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Search */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color="#888" style={styles.searchIcon} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search sound effects"
+          placeholderTextColor="#888"
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+        />
+        {searchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setSearchQuery("")}>
+            <Ionicons name="close-circle" size={20} color="#888" />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Categories */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoriesScroll}
+        contentContainerStyle={styles.categories}
+      >
+        {CATEGORIES.map((category) => (
+          <TouchableOpacity
+            key={category}
+            style={[
+              styles.categoryButton,
+              selectedCategory === category && styles.categoryButtonActive,
+            ]}
+            onPress={() => setSelectedCategory(category)}
+          >
+            <Text
+              style={[
+                styles.categoryText,
+                selectedCategory === category && styles.categoryTextActive,
+              ]}
+            >
+              {category}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* Sound Effects List */}
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#EC9A15" />
+        </View>
+      ) : (
+        <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
+          {filteredSoundEffects.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Ionicons name="volume-mute" size={48} color="#666" />
+              <Text style={styles.emptyText}>No sound effects found</Text>
+            </View>
+          ) : (
+            filteredSoundEffects.map((sfx) => (
+              <View key={sfx._id} style={styles.soundItem}>
+                <View style={styles.soundIcon}>
+                  <Ionicons name="musical-notes" size={24} color="#EC9A15" />
+                </View>
+
+                <View style={styles.soundInfo}>
+                  <Text style={styles.soundName}>{sfx.name}</Text>
+                  <View style={styles.soundMeta}>
+                    <Text style={styles.soundCategory}>{sfx.category}</Text>
+                    <Text style={styles.soundDuration}>
+                      {sfx.duration.toFixed(1)}s
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.soundActions}>
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handlePreview(sfx)}
+                  >
+                    <Ionicons
+                      name={
+                        previewingId === sfx._id ? "pause-circle" : "play-circle"
+                      }
+                      size={32}
+                      color="#EC9A15"
+                    />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.addButton}
+                    onPress={() => handleAddSoundFX(sfx)}
+                  >
+                    <Ionicons name="add-circle" size={28} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </ScrollView>
+      )}
+
+      {/* Info */}
+      <View style={styles.infoCard}>
+        <Ionicons name="information-circle" size={20} color="#888" />
+        <Text style={styles.infoText}>
+          Sound effects will be added at {currentTime.toFixed(1)}s. Adjust timing
+          on the audio track after adding.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: "70%",
+    backgroundColor: "#1a1a1a",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+  },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  title: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "600",
+  },
+  searchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#2a2a2a",
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 44,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    color: "#fff",
+    fontSize: 15,
+  },
+  categoriesScroll: {
+    marginBottom: 16,
+  },
+  categories: {
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  categoryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: "#2a2a2a",
+  },
+  categoryButtonActive: {
+    backgroundColor: "#EC9A15",
+  },
+  categoryText: {
+    color: "#888",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  categoryTextActive: {
+    color: "#000",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  list: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  emptyContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: "#666",
+    fontSize: 16,
+    marginTop: 12,
+  },
+  soundItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#2a2a2a",
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  soundIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(236, 154, 21, 0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  soundInfo: {
+    flex: 1,
+  },
+  soundName: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  soundMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  soundCategory: {
+    color: "#888",
+    fontSize: 12,
+    textTransform: "capitalize",
+  },
+  soundDuration: {
+    color: "#666",
+    fontSize: 12,
+  },
+  soundActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  actionButton: {
+    padding: 4,
+  },
+  addButton: {
+    padding: 4,
+  },
+  infoCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+    backgroundColor: "#2a2a2a",
+    borderRadius: 10,
+    padding: 16,
+    marginHorizontal: 20,
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  infoText: {
+    flex: 1,
+    color: "#888",
+    fontSize: 13,
+    lineHeight: 18,
+  },
+});

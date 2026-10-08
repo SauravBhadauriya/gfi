@@ -95,10 +95,22 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
     const artist = item.artist || item.singer || 'Gully Fame Audio';
     const duration = item.duration ? `${Math.floor(item.duration / 60)}:${(item.duration % 60).toString().padStart(2, '0')}` : '0:30';
 
+    const handleSelectTrack = () => {
+      const trackWithMetadata = {
+        ...item,
+        _id: item._id || item.id,
+        id: item._id || item.id,
+        title: title,
+        artist: artist,
+        startTime: 0, // Start from beginning by default
+      };
+      onSelect(trackWithMetadata);
+    };
+
     return (
       <TouchableOpacity
         style={[styles.trackCard, isSelected && styles.trackCardSelected]}
-        onPress={() => onSelect(item)}
+        onPress={handleSelectTrack}
         activeOpacity={0.7}
       >
         <View style={styles.trackImageBase}>
@@ -116,7 +128,7 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
 
         <TouchableOpacity
           style={styles.selectBtn}
-          onPress={() => onSelect(item)}
+          onPress={handleSelectTrack}
         >
           <Text style={styles.selectBtnText}>Use</Text>
         </TouchableOpacity>
