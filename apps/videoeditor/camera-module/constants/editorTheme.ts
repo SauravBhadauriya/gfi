@@ -10,7 +10,7 @@ export const editorTheme = {
   colors: {
     // Primary accent color
     primary: '#FF6B35',
-    primaryLight: 'rgba(255, 107, 53, 0.2)',
+    primaryLight: 'rgba(255, 107, 53, 0.35)',
     primaryOpacity: 'rgba(255, 107, 53, 0.6)',
     
     // Surface colors for dark theme
@@ -103,7 +103,7 @@ export const editorTheme = {
     glow: {
       shadowColor: '#FF6B35',
       shadowOffset: { width: 0, height: 0 },
-      shadowOpacity: 0.6,
+      shadowOpacity: 0.85,
       shadowRadius: 4,
       elevation: 4,
     },

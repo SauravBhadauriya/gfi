@@ -43,7 +43,7 @@ interface ToolTabBarProps {
   onOverlay?: () => void;
   onText?: () => void;
   onSticker?: (type: 'image' | 'emoji', content: string | number) => void;
-  onMusic?: () => void;
+  onMusic?: (audioData: { uri: string; name: string; duration?: number }) => void;
   onTransition?: () => void;
   onVoiceAdd?: (voice: VoiceOverlay) => void;
   onSoundFXAdd?: (sound: SoundEffect) => void;
@@ -117,7 +117,12 @@ const ToolTabBar: React.FC<ToolTabBarProps> = ({
       });
 
       if (!result.canceled && result.assets?.length > 0) {
-        onMusic?.();
+        const asset = result.assets[0];
+        onMusic?.({
+          uri: asset.uri,
+          name: asset.filename || 'audio',
+          duration: asset.duration,
+        });
       }
     } catch (error) {
       console.error('Music error:', error);
