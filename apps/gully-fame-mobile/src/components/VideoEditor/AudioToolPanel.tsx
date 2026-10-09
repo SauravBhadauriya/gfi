@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,6 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Audio } from "expo-audio";
 import apiClient from "@/api/axios";
 
 interface AudioTrack {
@@ -39,15 +38,16 @@ export default function AudioToolPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTab, setSelectedTab] = useState<"trending" | "saved">("trending");
   const [previewingTrackId, setPreviewingTrackId] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [sound, setSound] = useState<any>(null);
+  const soundRef = useRef<any>(null);
 
   // Fetch audio tracks from backend
   useEffect(() => {
     fetchAudioTracks();
     return () => {
       // Clean up audio on unmount
-      if (sound) {
-        sound.unloadAsync();
+      if (soundRef.current && soundRef.current.unloadAsync) {
+        soundRef.current.unloadAsync();
       }
     };
   }, []);
@@ -89,8 +89,9 @@ export default function AudioToolPanel({
   const handlePreview = async (track: AudioTrack) => {
     try {
       // Stop current preview if playing
-      if (sound) {
-        await sound.unloadAsync();
+      if (soundRef.current && soundRef.current.unloadAsync) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
         setSound(null);
       }
 
@@ -98,13 +99,21 @@ export default function AudioToolPanel({
         // Stop preview
         setPreviewingTrackId(null);
       } else {
-        // Start new preview
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: track.url },
-          { shouldPlay: true, isLooping: true, volume: 0.5 }
-        );
-        setSound(newSound);
-        setPreviewingTrackId(track._id);
+        // Start new preview - use require to avoid module resolution issues
+        const AudioModule = require('expo-audio');
+        const Audio = AudioModule.Audio || AudioModule;
+        
+        if (Audio.Sound && Audio.Sound.createAsync) {
+          const { sound: newSound } = await Audio.Sound.createAsync(
+            { uri: track.url },
+            { shouldPlay: true, isLooping: true, volume: 0.5 }
+          );
+          soundRef.current = newSound;
+          setSound(newSound);
+          setPreviewingTrackId(track._id);
+        } else {
+          Alert.alert("Info", "Audio preview not available");
+        }
       }
     } catch (error) {
       console.error("[AudioToolPanel] Preview error:", error);
@@ -115,8 +124,11 @@ export default function AudioToolPanel({
   // Add audio to timeline
   const handleAddAudio = async (track: AudioTrack) => {
     // Stop preview
-    if (sound) {
-      await sound.unloadAsync();
+    if (soundRef.current) {
+      if (soundRef.current.unloadAsync) {
+        await soundRef.current.unloadAsync();
+      }
+      soundRef.current = null;
       setSound(null);
       setPreviewingTrackId(null);
     }

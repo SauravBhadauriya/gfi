@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,7 +10,6 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Audio } from "expo-audio";
 import { listSoundFX, searchSoundFX } from "@/api/services/soundFXService";
 
 interface SoundEffect {
@@ -99,12 +97,12 @@ export default function SoundFXToolPanel({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [previewingId, setPreviewingId] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [sound, setSound] = useState<any>(null);
 
   useEffect(() => {
     fetchSoundEffects();
     return () => {
-      if (sound) {
+      if (sound && sound.unloadAsync) {
         sound.unloadAsync();
       }
     };
@@ -177,7 +175,7 @@ export default function SoundFXToolPanel({
 
   const handlePreview = async (sfx: SoundEffect) => {
     try {
-      if (sound) {
+      if (sound && sound.unloadAsync) {
         await sound.unloadAsync();
         setSound(null);
       }
@@ -185,18 +183,26 @@ export default function SoundFXToolPanel({
       if (previewingId === sfx._id) {
         setPreviewingId(null);
       } else {
-        const { sound: newSound } = await Audio.Sound.createAsync(
-          { uri: sfx.url },
-          { shouldPlay: true, volume: 0.8 }
-        );
-        setSound(newSound);
-        setPreviewingId(sfx._id);
+        // Use require to avoid module resolution issues
+        const AudioModule = require('expo-audio');
+        const Audio = AudioModule.Audio || AudioModule;
+        
+        if (Audio.Sound && Audio.Sound.createAsync) {
+          const { sound: newSound } = await Audio.Sound.createAsync(
+            { uri: sfx.url },
+            { shouldPlay: true, volume: 0.8 }
+          );
+          setSound(newSound);
+          setPreviewingId(sfx._id);
 
-        newSound.setOnPlaybackStatusUpdate((status) => {
-          if (status.isLoaded && status.didJustFinish) {
-            setPreviewingId(null);
-          }
-        });
+          newSound.setOnPlaybackStatusUpdate((status: any) => {
+            if (status.isLoaded && status.didJustFinish) {
+              setPreviewingId(null);
+            }
+          });
+        } else {
+          Alert.alert("Info", "Audio preview not available");
+        }
       }
     } catch (error) {
       console.error("[SoundFXToolPanel] Preview error:", error);
@@ -206,7 +212,9 @@ export default function SoundFXToolPanel({
 
   const handleAddSoundFX = async (sfx: SoundEffect) => {
     if (sound) {
-      await sound.unloadAsync();
+      if (sound.unloadAsync) {
+        await sound.unloadAsync();
+      }
       setSound(null);
       setPreviewingId(null);
     }

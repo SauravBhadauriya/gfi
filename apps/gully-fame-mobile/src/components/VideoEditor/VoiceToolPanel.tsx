@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,9 +6,9 @@ import {
   TouchableOpacity,
   Alert,
   Animated,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { Audio } from "expo-audio";
 import { uploadVoiceover } from "@/api/services/voiceoverService";
 
 interface VoiceToolPanelProps {
@@ -26,16 +26,16 @@ export default function VoiceToolPanel({
   onAddVoice,
   currentTime,
 }: VoiceToolPanelProps) {
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recording, setRecording] = useState<any>(null);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
+  const [sound, setSound] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const durationInterval = useRef<NodeJS.Timeout | null>(null);
+  const durationInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Start recording animation
   const startPulseAnimation = () => {
@@ -64,6 +64,10 @@ export default function VoiceToolPanel({
   // Request audio permissions and start recording
   const startRecording = async () => {
     try {
+      // Use require to avoid module resolution issues
+      const AudioModule = require('expo-av');
+      const Audio = AudioModule.Audio || AudioModule;
+      
       // Request permissions
       const { status } = await Audio.requestPermissionsAsync();
       if (status !== "granted") {
@@ -139,13 +143,17 @@ export default function VoiceToolPanel({
         setSound(null);
         setIsPlaying(false);
       } else {
+        // Use require to avoid module resolution issues
+        const AudioModule = require('expo-av');
+        const Audio = AudioModule.Audio || AudioModule;
+        
         // Start playback
         const { sound: newSound } = await Audio.Sound.createAsync(
           { uri: recordedUri },
           { shouldPlay: true }
         );
 
-        newSound.setOnPlaybackStatusUpdate((status) => {
+        newSound.setOnPlaybackStatusUpdate((status: any) => {
           if (status.isLoaded && status.didJustFinish) {
             setIsPlaying(false);
           }
