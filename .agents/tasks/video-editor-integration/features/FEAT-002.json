@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Create unified API service layer for editor tools. Postman collection reveals backend endpoints for filters, stickers, and soundfx. Build dedicated service files following the soundFXService and musicLibraryService patterns: list/search/get methods, proper error handling, field normalization, response wrapping. Services: filterLibraryService (GET /public/filters), stickerEmojiService (GET /public/stickers), captionsService (POST /reels/auto-caption), and ensure voiceoverService and cameraService exist and work correctly.",
+  "status": "completed",
+  "steps": [
+    "Review existing filterLibraryService.ts — if incomplete, enhance it to match soundFXService pattern: export listFilters(), getFilterById(), searchFilters() with proper response handling",
+    "Review existing stickerEmojiService.ts — if incomplete, enhance it: export listStickers(), getStickerById(), searchStickers() following same pattern",
+    "Create captionsService.ts in src/api/services/: export captionServices.autoCaption(reelId: string, videoUri: string) calling POST /reels/auto-caption",
+    "Review existing voiceoverService.ts — ensure it exports recordVoiceOver() and handles audio URI storage",
+    "Review existing cameraService.ts — ensure photo/video capture methods are present",
+    "Ensure all services handle: (1) skipAuth: true for public endpoints, (2) response field normalization (id/_id, title/name), (3) structured error returns with ApiResponse<T>, (4) console logging for debugging"
+  ],
+  "acceptance_criteria": [
+    "filterLibraryService.ts exports listFilters(), getFilterById(), searchFilters() using GET /public/filters",
+    "stickerEmojiService.ts exports listStickers(), getStickerById(), searchStickers() using GET /public/stickers",
+    "captionsService.ts exports autoCaption() using POST /reels/auto-caption with proper request/response shape",
+    "All services use ApiResponse<T> interface and normalize response fields",
+    "All services skip auth (skipAuth: true) for public endpoints",
+    "No TypeScript errors, all exports are typed"
+  ],
+  "verification": [
+    "TypeScript compilation: npm run lint or npm run build",
+    "Each service file compiles without errors",
+    "Services can be imported into tool panels without type errors"
+  ],
+  "blocked_reason": null,
+  "findings": "Successfully implemented all required service layer enhancements. Created captionsService.ts with autoCaption() and batchAutoCaption() methods following soundFXService pattern. Enhanced stickerEmojiService.ts with consistent skipAuth: true for all public endpoints. Verified filterLibraryService.ts, voiceoverService.ts, and cameraService.ts all follow the pattern with proper ApiResponse<T> typing, field normalization, and error handling. All services export both named and default exports. No TypeScript errors."
+}
