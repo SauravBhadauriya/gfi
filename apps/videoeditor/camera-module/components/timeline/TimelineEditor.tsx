@@ -519,30 +519,28 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 
       {/* BOTTOM TOOLBAR */}
       <View style={styles.bottomToolbar}>
-        {isReady && (
-          <PreviewActionButtons
-            displayUri={currentClipUri}
-            onFilter={handleFilter}
-            onOverlay={handleOverlay}
-            onText={handleText}
-            onSticker={(type, content) => onSelectOverlay?.(type, content)} 
-            onMusic={handleMusic}
-            onVoiceAdd={handleVoiceAdd}
-            onSoundFXAdd={handleSoundFXAdd}
-            onCaptionAdd={handleCaptionAdd}
-            onAdjustChange={handleAdjustChange}
-            onOverlayEffectAdd={handleOverlayEffectAdd}
-            onCutoutAdd={handleCutoutAdd}
-            onLinkAdd={handleLinkAdd}
-            onPaste={handlePaste}
-            startTime={currentTime}
-            onTTSGenerate={() => console.log('TTS Generate')}
-            onUpdateAudioTracks={() => console.log('Audio Tracks Updated')}
-            onUpdateAudioMix={() => console.log('Audio Mix Updated')}
-            audioTracks={[]}
-            masterVolume={1}
-          />
-        )}
+        <PreviewActionButtons
+          displayUri={currentClipUri}
+          onFilter={handleFilter}
+          onOverlay={handleOverlay}
+          onText={handleText}
+          onSticker={(type, content) => onSelectOverlay?.(type, content)} 
+          onMusic={handleMusic}
+          onVoiceAdd={handleVoiceAdd}
+          onSoundFXAdd={handleSoundFXAdd}
+          onCaptionAdd={handleCaptionAdd}
+          onAdjustChange={handleAdjustChange}
+          onOverlayEffectAdd={handleOverlayEffectAdd}
+          onCutoutAdd={handleCutoutAdd}
+          onLinkAdd={handleLinkAdd}
+          onPaste={handlePaste}
+          startTime={currentTime}
+          onTTSGenerate={() => console.log('TTS Generate')}
+          onUpdateAudioTracks={() => console.log('Audio Tracks Updated')}
+          onUpdateAudioMix={() => console.log('Audio Mix Updated')}
+          audioTracks={[]}
+          masterVolume={1}
+        />
       </View>
 
       <AddClipOverlay visible={showAddClipOverlay} onClose={() => setShowAddClipOverlay(false)} onSelectCamera={handleSelectCamera} onSelectGallery={handleSelectGallery} />
@@ -749,7 +747,8 @@ const styles = StyleSheet.create({
 
   /* BOTTOM TOOLBAR */
   bottomToolbar: { 
-    height: 65, 
+    minHeight: 65,
+    overflow: 'visible',
     backgroundColor: '#0A0A0A', 
     justifyContent: 'center', 
     borderTopWidth: 0.5, 

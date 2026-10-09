@@ -33,7 +33,7 @@ interface PreviewActionButtonsProps {
   onFilter?: (filter: FilterConfig) => void;
   onOverlay?: () => void;
   onText?: () => void;
-  onSticker?: (sticker?: string | number) => void;
+  onSticker?: (type: 'image' | 'emoji', content: string | number) => void;
   onMusic?: () => void;
   onTransition?: () => void;
   onVoiceAdd?: (voice: VoiceOverlay) => void;
@@ -147,7 +147,7 @@ const PreviewActionButtons: React.FC<PreviewActionButtonsProps> = ({
         masterVolume={masterVolume}
       />
       <CutoutButton onPress={onCutoutAdd} onCutoutAdd={onCutoutAdd} />
-      <StickerButton onPress={onSticker} onStickerSelect={onSticker} />
+      <StickerButton onPress={() => {}} onStickerSelect={onSticker} />
       <PasteButton onPress={onPaste} onPaste={onPaste} />
       <TransitionButton onPress={onTransition} />
     </ScrollView>
@@ -159,14 +159,14 @@ const styles = StyleSheet.create({
     backgroundColor: "#000000",
     borderTopWidth: 0.5,
     borderTopColor: "rgba(255, 255, 255, 0.08)",
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    height: '100%',
   },
   contentContainer: {
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
     paddingHorizontal: 8,
+    paddingVertical: 6,
   },
 });
 

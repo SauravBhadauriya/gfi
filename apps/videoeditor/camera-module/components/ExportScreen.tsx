@@ -15,6 +15,7 @@ import * as MediaLibrary from 'expo-media-library';
 import Svg, { Path } from 'react-native-svg';
 import type { CameraClip, CameraClipArray } from '../types/camera.types';
 import { exportAndCombineClips } from '../utils/videoExporter';
+import { uploadVideo } from '../services/videoApiService';
 
 interface ExportScreenProps {
   clips: CameraClipArray;
@@ -90,6 +91,18 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
         const asset = await MediaLibrary.createAssetAsync(outputUri);
         await MediaLibrary.createAlbumAsync('Video Editor', asset, false);
 
+        // Upload to backend (non-blocking)
+        setStatus('Uploading to server...');
+        setProgress(0.95);
+        try {
+          await uploadVideo(outputUri, { title: `video_${Date.now()}`, clips: clips.length }, (pct) => {
+            setProgress(0.9 + pct * 0.09);
+          });
+        } catch (uploadError) {
+          console.warn('Backend upload failed (non-blocking):', uploadError);
+          // Non-blocking: gallery save already succeeded
+        }
+
         setProgress(1);
         setStatus('Export complete!');
         setExportedUri(outputUri);
@@ -134,7 +147,7 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
   }, []);
 
   const progressWidth = progressAnim.interpolate({
-    inputRange: [0, 100],
+    inputRange: [0, 1],
     outputRange: ['0%', '100%'],
   });
 
