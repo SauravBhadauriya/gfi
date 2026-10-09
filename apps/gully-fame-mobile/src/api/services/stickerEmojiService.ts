@@ -63,7 +63,7 @@ export async function listStickers(
     const params: Record<string, any> = { page, limit };
     if (category) params.category = category;
 
-    const response = await apiClient.get<any>("public/stickers", { params });
+    const response = await apiClient.get<any>("public/stickers", { params, skipAuth: true });
     const responseData = response.data as any;
 
     if (responseData.code === 1 && responseData.data) {
@@ -146,7 +146,7 @@ export async function getStickerById(stickerId: string): Promise<ApiResponse<Sti
   try {
     console.log("[stickerEmojiService] Getting sticker:", stickerId);
 
-    const response = await apiClient.get<any>(`public/stickers/${stickerId}`);
+    const response = await apiClient.get<any>(`public/stickers/${stickerId}`, { skipAuth: true });
     const responseData = response.data as any;
 
     if (responseData.code === 1 && responseData.data) {
@@ -201,6 +201,7 @@ export async function searchStickers(query: string, limit = 30): Promise<ApiResp
 
     const response = await apiClient.get<any>("public/stickers", {
       params: { search: query, limit },
+      skipAuth: true
     });
     const responseData = response.data as any;
 
@@ -254,6 +255,7 @@ export async function getTrendingStickers(limit = 20): Promise<ApiResponse<Stick
 
     const response = await apiClient.get<any>("public/stickers", {
       params: { sort: "trending", limit },
+      skipAuth: true
     });
     const responseData = response.data as any;
 
@@ -304,7 +306,7 @@ export async function getEmojis(): Promise<ApiResponse<EmojiGroup[]>> {
     console.log("[stickerEmojiService] Fetching emojis");
 
     // For emojis, we can use a standard emoji library or backend
-    const response = await apiClient.get<any>("public/emojis");
+    const response = await apiClient.get<any>("public/emojis", { skipAuth: true });
     const responseData = response.data as any;
 
     if (responseData.code === 1 && responseData.data) {

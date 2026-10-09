@@ -287,3 +287,5 @@ export const cameraService = {
   getVideoDuration,
   compressVideo,
 };
+
+export default cameraService;
