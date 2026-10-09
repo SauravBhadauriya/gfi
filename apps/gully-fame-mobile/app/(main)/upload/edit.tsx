@@ -18,7 +18,7 @@ import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-ic
 import { exportAndCombineClips } from "@modules/video-editor/camera-module/utils/videoExporter";
 import type { CameraClipArray } from "@modules/video-editor/camera-module/types/camera.types";
 import EditableTimeline from "@/components/VideoEditor/EditableTimeline";
-// import AudioToolPanel from "@/components/VideoEditor/AudioToolPanel"; // Temporarily disabled - needs native rebuild
+import AudioToolPanel from "@/components/VideoEditor/AudioToolPanel";
 import AudioTrack from "@/components/VideoEditor/AudioTrack";
 import TextToolPanel, {
   TextOverlay,
@@ -670,18 +670,10 @@ export default function EditScreen() {
 
       {/* Tool-specific panels */}
       {selectedTool === "audio" && (
-        <View style={styles.disabledPanel}>
-          <Text style={styles.disabledText}>
-            Audio feature temporarily disabled. Requires native rebuild with expo-av.
-          </Text>
-          <TouchableOpacity onPress={() => setSelectedTool(null)} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-        </View>
-        // <AudioToolPanel
-        //   onClose={() => setSelectedTool(null)}
-        //   onAddAudio={handleAddAudio}
-        // />
+        <AudioToolPanel
+          onClose={() => setSelectedTool(null)}
+          onAddAudio={handleAddAudio}
+        />
       )}
 
       {selectedTool === "text" && (
