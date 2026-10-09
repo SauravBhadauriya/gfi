@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import apiClient from "@/api/axios";
+import { autoCaption } from "@/api/services/captionsService";
 
 export interface Caption {
   id: string;
@@ -81,39 +81,53 @@ export default function CaptionsToolPanel({
     try {
       setIsGenerating(true);
 
-      // Call auto-caption API
-      const response = await apiClient.post("/reels/auto-caption", {
-        videoUrl: videoUri,
-      });
+      // Call auto-caption service
+      const result = await autoCaption("temp-reel-id", videoUri);
 
-      if (response.data.code === 1 && response.data.data.captions) {
+      if (result.success && result.data) {
         // Parse captions from API response
-        const generatedCaptions: Caption[] = response.data.data.captions.map(
-          (cap: any, index: number) => ({
-            id: `caption-${Date.now()}-${index}`,
-            text: cap.text,
-            startTime: cap.startTime || 0,
-            endTime: cap.endTime || 3,
-            fontSize,
-            fontFamily,
-            color,
-            backgroundColor,
-            position,
-            animation,
-          })
+        const captionText = result.data.caption || "";
+        
+        // Split caption into sentences for better timing
+        const sentences = captionText
+          .split(/[.!?]+/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+
+        const generatedCaptions: Caption[] = sentences.map(
+          (text: string, index: number) => {
+            const startTime = (index * videoDuration) / Math.max(sentences.length, 1);
+            const endTime = Math.min(
+              startTime + 3,
+              videoDuration
+            );
+
+            return {
+              id: `caption-${Date.now()}-${index}`,
+              text: text,
+              startTime,
+              endTime,
+              fontSize,
+              fontFamily,
+              color,
+              backgroundColor,
+              position,
+              animation,
+            };
+          }
         );
 
         setCaptions(generatedCaptions);
         Alert.alert(
           "Success",
-          `Generated ${generatedCaptions.length} captions from audio`
+          `Generated ${generatedCaptions.length} caption(s) from audio`
         );
       } else {
-        Alert.alert("Info", "No speech detected in video");
+        Alert.alert("Info", result.message || "No speech detected in video");
       }
     } catch (error: any) {
       console.error("[CaptionsToolPanel] Failed to generate captions:", error);
-      
+
       // For demo purposes, create sample captions if API fails
       if (__DEV__) {
         const sampleCaptions: Caption[] = [

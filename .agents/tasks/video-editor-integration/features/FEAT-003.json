@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Integrate all editor tool panels with backend services. Update tool panel components (StickersToolPanel, FiltersToolPanel, CaptionsToolPanel, SoundFXToolPanel, TextToolPanel, VoiceToolPanel, AdjustToolPanel, DoodlesToolPanel) to call the service layer instead of using hardcoded/fallback data. Replace direct apiClient.get() calls with service methods. Add proper loading, error, and empty states. Verify all panels work end-to-end with backend.",
+  "status": "pending",
+  "steps": [
+    "Update StickersToolPanel.tsx: import stickerEmojiService, replace apiClient.get() with listStickers(), add error handling and loading state",
+    "Update FiltersToolPanel.tsx: import filterLibraryService, replace apiClient.get() with listFilters(), add error handling and loading state",
+    "Update SoundFXToolPanel.tsx: import soundFXService (already exists), replace apiClient.get() calls with soundFXService methods, verify search and preview work",
+    "Update CaptionsToolPanel.tsx: import captionsService, use autoCaption() to generate captions from video, handle async processing",
+    "Update TextToolPanel.tsx: ensure it doesn't need backend integration (text is local), verify state management works with timeline",
+    "Update VoiceToolPanel.tsx: ensure voiceoverService methods are called for recording/saving, verify audio recording works",
+    "Update AdjustToolPanel.tsx: ensure adjustments are applied locally (no backend call needed for brightness/contrast/saturation/exposure)",
+    "Update DoodlesToolPanel.tsx: ensure doodles are stored locally in state (no backend call needed)",
+    "Test each tool: click button in bottom nav, verify panel opens, verify data loads from backend, verify actions (add/preview/search) work"
+  ],
+  "acceptance_criteria": [
+    "All tool panels import and use service layer methods",
+    "No direct apiClient.get() calls in components (except through services)",
+    "Each panel shows loading spinner while fetching",
+    "Each panel shows error message on API failure",
+    "Each panel shows empty state when no data found",
+    "All panels compile without TypeScript errors",
+    "Backend calls succeed (check network tab or logs)"
+  ],
+  "verification": [
+    "Build: npm run android (or ios)",
+    "Test each tool: Filters, Text, Voice, Captions, Adjust, Doodles, Sound FX, Stickers, Audio, Transitions (if exists)",
+    "Visual: Each opens a panel, shows content, loading/error states work",
+    "Network: Postman or network tab shows successful API calls to correct endpoints",
+    "No console errors"
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

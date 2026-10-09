@@ -1,0 +1,7 @@
+{
+  "task_id": "video-editor-integration",
+  "task_description": "Enable audio tool panel by removing disabled state, and build unified backend service layer for all 10 bottom nav editor tools (Filters, Text, Voice, Captions, Adjust, Doodles, Sound FX, Stickers, Audio, Transitions) with proper API integration",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003"],
+  "blocked_reason": null
+}

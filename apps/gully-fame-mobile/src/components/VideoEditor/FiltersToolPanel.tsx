@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -7,9 +7,11 @@ import {
   TouchableOpacity,
   Image,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Slider from "@react-native-community/slider";
+import { listFilters } from "@/api/services/filterLibraryService";
 
 export interface VideoFilter {
   id: string;
@@ -27,6 +29,7 @@ export interface VideoFilter {
     | "soft"
     | "vivid"
     | "fade";
+  category?: string;
 }
 
 interface FiltersToolPanelProps {
@@ -60,6 +63,52 @@ export default function FiltersToolPanel({
     currentFilter || { ...PREDEFINED_FILTERS[0], intensity: 100 }
   );
   const [intensity, setIntensity] = useState(currentFilter?.intensity || 100);
+  const [loading, setLoading] = useState(true);
+  const [filters, setFilters] = useState<VideoFilter[]>(
+    PREDEFINED_FILTERS.map((f) => ({ ...f, intensity: 100 }))
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchFilters();
+  }, []);
+
+  const fetchFilters = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      const result = await listFilters();
+      if (result.success && result.data) {
+        // Map service response to component interface
+        const filterList = result.data.filters || [];
+        const mappedFilters: VideoFilter[] = filterList.map((f: any) => ({
+          id: f.id || f._id || "",
+          name: f.name || "Filter",
+          thumbnail: f.thumbnail,
+          intensity: 100,
+          type: (f.type || "none") as VideoFilter["type"],
+          category: f.category,
+        }));
+
+        // Combine with predefined if needed
+        if (mappedFilters.length === 0) {
+          setFilters(PREDEFINED_FILTERS.map((f) => ({ ...f, intensity: 100 })));
+        } else {
+          setFilters(mappedFilters);
+        }
+      } else {
+        setError(result.message || "Failed to load filters");
+        setFilters(PREDEFINED_FILTERS.map((f) => ({ ...f, intensity: 100 })));
+      }
+    } catch (err) {
+      console.error("[FiltersToolPanel] Fetch error:", err);
+      setError("Failed to load filters");
+      setFilters(PREDEFINED_FILTERS.map((f) => ({ ...f, intensity: 100 })));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleFilterSelect = (filter: Omit<VideoFilter, "intensity">) => {
     const newFilter: VideoFilter = { ...filter, intensity };
@@ -115,64 +164,78 @@ export default function FiltersToolPanel({
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Filter Grid */}
         <View style={styles.filtersGrid}>
-          {PREDEFINED_FILTERS.map((filter) => {
-            const isSelected = selectedFilter.id === filter.id;
+          {loading ? (
+            <View style={styles.loadingGrid}>
+              <ActivityIndicator size="large" color="#EC9A15" />
+            </View>
+          ) : error ? (
+            <View style={styles.errorGrid}>
+              <Ionicons name="alert-circle-outline" size={48} color="#ff3b30" />
+              <Text style={styles.errorText}>{error}</Text>
+              <TouchableOpacity onPress={fetchFilters} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            filters.map((filter) => {
+              const isSelected = selectedFilter.id === filter.id;
 
-            return (
-              <TouchableOpacity
-                key={filter.id}
-                style={[
-                  styles.filterCard,
-                  isSelected && styles.filterCardSelected,
-                ]}
-                onPress={() => handleFilterSelect(filter)}
-                activeOpacity={0.7}
-              >
-                {/* Filter Preview Thumbnail */}
-                <View style={styles.filterThumbnail}>
-                  {videoThumbnail ? (
-                    <Image
-                      source={{ uri: videoThumbnail }}
-                      style={styles.thumbnailImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <View style={styles.thumbnailPlaceholder}>
-                      <Ionicons
-                        name="image"
-                        size={32}
-                        color={isSelected ? "#EC9A15" : "#666"}
+              return (
+                <TouchableOpacity
+                  key={filter.id}
+                  style={[
+                    styles.filterCard,
+                    isSelected && styles.filterCardSelected,
+                  ]}
+                  onPress={() => handleFilterSelect(filter)}
+                  activeOpacity={0.7}
+                >
+                  {/* Filter Preview Thumbnail */}
+                  <View style={styles.filterThumbnail}>
+                    {videoThumbnail ? (
+                      <Image
+                        source={{ uri: videoThumbnail }}
+                        style={styles.thumbnailImage}
+                        resizeMode="cover"
                       />
+                    ) : (
+                      <View style={styles.thumbnailPlaceholder}>
+                        <Ionicons
+                          name="image"
+                          size={32}
+                          color={isSelected ? "#EC9A15" : "#666"}
+                        />
+                      </View>
+                    )}
+                    {/* Filter overlay effect representation */}
+                    <View
+                      style={[
+                        styles.filterOverlay,
+                        getFilterOverlayStyle(filter.type),
+                      ]}
+                    />
+                  </View>
+
+                  {/* Filter Name */}
+                  <Text
+                    style={[
+                      styles.filterName,
+                      isSelected && styles.filterNameSelected,
+                    ]}
+                  >
+                    {filter.name}
+                  </Text>
+
+                  {/* Selection indicator */}
+                  {isSelected && (
+                    <View style={styles.selectedIndicator}>
+                      <Ionicons name="checkmark-circle" size={20} color="#EC9A15" />
                     </View>
                   )}
-                  {/* Filter overlay effect representation */}
-                  <View
-                    style={[
-                      styles.filterOverlay,
-                      getFilterOverlayStyle(filter.type),
-                    ]}
-                  />
-                </View>
-
-                {/* Filter Name */}
-                <Text
-                  style={[
-                    styles.filterName,
-                    isSelected && styles.filterNameSelected,
-                  ]}
-                >
-                  {filter.name}
-                </Text>
-
-                {/* Selection indicator */}
-                {isSelected && (
-                  <View style={styles.selectedIndicator}>
-                    <Ionicons name="checkmark-circle" size={20} color="#EC9A15" />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+                </TouchableOpacity>
+              );
+            })
+          )}
         </View>
 
         {/* Intensity Control */}
@@ -300,6 +363,37 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 12,
     marginBottom: 24,
+  },
+  loadingGrid: {
+    width: "100%",
+    height: 200,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  errorGrid: {
+    width: "100%",
+    height: 200,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    color: "#ff3b30",
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: "center",
+  },
+  retryButton: {
+    backgroundColor: "#EC9A15",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+    marginTop: 12,
+  },
+  retryButtonText: {
+    color: "#000",
+    fontSize: 12,
+    fontWeight: "600",
   },
   filterCard: {
     width: "31%",

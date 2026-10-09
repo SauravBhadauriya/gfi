@@ -11,7 +11,7 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import apiClient from "@/api/axios";
+import { listStickers, searchStickers } from "@/api/services/stickerEmojiService";
 
 export interface StickerItem {
   id: string;
@@ -28,8 +28,10 @@ export interface StickerItem {
 
 interface Sticker {
   _id: string;
+  id?: string;
   name: string;
   imageUrl: string;
+  url?: string;
   category: string;
   isActive: boolean;
 }
@@ -51,24 +53,67 @@ export default function StickersToolPanel({
 }: StickersToolPanelProps) {
   const [stickers, setStickers] = useState<Sticker[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
 
   useEffect(() => {
     fetchStickers();
-  }, []);
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    // Debounce search
+    const timer = setTimeout(() => {
+      if (searchQuery) {
+        fetchStickers();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const fetchStickers = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get("/public/stickers");
+      setError(null);
 
-      if (response.data.code === 1 && response.data.data) {
-        setStickers(response.data.data);
+      let result;
+      if (searchQuery.trim()) {
+        // Use search service for filtered results
+        result = await searchStickers(searchQuery);
+      } else if (selectedCategory !== "All") {
+        // Use list service with category filter
+        result = await listStickers(selectedCategory.toLowerCase());
+      } else {
+        // Get all stickers
+        result = await listStickers();
       }
-    } catch (error) {
-      console.error("[StickersToolPanel] Failed to fetch stickers:", error);
-      Alert.alert("Error", "Failed to load stickers");
+
+      if (result.success && result.data) {
+        // Handle both array and paginated response
+        const stickerList = Array.isArray(result.data)
+          ? result.data
+          : result.data.stickers || [];
+
+        // Map service response to component interface
+        const mappedStickers: Sticker[] = stickerList.map((s: any) => ({
+          _id: s.id || s._id || "",
+          id: s.id || s._id || "",
+          name: s.name || "Sticker",
+          imageUrl: s.url || s.imageUrl || "",
+          url: s.url || s.imageUrl || "",
+          category: s.category || "general",
+          isActive: s.isActive !== false,
+        }));
+
+        setStickers(mappedStickers);
+      } else {
+        setError(result.message || "Failed to load stickers");
+        setStickers([]);
+      }
+    } catch (err) {
+      console.error("[StickersToolPanel] Fetch error:", err);
+      setError("Failed to load stickers");
+      setStickers([]);
     } finally {
       setLoading(false);
     }
@@ -164,6 +209,18 @@ export default function StickersToolPanel({
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#EC9A15" />
+          <Text style={styles.loadingText}>Loading stickers...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#ff3b30" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={fetchStickers}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <ScrollView
@@ -191,7 +248,7 @@ export default function StickersToolPanel({
                 >
                   <View style={styles.stickerImageContainer}>
                     <Image
-                      source={{ uri: sticker.imageUrl }}
+                      source={{ uri: sticker.imageUrl || sticker.url }}
                       style={styles.stickerImage}
                       resizeMode="contain"
                     />
@@ -288,6 +345,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  loadingText: {
+    color: "#888",
+    fontSize: 14,
+    marginTop: 12,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    color: "#ff3b30",
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: "center",
+  },
+  retryButton: {
+    backgroundColor: "#EC9A15",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: "#000",
+    fontSize: 14,
+    fontWeight: "600",
   },
   grid: {
     flex: 1,

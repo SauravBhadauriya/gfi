@@ -1,0 +1,26 @@
+{
+  "project_type": "Expo React Native app with TypeScript, monorepo structure",
+  "language": "TypeScript (React Native)",
+  "build_system": "Expo EAS with npm, npm scripts for running and building",
+  "test_framework": "Jest with @testing-library/react-native",
+  "build_command": "npm run android or npm run ios (via Expo)",
+  "test_command": "npm test",
+  "verification_instructions": "Build the app using `npm run android` or `npm run ios`, navigate to the editor screen, verify audio panel opens without disabled message, test each bottom nav tool, and verify backend API calls succeed (check console logs)",
+  "snapshot_or_generated_files": null,
+  "environment_constraints": "EXPO_PUBLIC_API_BASE_URL must be set in .env (.env.local for dev); default is https://gullyfame.com/v1/api. The app requires native build for expo-audio (already installed). Use BASE_URL from axios config which strips trailing slashes to prevent double-slash issues",
+  "contribution_requirements": "Follow existing service patterns in src/api/services/. All new services must use apiClient for requests. Use the ApiResponse<T> interface from src/api/types.ts. Auth token is automatically attached by axios interceptor (skipAuth: true for public endpoints). Service methods should handle both array and wrapped response formats for flexibility",
+  "key_patterns": "Services export standalone functions and a default export object with all methods. Response handling normalizes field names (e.g., _id vs id, title vs name). Components fetch data on mount and show loading/empty states. Error handling includes Alert.alert for user-facing errors and console.error for debugging. Mock/fallback data provided for offline development",
+  "relevant_files": [
+    "apps/gully-fame-mobile/app/(main)/upload/edit.tsx (audio disabled panel line ~675, editorTools array line ~460)",
+    "apps/gully-fame-mobile/src/components/VideoEditor/AudioToolPanel.tsx (needs real expo-audio, already correct)",
+    "apps/gully-fame-mobile/src/api/services/soundFXService.ts (pattern for list/search/get endpoints)",
+    "apps/gully-fame-mobile/src/api/services/musicLibraryService.ts (pattern for public/user endpoints and auth)",
+    "apps/gully-fame-mobile/src/api/axios.ts (auth headers, error handling, BASE_URL)",
+    "apps/gully-fame-mobile/src/api/types.ts (ApiResponse<T> interface)",
+    "apps/gully-fame-mobile/src/components/VideoEditor/SoundFXToolPanel.tsx (example component calling APIs)",
+    "apps/gully-fame-mobile/src/components/VideoEditor/StickersToolPanel.tsx (to update)",
+    "apps/gully-fame-mobile/src/components/VideoEditor/FiltersToolPanel.tsx (to update)",
+    "Gully Fame API.postman_collection (2).json (endpoint reference)"
+  ],
+  "directory_structure": "apps/gully-fame-mobile/src/api/services/ — all service files; apps/gully-fame-mobile/src/components/VideoEditor/ — tool panel components; apps/gully-fame-mobile/app/(main)/upload/edit.tsx — main editor screen"
+}

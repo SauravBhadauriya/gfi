@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { Audio } from "expo-audio";
-import apiClient from "@/api/axios";
+import { listSoundFX, searchSoundFX } from "@/api/services/soundFXService";
 
 interface SoundEffect {
   _id: string;
@@ -94,6 +94,7 @@ export default function SoundFXToolPanel({
 }: SoundFXToolPanelProps) {
   const [soundEffects, setSoundEffects] = useState<SoundEffect[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [previewingId, setPreviewingId] = useState<string | null>(null);
@@ -106,21 +107,57 @@ export default function SoundFXToolPanel({
         sound.unloadAsync();
       }
     };
-  }, []);
+  }, [selectedCategory]);
+
+  useEffect(() => {
+    // Debounce search
+    const timer = setTimeout(() => {
+      if (searchQuery) {
+        fetchSoundEffects();
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   const fetchSoundEffects = async () => {
     try {
       setLoading(true);
-      const response = await apiClient.get("/public/soundfx");
+      setError(null);
 
-      if (response.data.code === 1 && response.data.data.length > 0) {
-        setSoundEffects(response.data.data);
+      let result;
+      if (searchQuery.trim()) {
+        // Use search service for filtered results
+        result = await searchSoundFX(searchQuery);
+      } else if (selectedCategory !== "All") {
+        // Use list service with category filter
+        result = await listSoundFX(selectedCategory.toLowerCase());
       } else {
-        // Use predefined sound effects as fallback
+        // Get all sound effects
+        result = await listSoundFX();
+      }
+
+      if (result.success && result.data) {
+        // Handle both array and paginated response
+        const sfxList = Array.isArray(result.data) ? result.data : result.data;
+
+        // Map service response to component interface
+        const mappedFX: SoundEffect[] = sfxList.map((fx: any) => ({
+          _id: fx._id || fx.id || "",
+          name: fx.name || fx.title || "Sound Effect",
+          url: fx.audioUrl || fx.audio_url || fx.url || "",
+          category: fx.category || "general",
+          duration: fx.duration || 1,
+          isActive: fx.isActive !== false,
+        }));
+
+        setSoundEffects(mappedFX);
+      } else {
+        setError(result.message || "Failed to load sound effects");
         setSoundEffects(PREDEFINED_SOUND_FX);
       }
-    } catch (error) {
-      console.error("[SoundFXToolPanel] Failed to fetch sound effects:", error);
+    } catch (err) {
+      console.error("[SoundFXToolPanel] Fetch error:", err);
+      setError("Failed to load sound effects");
       setSoundEffects(PREDEFINED_SOUND_FX);
     } finally {
       setLoading(false);
@@ -240,6 +277,18 @@ export default function SoundFXToolPanel({
       {loading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#EC9A15" />
+          <Text style={styles.loadingText}>Loading sound effects...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#ff3b30" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={fetchSoundEffects}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <ScrollView style={styles.list} showsVerticalScrollIndicator={false}>
@@ -374,6 +423,35 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  loadingText: {
+    color: "#888",
+    fontSize: 14,
+    marginTop: 12,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 20,
+  },
+  errorText: {
+    color: "#ff3b30",
+    fontSize: 16,
+    marginTop: 12,
+    textAlign: "center",
+  },
+  retryButton: {
+    backgroundColor: "#EC9A15",
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: "#000",
+    fontSize: 14,
+    fontWeight: "600",
   },
   list: {
     flex: 1,

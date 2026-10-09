@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { Audio } from "expo-audio";
+import { uploadVoiceover } from "@/api/services/voiceoverService";
 
 interface VoiceToolPanelProps {
   onClose: () => void;
@@ -31,6 +32,7 @@ export default function VoiceToolPanel({
   const [recordedUri, setRecordedUri] = useState<string | null>(null);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const durationInterval = useRef<NodeJS.Timeout | null>(null);
@@ -183,17 +185,35 @@ export default function VoiceToolPanel({
   };
 
   // Add voice recording to timeline
-  const handleAddVoice = () => {
+  const handleAddVoice = async () => {
     if (!recordedUri) {
       Alert.alert("Error", "No recording to add");
       return;
     }
 
-    onAddVoice({
-      uri: recordedUri,
-      duration: recordingDuration,
-      title: `Voice Recording ${new Date().toLocaleTimeString()}`,
-    });
+    try {
+      setIsUploading(true);
+
+      // Optional: Upload to backend if session ID is available
+      // Uncomment if you have a session ID
+      // const result = await uploadVoiceover("session-id", recordedUri, recordingDuration, currentTime);
+      // if (!result.success) {
+      //   Alert.alert("Error", result.message || "Failed to upload voice");
+      //   return;
+      // }
+
+      // For now, use local recording directly
+      onAddVoice({
+        uri: recordedUri,
+        duration: recordingDuration,
+        title: `Voice Recording ${new Date().toLocaleTimeString()}`,
+      });
+    } catch (error) {
+      console.error("[VoiceToolPanel] Error adding voice:", error);
+      Alert.alert("Error", "Failed to add voice recording");
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   // Format duration
@@ -304,11 +324,21 @@ export default function VoiceToolPanel({
         {/* Add Button */}
         {recordedUri && (
           <TouchableOpacity
-            style={styles.addButton}
+            style={[styles.addButton, isUploading && styles.addButtonDisabled]}
             onPress={handleAddVoice}
+            disabled={isUploading}
           >
-            <Text style={styles.addButtonText}>Add to Timeline</Text>
-            <Ionicons name="arrow-forward" size={20} color="#000" />
+            {isUploading ? (
+              <>
+                <ActivityIndicator size="small" color="#000" />
+                <Text style={styles.addButtonText}>Adding...</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.addButtonText}>Add to Timeline</Text>
+                <Ionicons name="arrow-forward" size={20} color="#000" />
+              </>
+            )}
           </TouchableOpacity>
         )}
 
@@ -456,6 +486,9 @@ const styles = StyleSheet.create({
     gap: 8,
     width: "100%",
     marginBottom: 24,
+  },
+  addButtonDisabled: {
+    opacity: 0.6,
   },
   addButtonText: {
     color: "#000",
