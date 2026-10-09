@@ -58,15 +58,20 @@ export async function uploadVideo(
       if (xhr.status >= 200 && xhr.status < 300) {
         try {
           const response = JSON.parse(xhr.responseText) as UploadResult;
+          // Validate backend success field: if backend explicitly returns success: false, reject
           if (response.success === false) {
             reject(new Error(`Backend upload failed: ${response.message || 'Unknown error'}`));
           } else {
+            // Backend returned success or did not include success field; treat as success
             resolve({ ...response, success: true });
           }
-        } catch {
+        } catch (parseError) {
+          // If JSON parsing fails, still consider it success (HTTP 2xx) and log warning
+          console.warn('videoApiService: Failed to parse upload response JSON:', parseError);
           resolve({ success: true, message: 'Upload successful' });
         }
       } else {
+        // HTTP error: reject with status and response body
         reject(new Error(`Upload failed with status ${xhr.status}: ${xhr.responseText}`));
       }
     };

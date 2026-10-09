@@ -41,20 +41,26 @@ const StickerButton: React.FC<StickerButtonProps> = ({ onPress, onStickerSelect 
     setStickers(STICKERS);
   }, []);
 
-  const handleStickerPress = (sticker: string | number) => {
-    if (sticker !== undefined && sticker !== null) {
-      onStickerSelect?.('image', sticker);
-      setVisible(false);
-      onPress?.();
+  const handleStickerPress = (sticker: string | number | undefined) => {
+    // Validate that sticker is non-null before passing to callback
+    if (sticker === undefined || sticker === null) {
+      console.warn('StickerButton: Sticker content is null or undefined, skipping callback');
+      return;
     }
+    onStickerSelect?.('image', sticker);
+    setVisible(false);
+    onPress?.();
   };
 
-  const handleEmojiPress = (emojiChar: string) => {
-    if (emojiChar !== undefined && emojiChar !== null) {
-      onStickerSelect?.('emoji', emojiChar);
-      setVisible(false);
-      onPress?.();
+  const handleEmojiPress = (emojiChar: string | undefined) => {
+    // Validate that emoji is non-null before passing to callback
+    if (emojiChar === undefined || emojiChar === null || emojiChar === '') {
+      console.warn('StickerButton: Emoji content is empty or undefined, skipping callback');
+      return;
     }
+    onStickerSelect?.('emoji', emojiChar);
+    setVisible(false);
+    onPress?.();
   };
 
   const screenWidth = Dimensions.get('window').width;

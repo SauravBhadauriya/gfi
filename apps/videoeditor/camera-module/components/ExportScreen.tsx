@@ -31,6 +31,8 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Preparing export...');
   const [exportedUri, setExportedUri] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadRetrying, setUploadRetrying] = useState(false);
   const progressAnim = React.useRef(new Animated.Value(0)).current;
 
   // Request media library permission
@@ -68,6 +70,7 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
     setProgress(0);
     setStatus('Initializing export...');
     setExportedUri(null);
+    setUploadError(null);
 
     try {
       // Update progress
@@ -99,30 +102,51 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
             setProgress(0.9 + pct * 0.09);
           });
           if (!uploadResult.success) {
-            console.warn('Backend upload failed (non-blocking):', uploadResult.message);
-            // Non-blocking: gallery save already succeeded
+            throw new Error(uploadResult.message || 'Backend upload failed');
           }
-        } catch (uploadError) {
-          console.warn('Backend upload failed (non-blocking):', uploadError);
-          // Non-blocking: gallery save already succeeded
+          // Upload succeeded
+          setProgress(1);
+          setStatus('Export complete!');
+        } catch (uploadErr: any) {
+          // Upload failed but gallery save succeeded
+          const errorMsg = uploadErr?.message || 'Upload failed';
+          console.warn('Backend upload failed (non-blocking):', errorMsg);
+          setUploadError(errorMsg);
+          setProgress(1);
+          setStatus('Export complete (upload failed)');
         }
 
-        setProgress(1);
-        setStatus('Export complete!');
         setExportedUri(outputUri);
 
+        // Show appropriate alert based on upload status
         Alert.alert(
-          'Success!',
-          'Video saved to gallery successfully!',
-          [
-            {
-              text: 'Done',
-              onPress: () => {
-                onComplete?.();
-                onBack();
-              },
-            },
-          ]
+          uploadError ? '⚠️ Partial Success' : '✅ Success!',
+          uploadError
+            ? `Video saved to gallery, but upload failed: ${uploadError}\n\nWould you like to retry uploading?`
+            : 'Video saved to gallery and uploaded successfully!',
+          uploadError
+            ? [
+                {
+                  text: 'Done',
+                  onPress: () => {
+                    onComplete?.();
+                    onBack();
+                  },
+                },
+                {
+                  text: 'Retry Upload',
+                  onPress: handleRetryUpload,
+                },
+              ]
+            : [
+                {
+                  text: 'Done',
+                  onPress: () => {
+                    onComplete?.();
+                    onBack();
+                  },
+                },
+              ]
         );
       } else {
         throw new Error('Export failed: No output file');
@@ -141,11 +165,62 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
     } finally {
       setExporting(false);
     }
-  }, [clips, exporting, onBack, onComplete]);
+  }, [clips, exporting, uploadError, onBack, onComplete]);
 
-  // Auto-start export when screen loads
+  const handleRetryUpload = useCallback(async () => {
+    if (!exportedUri) return;
+
+    setUploadRetrying(true);
+    setProgress(0.95);
+    setStatus('Retrying upload...');
+    setUploadError(null);
+
+    try {
+      const uploadResult = await uploadVideo(exportedUri, { title: `video_${Date.now()}`, clips: clips.length }, (pct) => {
+        setProgress(0.9 + pct * 0.09);
+      });
+      if (!uploadResult.success) {
+        throw new Error(uploadResult.message || 'Backend upload failed');
+      }
+      // Upload succeeded
+      setProgress(1);
+      setStatus('Upload complete!');
+      setUploadRetrying(false);
+
+      Alert.alert(
+        '✅ Success!',
+        'Video uploaded successfully!',
+        [
+          {
+            text: 'Done',
+            onPress: () => {
+              onComplete?.();
+              onBack();
+            },
+          },
+        ]
+      );
+    } catch (uploadErr: any) {
+      const errorMsg = uploadErr?.message || 'Upload failed';
+      console.warn('Upload retry failed:', errorMsg);
+      setUploadError(errorMsg);
+      setUploadRetrying(false);
+      setProgress(1);
+
+      Alert.alert(
+        '❌ Upload Failed',
+        `${errorMsg}\n\nPlease check your connection and try again.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry Again', onPress: handleRetryUpload },
+        ]
+      );
+    }
+  }, [exportedUri, clips.length, onBack, onComplete]);
+
+  // Auto-start export when screen loads (only if not already exported)
   useEffect(() => {
-    if (clips.length > 0 && !exporting && !exportedUri) {
+    if (clips.length > 0 && !exporting && !exportedUri && !uploadRetrying) {
       handleExport();
     }
   }, []);
