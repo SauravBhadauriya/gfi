@@ -95,9 +95,13 @@ const ExportScreen: React.FC<ExportScreenProps> = ({ clips, onBack, onComplete }
         setStatus('Uploading to server...');
         setProgress(0.95);
         try {
-          await uploadVideo(outputUri, { title: `video_${Date.now()}`, clips: clips.length }, (pct) => {
+          const uploadResult = await uploadVideo(outputUri, { title: `video_${Date.now()}`, clips: clips.length }, (pct) => {
             setProgress(0.9 + pct * 0.09);
           });
+          if (!uploadResult.success) {
+            console.warn('Backend upload failed (non-blocking):', uploadResult.message);
+            // Non-blocking: gallery save already succeeded
+          }
         } catch (uploadError) {
           console.warn('Backend upload failed (non-blocking):', uploadError);
           // Non-blocking: gallery save already succeeded

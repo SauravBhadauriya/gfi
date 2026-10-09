@@ -59,7 +59,7 @@ export async function uploadVideo(
         try {
           const response = JSON.parse(xhr.responseText) as UploadResult;
           if (response.success === false) {
-            resolve(response);
+            reject(new Error(`Backend upload failed: ${response.message || 'Unknown error'}`));
           } else {
             resolve({ ...response, success: true });
           }

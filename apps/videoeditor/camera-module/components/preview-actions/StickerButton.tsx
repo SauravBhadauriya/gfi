@@ -42,15 +42,19 @@ const StickerButton: React.FC<StickerButtonProps> = ({ onPress, onStickerSelect 
   }, []);
 
   const handleStickerPress = (sticker: string | number) => {
-    onStickerSelect?.('image', sticker);
-    setVisible(false);
-    onPress?.();
+    if (sticker !== undefined && sticker !== null) {
+      onStickerSelect?.('image', sticker);
+      setVisible(false);
+      onPress?.();
+    }
   };
 
   const handleEmojiPress = (emojiChar: string) => {
-    onStickerSelect?.('emoji', emojiChar);
-    setVisible(false);
-    onPress?.();
+    if (emojiChar !== undefined && emojiChar !== null) {
+      onStickerSelect?.('emoji', emojiChar);
+      setVisible(false);
+      onPress?.();
+    }
   };
 
   const screenWidth = Dimensions.get('window').width;
