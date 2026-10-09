@@ -47,6 +47,7 @@ import OverlayToolPanel, {
 import CutoutToolPanel, {
   CutoutSettings,
 } from "@/components/VideoEditor/CutoutToolPanel";
+import VideoPreviewWithOverlays from "@/components/VideoEditor/VideoPreviewWithOverlays";
 import {
   exportVideo,
   uploadVideoToBackend,
@@ -126,6 +127,11 @@ export default function EditScreen() {
 
   // Export state
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
+
+  // Drawing mode state for doodles
+  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [doodleBrushColor, setDoodleBrushColor] = useState("#EC9A15");
+  const [doodleBrushSize, setDoodleBrushSize] = useState(5);
 
   // Undo/redo stacks
   const undoStack = useRef<any[][]>([]);
@@ -527,23 +533,31 @@ export default function EditScreen() {
       <View style={styles.videoContainer}>
         <View style={styles.videoWrapper}>
           {currentVideoUri ? (
-            <>
-              <VideoView
-                player={player}
-                style={styles.video}
-                contentFit="contain"
-                nativeControls={false}
-              />
-              {/* Caption Overlay */}
-              {captions.length > 0 && (
-                <CaptionOverlay
-                  captions={captions}
-                  currentTime={currentTime}
-                  videoWidth={SCREEN_WIDTH * 0.5}
-                  videoHeight={(SCREEN_WIDTH * 0.5 * 16) / 9}
-                />
-              )}
-            </>
+            <VideoPreviewWithOverlays
+              player={player}
+              currentTime={currentTime}
+              captions={captions}
+              filter={filter}
+              adjustments={adjustments}
+              doodles={doodles}
+              stickers={stickers}
+              overlays={overlays}
+              cutoutSettings={cutoutSettings}
+              selectedTool={selectedTool}
+              isDrawingMode={isDrawingMode && selectedTool === "doodles"}
+              doodleBrushColor={doodleBrushColor}
+              doodleBrushSize={doodleBrushSize}
+              onDoodleComplete={(doodle) => {
+                setDoodles([...doodles, doodle]);
+              }}
+              onStickerUpdate={(updatedSticker) => {
+                setStickers(
+                  stickers.map((s) =>
+                    s.id === updatedSticker.id ? updatedSticker : s
+                  )
+                );
+              }}
+            />
           ) : (
             <View style={styles.videoPlaceholder}>
               <MaterialIcons name="videocam" size={48} color="#666" />
@@ -721,11 +735,20 @@ export default function EditScreen() {
 
       {selectedTool === "doodles" && (
         <DoodlesToolPanel
-          onClose={() => setSelectedTool(null)}
+          onClose={() => {
+            setSelectedTool(null);
+            setIsDrawingMode(false);
+          }}
           onDoodlesChange={handleDoodlesChange}
           currentTime={currentTime}
           videoDuration={duration}
           initialDoodles={doodles}
+          isDrawingMode={isDrawingMode}
+          onDrawingModeChange={setIsDrawingMode}
+          brushColor={doodleBrushColor}
+          onBrushColorChange={setDoodleBrushColor}
+          brushSize={doodleBrushSize}
+          onBrushSizeChange={setDoodleBrushSize}
         />
       )}
 

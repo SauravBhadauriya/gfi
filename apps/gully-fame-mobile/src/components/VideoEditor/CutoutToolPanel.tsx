@@ -62,17 +62,9 @@ export default function CutoutToolPanel({
       backgroundImage,
     };
 
-    // Simulate processing delay
-    setTimeout(() => {
-      onApplyCutout(settings);
-      setIsProcessing(false);
-      Alert.alert(
-        enabled ? "Cutout Applied" : "Cutout Removed",
-        enabled
-          ? "Background removal is processing. This may take a moment."
-          : "Background will be restored to original."
-      );
-    }, 1000);
+    // Apply settings immediately (no processing delay needed)
+    onApplyCutout(settings);
+    setIsProcessing(false);
   };
 
   const pickBackgroundImage = async () => {

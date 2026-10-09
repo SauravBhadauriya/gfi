@@ -30,6 +30,12 @@ interface DoodlesToolPanelProps {
   currentTime: number;
   videoDuration: number;
   initialDoodles?: DoodlePath[];
+  isDrawingMode?: boolean;
+  onDrawingModeChange?: (mode: boolean) => void;
+  brushColor?: string;
+  onBrushColorChange?: (color: string) => void;
+  brushSize?: number;
+  onBrushSizeChange?: (size: number) => void;
 }
 
 const PRESET_COLORS = [
@@ -58,24 +64,52 @@ export default function DoodlesToolPanel({
   currentTime,
   videoDuration,
   initialDoodles = [],
+  isDrawingMode: externalIsDrawingMode,
+  onDrawingModeChange,
+  brushColor: externalBrushColor,
+  onBrushColorChange,
+  brushSize: externalBrushSize,
+  onBrushSizeChange,
 }: DoodlesToolPanelProps) {
   const [doodles, setDoodles] = useState<DoodlePath[]>(initialDoodles);
-  const [selectedColor, setSelectedColor] = useState("#EC9A15");
-  const [selectedBrushSize, setSelectedBrushSize] = useState(5);
-  const [isDrawingMode, setIsDrawingMode] = useState(false);
+  const [selectedColor, setSelectedColor] = useState(externalBrushColor || "#EC9A15");
+  const [selectedBrushSize, setSelectedBrushSize] = useState(externalBrushSize || 5);
+  const [isDrawingMode, setIsDrawingMode] = useState(externalIsDrawingMode || false);
   const [doodleDuration, setDoodleDuration] = useState(3); // Default 3 seconds
+
+  // Sync external drawing mode state
+  React.useEffect(() => {
+    if (externalIsDrawingMode !== undefined) {
+      setIsDrawingMode(externalIsDrawingMode);
+    }
+  }, [externalIsDrawingMode]);
+
+  // Sync external brush color
+  React.useEffect(() => {
+    if (externalBrushColor) {
+      setSelectedColor(externalBrushColor);
+    }
+  }, [externalBrushColor]);
+
+  // Sync external brush size
+  React.useEffect(() => {
+    if (externalBrushSize) {
+      setSelectedBrushSize(externalBrushSize);
+    }
+  }, [externalBrushSize]);
 
   const handleStartDrawing = () => {
     setIsDrawingMode(true);
-    Alert.alert(
-      "Drawing Mode",
-      "Tap the video preview area to draw. Your drawing will appear at the current playback time.",
-      [{ text: "Got it", style: "default" }]
-    );
+    if (onDrawingModeChange) {
+      onDrawingModeChange(true);
+    }
   };
 
   const handleStopDrawing = () => {
     setIsDrawingMode(false);
+    if (onDrawingModeChange) {
+      onDrawingModeChange(false);
+    }
   };
 
   const handleClearAll = () => {
@@ -168,7 +202,12 @@ export default function DoodlesToolPanel({
                   { backgroundColor: color },
                   selectedColor === color && styles.colorSwatchSelected,
                 ]}
-                onPress={() => setSelectedColor(color)}
+                onPress={() => {
+                  setSelectedColor(color);
+                  if (onBrushColorChange) {
+                    onBrushColorChange(color);
+                  }
+                }}
               >
                 {selectedColor === color && (
                   <Ionicons
@@ -193,7 +232,12 @@ export default function DoodlesToolPanel({
                   styles.brushButton,
                   selectedBrushSize === size.value && styles.brushButtonActive,
                 ]}
-                onPress={() => setSelectedBrushSize(size.value)}
+                onPress={() => {
+                  setSelectedBrushSize(size.value);
+                  if (onBrushSizeChange) {
+                    onBrushSizeChange(size.value);
+                  }
+                }}
               >
                 <View
                   style={[

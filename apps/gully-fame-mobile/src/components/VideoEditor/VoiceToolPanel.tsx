@@ -64,9 +64,17 @@ export default function VoiceToolPanel({
   // Request audio permissions and start recording
   const startRecording = async () => {
     try {
-      // Use require to avoid module resolution issues
-      const AudioModule = require('expo-av');
-      const Audio = AudioModule.Audio || AudioModule;
+      // Import expo-audio for recording
+      let Audio;
+      try {
+        Audio = require('expo-audio').Audio;
+      } catch (e) {
+        Alert.alert(
+          "Audio Not Available",
+          "Voice recording requires a native rebuild with expo-audio. This feature is not available in this build."
+        );
+        return;
+      }
       
       // Request permissions
       const { status } = await Audio.requestPermissionsAsync();
@@ -143,9 +151,17 @@ export default function VoiceToolPanel({
         setSound(null);
         setIsPlaying(false);
       } else {
-        // Use require to avoid module resolution issues
-        const AudioModule = require('expo-av');
-        const Audio = AudioModule.Audio || AudioModule;
+        // Import expo-audio for playback
+        let Audio;
+        try {
+          Audio = require('expo-audio').Audio;
+        } catch (e) {
+          Alert.alert(
+            "Audio Not Available",
+            "Playback requires a native rebuild with expo-audio."
+          );
+          return;
+        }
         
         // Start playback
         const { sound: newSound } = await Audio.Sound.createAsync(

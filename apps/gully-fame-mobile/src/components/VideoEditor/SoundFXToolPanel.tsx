@@ -183,23 +183,38 @@ export default function SoundFXToolPanel({
       if (previewingId === sfx._id) {
         setPreviewingId(null);
       } else {
-        // Use require to avoid module resolution issues
-        const AudioModule = require('expo-audio');
-        const Audio = AudioModule.Audio || AudioModule;
-        
-        if (Audio.Sound && Audio.Sound.createAsync) {
-          const { sound: newSound } = await Audio.Sound.createAsync(
-            { uri: sfx.url },
-            { shouldPlay: true, volume: 0.8 }
-          );
-          setSound(newSound);
-          setPreviewingId(sfx._id);
-
-          newSound.setOnPlaybackStatusUpdate((status: any) => {
-            if (status.isLoaded && status.didJustFinish) {
-              setPreviewingId(null);
-            }
+        // Try to load audio preview, but gracefully fail
+        let Audio;
+        try {
+          Audio = require('expo-audio').Audio;
+        } catch (e) {
+          Alert.alert("Info", "Audio preview not available in this build. Added to timeline instead.");
+          onAddSoundFX({
+            id: sfx._id,
+            name: sfx.name,
+            url: sfx.url,
+            duration: sfx.duration,
           });
+          return;
+        }
+        
+        if (Audio && Audio.Sound && Audio.Sound.createAsync) {
+          try {
+            const { sound: newSound } = await Audio.Sound.createAsync(
+              { uri: sfx.url },
+              { shouldPlay: true, volume: 0.8 }
+            );
+            setSound(newSound);
+            setPreviewingId(sfx._id);
+
+            newSound.setOnPlaybackStatusUpdate((status: any) => {
+              if (status.isLoaded && status.didJustFinish) {
+                setPreviewingId(null);
+              }
+            });
+          } catch (playError) {
+            Alert.alert("Error", "Failed to play audio preview");
+          }
         } else {
           Alert.alert("Info", "Audio preview not available");
         }
