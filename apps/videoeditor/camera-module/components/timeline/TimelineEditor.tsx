@@ -12,6 +12,7 @@ import {
   calculateTimelinePositions,
 } from "../../utils/timelineHelpers";
 import { generateThumbnailsForClips } from "../../utils/thumbnailGenerator";
+import editorTheme from "../../constants/editorTheme";
 import AddClipOverlay from "../AddClipOverlay";
 import DraggableTextOverlays from "../DraggableTextOverlays";
 import PreviewActionButtons from "../PreviewActionButtons";
@@ -550,25 +551,29 @@ const TimelineEditor: React.FC<TimelineEditorProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0A0A0A", flexDirection: 'column' },
+  container: { 
+    flex: 1, 
+    backgroundColor: editorTheme.colors.surface, 
+    flexDirection: 'column' 
+  },
   
   topHeader: {
     height: 56, 
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'space-between',
-    paddingHorizontal: 16, 
-    paddingTop: 8,
-    paddingBottom: 4,
-    backgroundColor: '#0A0A0A', 
+    paddingHorizontal: editorTheme.spacing.lg, 
+    paddingTop: editorTheme.spacing.sm,
+    paddingBottom: editorTheme.spacing.xs,
+    backgroundColor: editorTheme.colors.surface, 
     zIndex: 10,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: editorTheme.colors.separator,
   },
   exportButton: { 
-    backgroundColor: '#fff', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
+    backgroundColor: editorTheme.colors.textPrimary, 
+    paddingHorizontal: editorTheme.spacing.lg, 
+    paddingVertical: editorTheme.spacing.sm, 
     borderRadius: 20 
   },
 
@@ -576,12 +581,12 @@ const styles = StyleSheet.create({
   videoPreviewArea: {
     height: SCREEN_HEIGHT * 0.30,
     width: '100%',
-    backgroundColor: '#000',
+    backgroundColor: editorTheme.colors.surfaceRaised,
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: editorTheme.colors.separator,
   },
 
   playCenterOverlay: { 
@@ -603,52 +608,48 @@ const styles = StyleSheet.create({
   editingAreaContainer: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#0A0A0A',
+    backgroundColor: editorTheme.colors.surface,
     borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255, 255, 255, 0.08)',
+    borderBottomColor: editorTheme.colors.separator,
   },
 
   /* LEFT COLUMN - CONTROLS */
   leftControls: {
     width: 70,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: editorTheme.colors.surface,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingVertical: 12,
-    gap: 12,
+    paddingVertical: editorTheme.spacing.md,
+    gap: editorTheme.spacing.md,
     borderRightWidth: 0.5,
-    borderRightColor: 'rgba(255, 255, 255, 0.08)',
+    borderRightColor: editorTheme.colors.separator,
   },
 
   playButtonLarge: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: '#ec9a15',
+    backgroundColor: editorTheme.colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
-    elevation: 5,
+    ...editorTheme.shadows.glow,
   },
 
   addAudioButton: {
     width: 48,
     height: 48,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: editorTheme.borderRadius.sm,
+    backgroundColor: editorTheme.colors.surfaceHover,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.15)',
+    borderColor: editorTheme.colors.border,
   },
 
   deleteButton: {
     width: 48,
     height: 48,
-    borderRadius: 6,
+    borderRadius: editorTheme.borderRadius.sm,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -656,16 +657,16 @@ const styles = StyleSheet.create({
   /* CENTER COLUMN - EDITING AREA */
   centerEditingArea: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    backgroundColor: editorTheme.colors.surface,
+    paddingHorizontal: editorTheme.spacing.md,
+    paddingVertical: editorTheme.spacing.sm,
     flexDirection: 'column',
   },
 
   timelineWrapper: {
     flex: 1,
-    backgroundColor: '#111',
-    borderRadius: 6,
+    backgroundColor: editorTheme.colors.surfaceRaised,
+    borderRadius: editorTheme.borderRadius.md,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -676,25 +677,22 @@ const styles = StyleSheet.create({
     top: 0, 
     bottom: 0, 
     width: 2,
-    backgroundColor: '#fff', 
+    backgroundColor: editorTheme.colors.primary, 
     zIndex: 99,
+    ...editorTheme.shadows.glow,
   },
 
   floatingAddButton: {
     position: 'absolute', 
-    right: 10, 
-    bottom: 10, 
+    right: editorTheme.spacing.md, 
+    bottom: editorTheme.spacing.md, 
     width: 36, 
     height: 36,
-    borderRadius: 6, 
-    backgroundColor: '#fff', 
+    borderRadius: editorTheme.borderRadius.sm, 
+    backgroundColor: editorTheme.colors.textPrimary, 
     justifyContent: 'center', 
     alignItems: 'center',
-    shadowColor: "#000", 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.3, 
-    shadowRadius: 3, 
-    elevation: 4, 
+    ...editorTheme.shadows.large,
     zIndex: 100,
   },
 
@@ -702,9 +700,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 6,
+    paddingVertical: editorTheme.spacing.sm,
     borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopColor: editorTheme.colors.separator,
   },
 
   timeDisplaySmall: {
@@ -712,35 +710,36 @@ const styles = StyleSheet.create({
   },
 
   timeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
+    color: editorTheme.colors.textPrimary,
+    fontSize: editorTheme.typography.body,
+    fontWeight: editorTheme.typography.fontWeights.semibold as any,
+    fontFamily: 'monospace',
   },
 
   secondsText: {
-    color: '#888',
-    fontSize: 10,
-    marginTop: 1,
-    fontWeight: '400',
+    color: editorTheme.colors.textSecondary,
+    fontSize: editorTheme.typography.micro,
+    marginTop: editorTheme.spacing.xs,
+    fontWeight: editorTheme.typography.fontWeights.regular as any,
   },
 
   /* RIGHT COLUMN - CONTROLS */
   rightControls: {
     width: 60,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: editorTheme.colors.surface,
     alignItems: 'center',
     justifyContent: 'flex-start',
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: editorTheme.spacing.md,
+    gap: editorTheme.spacing.sm,
     borderLeftWidth: 0.5,
-    borderLeftColor: 'rgba(255, 255, 255, 0.08)',
+    borderLeftColor: editorTheme.colors.separator,
   },
 
   volumeButton: {
     width: 40,
     height: 40,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: editorTheme.borderRadius.sm,
+    backgroundColor: editorTheme.colors.surfaceHover,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -749,10 +748,10 @@ const styles = StyleSheet.create({
   bottomToolbar: { 
     minHeight: 65,
     overflow: 'visible',
-    backgroundColor: '#0A0A0A', 
+    backgroundColor: editorTheme.colors.surface, 
     justifyContent: 'center', 
     borderTopWidth: 0.5, 
-    borderTopColor: 'rgba(255, 255, 255, 0.08)',
+    borderTopColor: editorTheme.colors.separator,
   },
 
   /* Legacy/hidden styles */
