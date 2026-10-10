@@ -2030,7 +2030,7 @@
 					]
 				},
 				{
-					"name": "User Managment",
+					"name": "User Management",
 					"item": [
 						{
 							"name": "List Users (pagination + filters)",
@@ -3018,7 +3018,7 @@
 					]
 				},
 				{
-					"name": "Compitition Managment",
+					"name": "Competition Management",
 					"item": [
 						{
 							"name": "List Competitions",
@@ -4013,10 +4013,10 @@
 					]
 				},
 				{
-					"name": "Sponsers Managment",
+					"name": "Sponsors Management",
 					"item": [
 						{
-							"name": "get sponsers",
+							"name": "get sponsors",
 							"request": {
 								"auth": {
 									"type": "bearer",
@@ -4042,7 +4042,7 @@
 							},
 							"response": [
 								{
-									"name": "get sponsers",
+									"name": "get sponsors",
 									"originalRequest": {
 										"method": "GET",
 										"header": [],
@@ -4099,7 +4099,7 @@
 							]
 						},
 						{
-							"name": "get sponsers by id",
+							"name": "get sponsors by id",
 							"request": {
 								"auth": {
 									"type": "bearer",
@@ -4126,7 +4126,7 @@
 							},
 							"response": [
 								{
-									"name": "get sponsers by id",
+									"name": "get sponsors by id",
 									"originalRequest": {
 										"method": "GET",
 										"header": [],
@@ -4321,7 +4321,7 @@
 							},
 							"response": [
 								{
-									"name": "update sponsers by id",
+									"name": "update sponsors by id",
 									"originalRequest": {
 										"method": "PUT",
 										"header": [],
@@ -4882,7 +4882,7 @@
 					]
 				},
 				{
-					"name": "Reports Managment",
+					"name": "Reports Management",
 					"item": [
 						{
 							"name": "List Reports (with USER filter)",
