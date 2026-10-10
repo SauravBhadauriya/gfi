@@ -15,11 +15,30 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import {
+  addClip,
+  removeClip,
+  addOverlay,
+  removeOverlay,
+  addAudioTrack,
+  removeAudioTrack,
+  addText,
+  removeText,
+  setCurrentTime,
+  setIsPlaying,
+  setSelectedItemId,
+  undo,
+  redo,
+  resetEditor,
+} from "@/store/slices/editorSlice";
 import { exportAndCombineClips } from "@modules/video-editor/camera-module/utils/videoExporter";
 import type { CameraClipArray } from "@modules/video-editor/camera-module/types/camera.types";
-import EditableTimeline from "@/components/VideoEditor/EditableTimeline";
+import TimelineContainer from "@/components/VideoEditor/TimelineContainer";
+import BottomToolbar, {
+  ToolId,
+} from "@/components/VideoEditor/BottomToolbar";
 import AudioToolPanel from "@/components/VideoEditor/AudioToolPanel";
-import AudioTrack from "@/components/VideoEditor/AudioTrack";
 import TextToolPanel, {
   TextOverlay,
 } from "@/components/VideoEditor/TextToolPanel";
@@ -53,47 +72,34 @@ import {
   uploadVideoToBackend,
   ExportProgress,
 } from "@/services/videoExportService";
+import * as ImagePicker from "expo-image-picker";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-// Editor tool types matching Instagram Edits
-type EditorTool =
-  | "audio"
-  | "text"
-  | "voice"
-  | "links"
-  | "captions"
-  | "doodles"
-  | "adjust"
-  | "filters"
-  | "overlay"
-  | "soundfx"
-  | "cutout"
-  | "stickers";
-
 export default function EditScreen() {
   const params = useLocalSearchParams();
-  const [clips, setClips] = useState<any[]>([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [selectedTool, setSelectedTool] = useState<EditorTool | null>(null);
+  const dispatch = useAppDispatch();
+
+  // Redux state
+  const clips = useAppSelector((state: any) => state.editor.clips);
+  const overlays = useAppSelector((state: any) => state.editor.overlays);
+  const audioTracks = useAppSelector((state: any) => state.editor.audioTracks);
+  const texts = useAppSelector((state: any) => state.editor.texts);
+  const currentTime = useAppSelector((state: any) => state.editor.currentTime);
+  const isPlaying = useAppSelector((state: any) => state.editor.isPlaying);
+  const selectedItemId = useAppSelector((state: any) => state.editor.selectedItemId);
+  const undoStack = useAppSelector((state: any) => state.editor.undoStack);
+  const redoStack = useAppSelector((state: any) => state.editor.redoStack);
+
+  // Local state
+  const [selectedTool, setSelectedTool] = useState<ToolId | null>(null);
   const [hdEnabled, setHdEnabled] = useState(true);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
+  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
 
-  // Audio clips state
-  const [audioClips, setAudioClips] = useState<any[]>([]);
-
-  // Text overlays state
+  // Local states for tool panels (not in Redux as they're UI-only)
   const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
-
-  // Captions state
   const [captions, setCaptions] = useState<Caption[]>([]);
-
-  // Video adjustments state
   const [adjustments, setAdjustments] = useState<VideoAdjustments>({
     brightness: 0,
     contrast: 0,
@@ -103,69 +109,64 @@ export default function EditScreen() {
     vignette: 0,
     sharpen: 0,
   });
-
-  // Video filter state
   const [filter, setFilter] = useState<VideoFilter>({
     id: "none",
     name: "Original",
     type: "none",
     intensity: 100,
   });
-
-  // Doodles state
   const [doodles, setDoodles] = useState<DoodlePath[]>([]);
-
-  // Phase 6 states
   const [stickers, setStickers] = useState<StickerItem[]>([]);
-  const [overlays, setOverlays] = useState<OverlayItem[]>([]);
   const [cutoutSettings, setCutoutSettings] = useState<CutoutSettings>({
     enabled: false,
     feathering: 50,
     threshold: 50,
     backgroundColor: "transparent",
   });
-
-  // Export state
-  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
-
-  // Drawing mode state for doodles
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [doodleBrushColor, setDoodleBrushColor] = useState("#EC9A15");
   const [doodleBrushSize, setDoodleBrushSize] = useState(5);
-
-  // Undo/redo stacks
-  const undoStack = useRef<any[][]>([]);
-  const redoStack = useRef<any[][]>([]);
-
-  // Timeline state
-  const [timelineScrollX, setTimelineScrollX] = useState(0);
 
   // Video player
   const currentVideoUri = clips[0]?.uri || "";
   const player = useVideoPlayer(currentVideoUri, (player) => {
     if (currentVideoUri) {
       player.loop = false;
-      // Don't auto-play, wait for user to press play button
     }
   });
 
-  // Parse clips from params
+  // Initialize editor state from params
   useEffect(() => {
     if (params.clips) {
       try {
         const parsedClips = JSON.parse(params.clips as string);
-        setClips(parsedClips);
-        // Calculate total duration
-        const totalDuration = parsedClips.reduce(
-          (sum: number, clip: any) => sum + (clip.duration || 0),
-          0
-        );
-        setDuration(totalDuration);
+        parsedClips.forEach((clip: any) => {
+          dispatch(
+            addClip({
+              id: clip.id || `clip-${Date.now()}`,
+              uri: clip.uri,
+              duration: clip.duration || 0,
+              type: clip.type || "video",
+              source: clip.source || "gallery",
+            })
+          );
+        });
       } catch (e) {
         console.error("[EditScreen] Failed to parse clips:", e);
       }
     }
-  }, [params.clips]);
+
+    return () => {
+      // Cleanup on unmount
+    };
+  }, [params.clips, dispatch]);
+
+  // Handle cleanup on unmount
+  useEffect(() => {
+    return () => {
+      dispatch(resetEditor());
+    };
+  }, [dispatch]);
 
   // Format time display (mm:ss)
   const formatTime = (seconds: number) => {
@@ -179,221 +180,196 @@ export default function EditScreen() {
     if (player) {
       if (isPlaying) {
         player.pause();
+        dispatch(setIsPlaying(false));
       } else {
         player.play();
+        dispatch(setIsPlaying(true));
       }
-      setIsPlaying(!isPlaying);
     }
-  }, [player, isPlaying]);
+  }, [player, isPlaying, dispatch]);
 
   // Handle tool selection
   const handleToolSelect = useCallback(
-    (tool: EditorTool) => {
+    (tool: ToolId) => {
       setSelectedTool(tool === selectedTool ? null : tool);
     },
     [selectedTool]
   );
 
-  // Handle adding audio from AudioToolPanel
+  // Handle adding clip from gallery
+  const handleAddClip = useCallback(async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: false,
+        quality: 1,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        dispatch(
+          addClip({
+            id: `clip-${Date.now()}`,
+            uri: asset.uri,
+            duration: asset.duration || 1,
+            type: "video",
+            source: "gallery",
+          })
+        );
+      }
+    } catch (error) {
+      console.error("[EditScreen] Add clip error:", error);
+      Alert.alert("Error", "Failed to add clip from gallery");
+    }
+  }, [dispatch]);
+
+  // Handle adding audio
   const handleAddAudio = useCallback(
     (audioTrack: any) => {
-      const newAudioClip = {
-        id: `audio-${Date.now()}`,
-        trackId: audioTrack._id,
-        title: audioTrack.title,
-        artist: audioTrack.artist,
-        url: audioTrack.url,
-        startTime: currentTime,
-        duration: audioTrack.duration,
-        volume: 0.8,
-        trimStart: 0,
-        trimEnd: 0,
-        originalDuration: audioTrack.duration,
-      };
-      saveToUndoStack();
-      setAudioClips([...audioClips, newAudioClip]);
+      dispatch(
+        addAudioTrack({
+          id: `audio-${Date.now()}`,
+          trackId: audioTrack._id,
+          title: audioTrack.title,
+          artist: audioTrack.artist,
+          url: audioTrack.url,
+          startTime: currentTime,
+          duration: audioTrack.duration,
+          volume: 0.8,
+          trimStart: 0,
+          trimEnd: 0,
+          originalDuration: audioTrack.duration,
+        })
+      );
     },
-    [audioClips, currentTime]
+    [currentTime, dispatch]
   );
 
-  // Handle adding text from TextToolPanel
+  // Handle adding text
   const handleAddText = useCallback(
     (textOverlay: Omit<TextOverlay, "id">) => {
       const newTextOverlay: TextOverlay = {
         ...textOverlay,
         id: `text-${Date.now()}`,
       };
-      saveToUndoStack();
       setTextOverlays([...textOverlays, newTextOverlay]);
     },
     [textOverlays]
   );
 
-  // Handle adding voice recording from VoiceToolPanel
+  // Handle adding voice recording
   const handleAddVoice = useCallback(
     (voiceRecording: { uri: string; duration: number; title: string }) => {
-      const newVoiceClip = {
-        id: `voice-${Date.now()}`,
-        trackId: null,
-        title: voiceRecording.title,
-        artist: "Voice Recording",
-        url: voiceRecording.uri,
-        startTime: currentTime,
-        duration: voiceRecording.duration,
-        volume: 1.0,
-        trimStart: 0,
-        trimEnd: 0,
-        originalDuration: voiceRecording.duration,
-      };
-      saveToUndoStack();
-      setAudioClips([...audioClips, newVoiceClip]);
+      dispatch(
+        addAudioTrack({
+          id: `voice-${Date.now()}`,
+          title: voiceRecording.title,
+          artist: "Voice Recording",
+          url: voiceRecording.uri,
+          startTime: currentTime,
+          duration: voiceRecording.duration,
+          volume: 1.0,
+          trimStart: 0,
+          trimEnd: 0,
+          originalDuration: voiceRecording.duration,
+        })
+      );
     },
-    [audioClips, currentTime]
+    [currentTime, dispatch]
   );
 
-  // Handle captions generated from CaptionsToolPanel
+  // Handle captions generated
   const handleCaptionsGenerated = useCallback((generatedCaptions: Caption[]) => {
-    saveToUndoStack();
     setCaptions(generatedCaptions);
   }, []);
 
-  // Handle adjustments change from AdjustToolPanel
+  // Handle adjustments change
   const handleAdjustmentsChange = useCallback((newAdjustments: VideoAdjustments) => {
     setAdjustments(newAdjustments);
   }, []);
 
-  // Handle filter change from FiltersToolPanel
+  // Handle filter change
   const handleFilterChange = useCallback((newFilter: VideoFilter) => {
     setFilter(newFilter);
   }, []);
 
-  // Handle doodles change from DoodlesToolPanel
+  // Handle doodles change
   const handleDoodlesChange = useCallback((newDoodles: DoodlePath[]) => {
-    saveToUndoStack();
     setDoodles(newDoodles);
   }, []);
 
-  // Handle adding sound FX from SoundFXToolPanel
+  // Handle adding sound FX
   const handleAddSoundFX = useCallback(
     (soundFX: { id: string; name: string; url: string; duration: number }) => {
-      const newSoundFX = {
-        id: `soundfx-${Date.now()}`,
-        trackId: soundFX.id,
-        title: soundFX.name,
-        artist: "Sound FX",
-        url: soundFX.url,
-        startTime: currentTime,
-        duration: soundFX.duration,
-        volume: 1.0,
-        trimStart: 0,
-        trimEnd: 0,
-        originalDuration: soundFX.duration,
-      };
-      saveToUndoStack();
-      setAudioClips([...audioClips, newSoundFX]);
+      dispatch(
+        addAudioTrack({
+          id: `soundfx-${Date.now()}`,
+          trackId: soundFX.id,
+          title: soundFX.name,
+          artist: "Sound FX",
+          url: soundFX.url,
+          startTime: currentTime,
+          duration: soundFX.duration,
+          volume: 1.0,
+          trimStart: 0,
+          trimEnd: 0,
+          originalDuration: soundFX.duration,
+        })
+      );
     },
-    [audioClips, currentTime]
+    [currentTime, dispatch]
   );
 
-  // Handle adding sticker from StickersToolPanel
+  // Handle adding sticker
   const handleAddSticker = useCallback(
     (sticker: Omit<StickerItem, "id">) => {
       const newSticker: StickerItem = {
         ...sticker,
         id: `sticker-${Date.now()}`,
       };
-      saveToUndoStack();
       setStickers([...stickers, newSticker]);
     },
     [stickers]
   );
 
-  // Handle adding overlay from OverlayToolPanel
+  // Handle adding overlay
   const handleAddOverlay = useCallback(
     (overlay: Omit<OverlayItem, "id">) => {
-      const newOverlay: OverlayItem = {
-        ...overlay,
-        id: `overlay-${Date.now()}`,
-      };
-      saveToUndoStack();
-      setOverlays([...overlays, newOverlay]);
+      dispatch(
+        addOverlay({
+          id: `overlay-${Date.now()}`,
+          type: overlay.type as "sticker" | "image" | "shape",
+          uri: overlay.uri,
+          startTime: overlay.startTime,
+          duration: overlay.duration,
+          x: overlay.x || 0,
+          y: overlay.y || 0,
+          width: overlay.width || 100,
+          height: overlay.height || 100,
+          rotation: overlay.rotation || 0,
+          opacity: overlay.opacity || 1,
+          scaleX: overlay.scaleX || 1,
+          scaleY: overlay.scaleY || 1,
+        })
+      );
     },
-    [overlays]
+    [dispatch]
   );
 
-  // Handle cutout settings from CutoutToolPanel
+  // Handle cutout settings
   const handleApplyCutout = useCallback((settings: CutoutSettings) => {
     setCutoutSettings(settings);
   }, []);
 
-
-
-  // Save state to undo stack before making changes
-  const saveToUndoStack = useCallback(() => {
-    undoStack.current.push([...clips]);
-    redoStack.current = []; // Clear redo stack on new action
-    setCanUndo(true);
-    setCanRedo(false);
-  }, [clips]);
-
-  // Handle clips change from EditableTimeline
-  const handleClipsChange = useCallback(
-    (newClips: any[]) => {
-      saveToUndoStack();
-      setClips(newClips);
-
-      // Recalculate total duration
-      const totalDuration = newClips.reduce(
-        (sum: number, clip: any) => sum + (clip.duration || 0),
-        0
-      );
-      setDuration(totalDuration);
-    },
-    [saveToUndoStack]
-  );
-
-  // Handle clip selection
-  const handleClipSelect = useCallback((index: number) => {
-    setSelectedClipIndex(index);
-  }, []);
-
   // Handle undo
   const performUndo = useCallback(() => {
-    if (undoStack.current.length === 0) return;
-
-    const previousState = undoStack.current.pop()!;
-    redoStack.current.push([...clips]);
-
-    setClips(previousState);
-    setCanUndo(undoStack.current.length > 0);
-    setCanRedo(true);
-
-    // Recalculate duration
-    const totalDuration = previousState.reduce(
-      (sum: number, clip: any) => sum + (clip.duration || 0),
-      0
-    );
-    setDuration(totalDuration);
-  }, [clips]);
+    dispatch(undo());
+  }, [dispatch]);
 
   // Handle redo
   const performRedo = useCallback(() => {
-    if (redoStack.current.length === 0) return;
-
-    const nextState = redoStack.current.pop()!;
-    undoStack.current.push([...clips]);
-
-    setClips(nextState);
-    setCanUndo(true);
-    setCanRedo(redoStack.current.length > 0);
-
-    // Recalculate duration
-    const totalDuration = nextState.reduce(
-      (sum: number, clip: any) => sum + (clip.duration || 0),
-      0
-    );
-    setDuration(totalDuration);
-  }, [clips]);
+    dispatch(redo());
+  }, [dispatch]);
 
   // Handle export/next
   const handleNext = async () => {
@@ -410,11 +386,17 @@ export default function EditScreen() {
     });
 
     try {
+      // Calculate total duration
+      const totalDuration = clips.reduce(
+        (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+        0
+      );
+
       // Export video with all layers and effects
       const exportedUri = await exportVideo(
         {
           clips,
-          audioClips,
+          audioClips: audioTracks,
           textOverlays,
           captions,
           adjustments,
@@ -426,7 +408,7 @@ export default function EditScreen() {
           quality: hdEnabled ? "1080p" : "720p",
         },
         (progress) => {
-          setExportProgress(progress);
+          setExportProgress(progress as any);
         }
       );
 
@@ -461,22 +443,6 @@ export default function EditScreen() {
       setExportProgress(null);
     }
   };
-
-  // Editor tools configuration
-  const editorTools: Array<{ id: EditorTool; label: string; icon: string }> = [
-    { id: "audio", label: "Audio", icon: "musical-note" },
-    { id: "text", label: "Text", icon: "text" },
-    { id: "voice", label: "Voice", icon: "mic" },
-    { id: "links", label: "Links", icon: "link" },
-    { id: "captions", label: "Captions", icon: "chatbox-ellipses" },
-    { id: "doodles", label: "Doodles", icon: "brush" },
-    { id: "adjust", label: "Adjust", icon: "options" },
-    { id: "filters", label: "Filters", icon: "color-filter" },
-    { id: "overlay", label: "Overlay", icon: "layers" },
-    { id: "soundfx", label: "Sound FX", icon: "volume-high" },
-    { id: "cutout", label: "Cutout", icon: "cut" },
-    { id: "stickers", label: "Stickers", icon: "happy" },
-  ];
 
   return (
     <View style={styles.container}>
@@ -515,7 +481,7 @@ export default function EditScreen() {
           <TouchableOpacity
             style={styles.nextButton}
             onPress={handleNext}
-            disabled={isExporting}
+            disabled={isExporting || clips.length === 0}
           >
             {isExporting ? (
               <ActivityIndicator size="small" color="#000" />
@@ -547,10 +513,10 @@ export default function EditScreen() {
               isDrawingMode={isDrawingMode && selectedTool === "doodles"}
               doodleBrushColor={doodleBrushColor}
               doodleBrushSize={doodleBrushSize}
-              onDoodleComplete={(doodle) => {
+              onDoodleComplete={(doodle: any) => {
                 setDoodles([...doodles, doodle]);
               }}
-              onStickerUpdate={(updatedSticker) => {
+              onStickerUpdate={(updatedSticker: any) => {
                 setStickers(
                   stickers.map((s) =>
                     s.id === updatedSticker.id ? updatedSticker : s
@@ -567,120 +533,34 @@ export default function EditScreen() {
         </View>
       </View>
 
-      {/* Playback Controls */}
-      <View style={styles.playbackControls}>
-        <TouchableOpacity style={styles.playButton} onPress={togglePlayPause}>
-          <Ionicons
-            name={isPlaying ? "pause" : "play"}
-            size={24}
-            color="#fff"
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.speedButton}>
-          <MaterialCommunityIcons name="speedometer" size={20} color="#fff" />
-        </TouchableOpacity>
-
-        <View style={styles.timeDisplay}>
-          <Text style={styles.timeText}>
-            {formatTime(currentTime)} / {formatTime(duration)}
-          </Text>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.undoButton, !canUndo && styles.controlButtonDisabled]}
-          onPress={performUndo}
-          disabled={!canUndo}
-        >
-          <MaterialIcons
-            name="undo"
-            size={24}
-            color={canUndo ? "#fff" : "#666"}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.redoButton, !canRedo && styles.controlButtonDisabled]}
-          onPress={performRedo}
-          disabled={!canRedo}
-        >
-          <MaterialIcons
-            name="redo"
-            size={24}
-            color={canRedo ? "#fff" : "#666"}
-          />
-        </TouchableOpacity>
-      </View>
-
       {/* Timeline */}
-      <View style={styles.timelineContainer}>
-        {/* Overlay track (above main track) */}
-        <View style={styles.overlayTrack}>
-          <Text style={styles.trackLabel}>Overlay</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.trackScrollView}
-          >
-            {/* Overlay clips will go here */}
-          </ScrollView>
-        </View>
-
-        {/* Main video track */}
-        <View style={styles.mainTrack}>
-          <Text style={styles.trackLabel}>Video</Text>
-          <EditableTimeline
-            clips={clips}
-            onClipsChange={handleClipsChange}
-            currentTime={currentTime}
-            onTimeChange={setCurrentTime}
-            selectedClipIndex={selectedClipIndex}
-            onClipSelect={handleClipSelect}
-          />
-        </View>
-
-        {/* Audio track */}
-        <AudioTrack
-          audioClips={audioClips}
-          onAudioClipsChange={setAudioClips}
-          currentTime={currentTime}
-          videoDuration={duration}
-        />
-      </View>
+      <TimelineContainer
+        clips={clips}
+        overlays={overlays}
+        audioTracks={audioTracks}
+        texts={texts}
+        currentTime={currentTime}
+        isPlaying={isPlaying}
+        selectedItemId={selectedItemId}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onAddClip={handleAddClip}
+        onSelectClip={(clipId: string) => dispatch(setSelectedItemId(clipId))}
+        onDeleteClip={(clipId: string) => dispatch(removeClip(clipId))}
+        onSelectOverlay={(overlayId: string) => dispatch(setSelectedItemId(overlayId))}
+        onDeleteOverlay={(overlayId: string) => dispatch(removeOverlay(overlayId))}
+        onSelectAudio={(trackId: string) => dispatch(setSelectedItemId(trackId))}
+        onDeleteAudio={(trackId: string) => dispatch(removeAudioTrack(trackId))}
+        onSelectText={(textId: string) => dispatch(setSelectedItemId(textId))}
+        onDeleteText={(textId: string) => dispatch(removeText(textId))}
+        onPlayPress={togglePlayPause}
+        onUndoPress={performUndo}
+        onRedoPress={performRedo}
+        onTimeChange={(time: number) => dispatch(setCurrentTime(time))}
+      />
 
       {/* Bottom Toolbar */}
-      <SafeAreaView style={styles.bottomToolbar} edges={["bottom"]}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.toolbarContent}
-        >
-          {editorTools.map((tool) => (
-            <TouchableOpacity
-              key={tool.id}
-              style={[
-                styles.toolButton,
-                selectedTool === tool.id && styles.toolButtonActive,
-              ]}
-              onPress={() => handleToolSelect(tool.id)}
-            >
-              <Ionicons
-                name={tool.icon as any}
-                size={24}
-                color={selectedTool === tool.id ? "#EC9A15" : "#fff"}
-              />
-              <Text
-                style={[
-                  styles.toolLabel,
-                  selectedTool === tool.id && styles.toolLabelActive,
-                ]}
-              >
-                {tool.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
+      <BottomToolbar selectedTool={selectedTool} onSelectTool={handleToolSelect} />
 
       {/* Tool-specific panels */}
       {selectedTool === "audio" && (
@@ -694,7 +574,10 @@ export default function EditScreen() {
         <TextToolPanel
           onClose={() => setSelectedTool(null)}
           onAddText={handleAddText}
-          videoDuration={duration}
+          videoDuration={clips.reduce(
+            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+            0
+          )}
           currentTime={currentTime}
         />
       )}
@@ -712,7 +595,10 @@ export default function EditScreen() {
           onClose={() => setSelectedTool(null)}
           onCaptionsGenerated={handleCaptionsGenerated}
           videoUri={currentVideoUri}
-          videoDuration={duration}
+          videoDuration={clips.reduce(
+            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+            0
+          )}
         />
       )}
 
@@ -741,7 +627,10 @@ export default function EditScreen() {
           }}
           onDoodlesChange={handleDoodlesChange}
           currentTime={currentTime}
-          videoDuration={duration}
+          videoDuration={clips.reduce(
+            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+            0
+          )}
           initialDoodles={doodles}
           isDrawingMode={isDrawingMode}
           onDrawingModeChange={setIsDrawingMode}
@@ -765,7 +654,10 @@ export default function EditScreen() {
           onClose={() => setSelectedTool(null)}
           onAddSticker={handleAddSticker}
           currentTime={currentTime}
-          videoDuration={duration}
+          videoDuration={clips.reduce(
+            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+            0
+          )}
         />
       )}
 
@@ -774,7 +666,10 @@ export default function EditScreen() {
           onClose={() => setSelectedTool(null)}
           onAddOverlay={handleAddOverlay}
           currentTime={currentTime}
-          videoDuration={duration}
+          videoDuration={clips.reduce(
+            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
+            0
+          )}
           existingOverlays={overlays}
         />
       )}
@@ -786,34 +681,6 @@ export default function EditScreen() {
           currentSettings={cutoutSettings}
         />
       )}
-
-      {/* Generic tool panel for remaining tools */}
-      {selectedTool &&
-        selectedTool !== "audio" &&
-        selectedTool !== "text" &&
-        selectedTool !== "voice" &&
-        selectedTool !== "captions" &&
-        selectedTool !== "adjust" &&
-        selectedTool !== "filters" &&
-        selectedTool !== "doodles" &&
-        selectedTool !== "soundfx" &&
-        selectedTool !== "stickers" &&
-        selectedTool !== "overlay" &&
-        selectedTool !== "cutout" && (
-          <View style={styles.toolPanel}>
-            <View style={styles.toolPanelHeader}>
-              <Text style={styles.toolPanelTitle}>
-                {selectedTool.toUpperCase()}
-              </Text>
-              <TouchableOpacity onPress={() => setSelectedTool(null)}>
-                <Ionicons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.toolPanelText}>
-              {selectedTool} tool panel - Coming in next phase
-            </Text>
-          </View>
-        )}
 
       {/* Export Progress Modal */}
       {exportProgress && (
@@ -930,7 +797,7 @@ const styles = StyleSheet.create({
   videoWrapper: {
     width: SCREEN_WIDTH * 0.5,
     aspectRatio: 9 / 16,
-    borderRadius: 12,
+    borderRadius: 16,
     overflow: "hidden",
     backgroundColor: "#1a1a1a",
   },
@@ -950,138 +817,14 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Playback Controls
-  playbackControls: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 16,
-  },
-  playButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  speedButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  timeDisplay: {
-    flex: 1,
-    alignItems: "center",
-  },
-  timeText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  undoButton: {
-    padding: 8,
-  },
-  redoButton: {
-    padding: 8,
-  },
-  controlButtonDisabled: {
-    opacity: 0.3,
-  },
-
-  // Timeline
-  timelineContainer: {
-    flex: 1,
-    backgroundColor: "#0a0a0a",
-    paddingTop: 8,
-  },
-  overlayTrack: {
-    height: 50,
-    borderBottomWidth: 1,
-    borderBottomColor: "#222",
-  },
-  mainTrack: {
-    height: 80,
-    borderBottomWidth: 1,
-    borderBottomColor: "#222",
-  },
-  trackLabel: {
-    color: "#888",
-    fontSize: 10,
-    fontWeight: "600",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-
-  // Bottom Toolbar
-  bottomToolbar: {
-    backgroundColor: "#000",
-    borderTopWidth: 1,
-    borderTopColor: "#222",
-    paddingTop: 12,
-  },
-  toolbarContent: {
-    paddingHorizontal: 16,
-    gap: 24,
-  },
-  toolButton: {
-    alignItems: "center",
-    minWidth: 60,
-  },
-  toolButtonActive: {
-    // Active state styling
-  },
-  toolLabel: {
-    color: "#fff",
-    fontSize: 11,
-    marginTop: 4,
-    fontWeight: "500",
-  },
-  toolLabelActive: {
-    color: "#EC9A15",
-  },
-
-  // Tool Panel
-  toolPanel: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 300,
-    backgroundColor: "#1a1a1a",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-  },
-  toolPanelHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  toolPanelTitle: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  toolPanelText: {
-    color: "#888",
-    fontSize: 14,
-  },
-
-  // Export Progress Modal
+  // Export Progress
   exportModal: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.9)",
+    backgroundColor: "rgba(0, 0, 0, 0.7)",
     justifyContent: "center",
     alignItems: "center",
     zIndex: 1000,
@@ -1089,26 +832,25 @@ const styles = StyleSheet.create({
   exportModalContent: {
     backgroundColor: "#1a1a1a",
     borderRadius: 20,
-    padding: 32,
+    padding: 24,
     width: "80%",
     alignItems: "center",
   },
   exportModalTitle: {
     color: "#fff",
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "600",
     marginBottom: 12,
   },
   exportModalMessage: {
     color: "#888",
     fontSize: 14,
-    marginBottom: 24,
-    textAlign: "center",
+    marginBottom: 16,
   },
   progressBarContainer: {
     width: "100%",
     height: 8,
-    backgroundColor: "#2a2a2a",
+    backgroundColor: "#333",
     borderRadius: 4,
     overflow: "hidden",
     marginBottom: 12,
@@ -1119,31 +861,7 @@ const styles = StyleSheet.create({
   },
   progressText: {
     color: "#EC9A15",
-    fontSize: 16,
-    fontWeight: "600",
-  },
-
-  // Disabled Panel
-  disabledPanel: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: "#1a1a1a",
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 32,
-    alignItems: "center",
-  },
-  disabledText: {
-    color: "#fff",
-    fontSize: 16,
-    textAlign: "center",
-    marginBottom: 20,
-  },
-  closeButtonText: {
-    color: "#EC9A15",
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: "600",
   },
 });

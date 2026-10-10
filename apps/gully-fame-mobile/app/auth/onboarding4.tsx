@@ -56,8 +56,8 @@ export default function Onboarding4() {
               },
             ]}
           >
-            <ThemedText style={styles.title}>Har Gully Ka Star –</ThemedText>
-            <ThemedText style={styles.subtitle}>Powered by Ranveer Singh</ThemedText>
+            <ThemedText style={styles.title}>Har Gully Ka Star </ThemedText>
+            {/* <ThemedText style={styles.subtitle}>Powered by Ranveer Singh</ThemedText> */}
           </Animated.View>
 
           <Animated.View

@@ -374,6 +374,22 @@ export const authService = {
   updateProfile: async (data: UpdateProfileRequest) => {
     try {
       console.log("[authService] PUT /user/profile");
+
+      // Ensure token is fresh before making the authenticated request
+      try {
+        const { ensureTokenFresh } = await import("../tokenUtils");
+        await ensureTokenFresh();
+        if (__DEV__) console.log("[authService] Token is fresh, proceeding with profile update");
+      } catch (refreshError: any) {
+        if (__DEV__) console.error("[authService] Token refresh failed:", refreshError.message);
+        return {
+          success: false,
+          error: "Session expired. Please log in again.",
+          status: 401,
+          data: null,
+        };
+      }
+
       const response = await apiClient.put<ApiResponse<UpdateProfileResponse>>(
         "/user/profile",
         data,

@@ -81,8 +81,8 @@
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
-    <key>RCTNewArchEnabled</key>
-    <true/>
+    <key>RCTMetroPort</key>
+    <string>$(RCT_METRO_PORT)</string>
     <key>RCTRootViewBackgroundColor</key>
     <integer>4282131984</integer>
     <key>UILaunchStoryboardName</key>

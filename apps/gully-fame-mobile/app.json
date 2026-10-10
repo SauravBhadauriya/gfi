@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "backgroundColor": "#000000",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon.jpeg",
     "scheme": "gullyfamemobile",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,6 +14,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.gullyfame.mobile",
       "buildNumber": "1",
+      "icon": "./assets/images/icon.jpeg",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
@@ -23,11 +24,12 @@
       "usesCleartextTraffic": false,
       "versionCode": 1,
       "package": "com.gullyfame.mobile",
+      "icon": "./assets/images/icon.jpeg",
       "adaptiveIcon": {
         "backgroundColor": "#3C2610",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "foregroundImage": "./assets/images/icon.jpeg",
         "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "monochromeImage": "./assets/images/icon.jpeg"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [

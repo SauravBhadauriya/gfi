@@ -257,6 +257,11 @@ export default function AccountCenterScreen() {
   };
 
   const handleSave = async () => {
+    if (isSaving) {
+      Alert.alert("Saving in progress", "Please wait for the current save to complete.");
+      return;
+    }
+
     setIsSaving(true);
     try {
       if (__DEV__) {
@@ -398,20 +403,34 @@ export default function AccountCenterScreen() {
           return;
         }
       } else {
-        const errorMsg =
-          updateResult.error || "Failed to update profile. Please try again.";
+        const errorStatus = updateResult.status;
+        let errorMsg = updateResult.error || "Failed to update profile. Please try again.";
+
+        // Improve error messaging for auth failures
+        if (errorStatus === 401 || errorMsg.toLowerCase().includes("invalid token") || errorMsg.toLowerCase().includes("session expired")) {
+          errorMsg = "Your session has expired. Please log in again.";
+        }
+
         Alert.alert("Error", errorMsg);
 
         if (__DEV__) {
-          console.error("❌ Failed to update profile on backend:", errorMsg);
+          console.error("❌ Failed to update profile on backend:", {
+            error: errorMsg,
+            status: errorStatus,
+            fullResponse: updateResult.data,
+          });
         }
       }
     } catch (error: any) {
       console.error("Error saving user data:", error);
-      Alert.alert(
-        "Error",
-        error.message || "Failed to save profile. Please try again.",
-      );
+      let errorMsg = error.message || "Failed to save profile. Please try again.";
+      
+      // Check for network errors
+      if (error.isNetworkError) {
+        errorMsg = "Network error. Please check your connection and try again.";
+      }
+      
+      Alert.alert("Error", errorMsg);
     } finally {
       setIsSaving(false);
     }
