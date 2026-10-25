@@ -1,327 +1,134 @@
-import apiClient from "../axios";
-import { ApiResponse } from "../types";
-
-// ─────────────────────────────────────────────
-// Backend Response Types
-// ─────────────────────────────────────────────
+import { apiGet, apiPost, toResult } from "../client";
 
 /**
- * Author/Creator information from backend
+ * Reels feed and interactions.
+ * GET  /reels?cursor&limit             -> newest-first, cursor paginated
+ * POST /reels/:reelId/action           -> toggles vote | like | save
+ * Votes only count on entries in a LIVE competition; the backend rejects others.
  */
-export interface ReelAuthor {
+
+export interface FeedReelAuthor {
   _id: string;
-  firstName?: string;
-  lastName?: string;
-  username?: string;
-  profileImage?: string;
+  username: string;
+  profile_picture_url: string;
   is_followed_by_me: boolean;
 }
 
-/**
- * Reel statistics from backend
- */
-export interface ReelStats {
-  votes?: number;
-  likes: number;
-  comments: number;
-  shares: number;
-  saves: number;
-  tips?: number;
-}
-
-/**
- * User's interaction state with the reel
- */
-export interface UserInteractions {
-  voted?: boolean;
-  liked: boolean;
-  saved: boolean;
-}
-
-/**
- * Raw backend reel response
- */
-export interface BackendReel {
+export interface FeedReel {
   _id: string;
   video_url: string;
-  thumbnail_url?: string;
+  thumbnail_url: string;
   caption: string;
-  author: ReelAuthor;
-  stats: ReelStats;
-  user_interactions: UserInteractions;
-  createdAt?: string;
-  duration?: number;
-  musicTrack?: {
-    id?: string;
-    title?: string;
-    artist?: string;
-    name?: string;
+  createdAt: string;
+  author: FeedReelAuthor;
+  music: { id: string; name: string };
+  stats: {
+    votes: number;
+    comments: number;
+    shares: number;
+    saves: number;
+    tips: number;
+    likes?: number;
+  };
+  user_interactions: {
+    has_voted: boolean;
+    is_saved: boolean;
+    has_tipped: boolean;
   };
 }
 
-/**
- * Normalized reel for UI consumption
- * Maps backend fields to UI model
- */
-export interface Reel {
+export interface ReelsPage {
+  nextCursor: string | null;
+  hasMore: boolean;
+  reels: FeedReel[];
+}
+
+export type ReelAction = "vote" | "like" | "save";
+
+export interface ReelActionResult {
+  reelId: string;
+  action_type: ReelAction;
+  updated_stats: { votes: number; likes: number; saves: number };
+  user_interactions: { has_voted: boolean; is_liked: boolean; is_saved: boolean };
+}
+
+/** The shape the reel player screens render. */
+export interface UiReel {
+  /** Stable numeric key derived from the backend id (the player keys maps by number). */
   id: number;
+  _backendId: string;
   userId: string;
   username: string;
+  profileImage: string;
   caption: string;
   musicName: string;
   video: { uri: string };
+  thumbnail: string;
   likes: number;
+  votes: number;
   comments: number;
   shares: number;
   saves: number;
   tips: number;
+  /** The feed does not report whether the viewer liked a reel; only the toggle response does. */
   isLiked: boolean;
   isSaved: boolean;
+  hasVoted: boolean;
+  hasTipped: boolean;
   isFollowed: boolean;
-  _backendId?: string;
-  thumbnail?: string;
-  duration?: number;
-  createdAt?: string;
+  createdAt: string;
 }
 
-/**
- * API response wrapper for reels list
- */
-export interface ReelsResponse {
-  reels: Reel[];
-  nextCursor?: string;
-  hasMore: boolean;
-  page?: number;
-  limit?: number;
-  total?: number;
-}
-
-// ─────────────────────────────────────────────
-// Mapping Functions
-// ─────────────────────────────────────────────
-
-/**
- * Normalize backend reel response to UI model
- * Converts backend field names and types to UI expectations
- */
-function normalizeReel(backendReel: BackendReel, index: number): Reel {
-  const creatorName = backendReel.author?.firstName
-    ? `${backendReel.author.firstName}${backendReel.author.lastName ? ` ${backendReel.author.lastName}` : ""}`
-    : backendReel.author?.username || "Unknown User";
-
-  const musicName =
-    backendReel.musicTrack?.title ||
-    backendReel.musicTrack?.name ||
-    "Original Sound";
-
-  // Generate stable numeric ID from backend ID for UI state management
-  // This ensures consistent IDs across renders
-  const numericId =
-    parseInt(backendReel._id.slice(-8), 16) % 1000000 || index + 1;
-
+export function toUiReel(reel: FeedReel, index = 0): UiReel {
+  const numericId = parseInt(reel._id.slice(-8), 16) % 100000000 || index + 1;
   return {
     id: numericId,
-    _backendId: backendReel._id,
-    userId: backendReel.author._id,
-    username: creatorName,
-    caption: backendReel.caption,
-    musicName,
-    video: { uri: backendReel.video_url },
-    likes: backendReel.stats.likes || 0,
-    comments: backendReel.stats.comments || 0,
-    shares: backendReel.stats.shares || 0,
-    saves: backendReel.stats.saves || 0,
-    tips: backendReel.stats.tips || 0,
-    isLiked: backendReel.user_interactions.liked || false,
-    isSaved: backendReel.user_interactions.saved || false,
-    isFollowed: backendReel.author.is_followed_by_me || false,
-    thumbnail: backendReel.thumbnail_url,
-    duration: backendReel.duration,
-    createdAt: backendReel.createdAt,
+    _backendId: reel._id,
+    userId: reel.author?._id || "",
+    username: reel.author?.username || "Gully Fame Creator",
+    profileImage: reel.author?.profile_picture_url || "",
+    caption: reel.caption || "",
+    musicName: reel.music?.name || "Original Sound",
+    video: { uri: reel.video_url },
+    thumbnail: reel.thumbnail_url || "",
+    likes: reel.stats?.likes || 0,
+    votes: reel.stats?.votes || 0,
+    comments: reel.stats?.comments || 0,
+    shares: reel.stats?.shares || 0,
+    saves: reel.stats?.saves || 0,
+    tips: reel.stats?.tips || 0,
+    isLiked: false,
+    isSaved: !!reel.user_interactions?.is_saved,
+    hasVoted: !!reel.user_interactions?.has_voted,
+    hasTipped: !!reel.user_interactions?.has_tipped,
+    isFollowed: !!reel.author?.is_followed_by_me,
+    createdAt: reel.createdAt,
   };
 }
 
-// ─────────────────────────────────────────────
-// API Endpoints
-// ─────────────────────────────────────────────
+/** GET /reels?cursor&limit */
+export const listReels = (cursor?: string | null, limit = 10) =>
+  apiGet<ReelsPage>("reels", { params: { limit, ...(cursor ? { cursor } : {}) } });
 
-const REELS_ENDPOINT = "reels";
-
-/**
- * Fetch reels with cursor-based pagination
- * 
- * @param limit - Number of reels per page (default: 10)
- * @param cursor - Last reel ID from previous page (for next page)
- * @returns API response with normalized reels and next cursor
- */
-export async function getReels(
-  limit: number = 10,
-  cursor?: string,
-  userId?: string
-): Promise<ApiResponse<ReelsResponse>> {
-  try {
-    if (__DEV__) {
-      console.log("[reelsService] Fetching reels:", { limit, cursor });
-    }
-
-    const params: any = { limit };
-    if (cursor) {
-      params.cursor = cursor;
-    }
-    if (userId) {
-      params.userId = userId;
-    }
-
-    const response = await apiClient.get<any>(REELS_ENDPOINT, { params });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const raw = responseData.data;
-      const reels = Array.isArray(raw.reels) ? raw.reels : [];
-
-      // Determine if there are more pages
-      const hasMore = reels.length >= limit;
-      const nextCursor = hasMore && reels.length > 0 ? reels[reels.length - 1]._id : undefined;
-
-      const normalizedReels = reels.map((r: BackendReel, idx: number) =>
-        normalizeReel(r, idx)
-      );
-
-      if (__DEV__) {
-        console.log(`[reelsService] Loaded ${normalizedReels.length} reels`, {
-          hasMore,
-          nextCursor: nextCursor ? `${nextCursor.slice(0, 8)}...` : undefined,
-        });
-      }
-
-      return {
-        success: true,
-        data: {
-          reels: normalizedReels,
-          nextCursor,
-          hasMore,
-          page: 1,
-          limit,
-          total: raw.total,
-        },
-        message: "Reels loaded successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to load reels",
-      data: {
-        reels: [],
-        hasMore: false,
-      },
-    };
-  } catch (error: any) {
-    console.error("[reelsService] Error fetching reels:", error.message || error);
-
-    return {
-      success: false,
-      message: error.message || "Failed to fetch reels",
-      data: {
-        reels: [],
-        hasMore: false,
-      },
-    };
-  }
+/** One page of the feed mapped for the player. */
+export async function listUiReels(cursor?: string | null, limit = 10) {
+  const page = await listReels(cursor, limit);
+  return { reels: page.reels.map(toUiReel), nextCursor: page.nextCursor, hasMore: page.hasMore };
 }
 
-/**
- * Like or unlike a reel
- * Uses the unified action endpoint
- * 
- * @param reelId - Backend reel ID
- * @returns Updated stats from backend
- */
-export async function toggleLikeReel(reelId: string): Promise<ApiResponse<any>> {
-  try {
-    if (__DEV__) {
-      console.log("[reelsService] Toggling like for reel:", reelId);
-    }
-
-    const response = await apiClient.post<any>(
-      `reels/${reelId}/action`,
-      { action_type: "like" }
-    );
-
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      if (__DEV__) {
-        console.log("[reelsService] Like action successful:", responseData.data);
-      }
-      return {
-        success: true,
-        data: responseData.data,
-        message: "Like action completed",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to like reel",
-    };
-  } catch (error: any) {
-    console.error("[reelsService] Error toggling like:", error.message || error);
-    return {
-      success: false,
-      message: error.message || "Failed to like reel",
-    };
-  }
-}
-
-/**
- * Save or unsave a reel
- * Uses the unified action endpoint
- * 
- * @param reelId - Backend reel ID
- * @returns Updated stats from backend
- */
-export async function toggleSaveReel(reelId: string): Promise<ApiResponse<any>> {
-  try {
-    if (__DEV__) {
-      console.log("[reelsService] Toggling save for reel:", reelId);
-    }
-
-    const response = await apiClient.post<any>(
-      `reels/${reelId}/action`,
-      { action_type: "save" }
-    );
-
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      if (__DEV__) {
-        console.log("[reelsService] Save action successful:", responseData.data);
-      }
-      return {
-        success: true,
-        data: responseData.data,
-        message: "Save action completed",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to save reel",
-    };
-  } catch (error: any) {
-    console.error("[reelsService] Error toggling save:", error.message || error);
-    return {
-      success: false,
-      message: error.message || "Failed to save reel",
-    };
-  }
-}
+/** POST /reels/:reelId/action { action_type } */
+export const toggleReelAction = (reelId: string, action: ReelAction) =>
+  apiPost<ReelActionResult>(`reels/${reelId}/action`, { action_type: action });
 
 export const reelsService = {
-  getReels,
-  toggleLikeReel,
-  toggleSaveReel,
+  listReels,
+  toggleReelAction,
+  listUiReels,
+  /** `{ success, data: { reels: UiReel[], nextCursor, hasMore } }` for the player screens. */
+  getReels: (limit = 10, cursor?: string | null) => toResult(() => listUiReels(cursor, limit)),
+  toggleLikeReel: (reelId: string) => toResult(() => toggleReelAction(reelId, "like")),
+  toggleSaveReel: (reelId: string) => toResult(() => toggleReelAction(reelId, "save")),
+  toggleVoteReel: (reelId: string) => toResult(() => toggleReelAction(reelId, "vote")),
 };
 
 export default reelsService;

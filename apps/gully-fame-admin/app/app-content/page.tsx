@@ -1,8 +1,8 @@
 'use client';
 
 import DashboardLayout from '@/components/DashboardLayout';
-import { useState } from 'react';
-import { Image, FileText, Shield, Info, Palette, Layout, ImageIcon } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Image, FileText, Shield, Info, Palette, ImageIcon, HelpCircle, Mail, Music, Volume2, Smile, Sparkles } from 'lucide-react';
 import { getUserRole } from '@/lib/auth';
 import Branding from './components/Branding';
 import HomeBanners from './components/HomeBanners';
@@ -11,10 +11,19 @@ import CompetitionRules from './components/CompetitionRules';
 import TermsConditions from './components/TermsConditions';
 import PrivacyPolicy from './components/PrivacyPolicy';
 import AboutUs from './components/AboutUs';
+import Faqs from './components/Faqs';
+import ContactUs from './components/ContactUs';
+import MediaLibrary from './components/MediaLibrary';
 
 export default function AppContentPage() {
   const userRole = getUserRole();
   const [activeTab, setActiveTab] = useState('branding');
+
+  // Deep links from the dashboard, e.g. /app-content?tab=faqs
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    if (tab) setActiveTab(tab);
+  }, []);
 
   if (userRole !== 'admin') {
     return <div>Access Denied</div>;
@@ -28,6 +37,12 @@ export default function AppContentPage() {
     { id: 'terms', name: 'Terms & Conditions', icon: Shield },
     { id: 'privacy', name: 'Privacy Policy', icon: Shield },
     { id: 'about', name: 'About Us', icon: Info },
+    { id: 'faqs', name: 'FAQs', icon: HelpCircle },
+    { id: 'contact', name: 'Contact Us', icon: Mail },
+    { id: 'music', name: 'Music', icon: Music },
+    { id: 'soundfx', name: 'Sound Effects', icon: Volume2 },
+    { id: 'stickers', name: 'Stickers', icon: Smile },
+    { id: 'filters', name: 'Filters', icon: Sparkles },
   ];
 
   const renderContent = () => {
@@ -46,6 +61,18 @@ export default function AppContentPage() {
         return <PrivacyPolicy />;
       case 'about':
         return <AboutUs />;
+      case 'faqs':
+        return <Faqs />;
+      case 'contact':
+        return <ContactUs />;
+      case 'music':
+        return <MediaLibrary kind="audio" />;
+      case 'soundfx':
+        return <MediaLibrary kind="soundfx" />;
+      case 'stickers':
+        return <MediaLibrary kind="stickers" />;
+      case 'filters':
+        return <MediaLibrary kind="filters" />;
       default:
         return <Branding />;
     }
@@ -67,10 +94,11 @@ export default function AppContentPage() {
             return (
               <button
                 key={tab.id}
+                title={tab.name}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 md:px-4 py-2 sm:py-3 font-medium text-xs sm:text-sm transition-colors whitespace-nowrap ${
                   activeTab === tab.id
-                    ? 'border-b-2 border-primary-600 text-primary-600 bg-primary-50/50'
+                    ? 'border-b-2 border-primary-600 text-primary-600 bg-primary-50'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`}
               >

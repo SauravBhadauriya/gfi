@@ -21,12 +21,39 @@ export const styles = StyleSheet.create({
     paddingTop: scaleVertical(60),
     paddingBottom: scaleVertical(20),
   },
+  heroBannerWrapper: {
+    width: "100%",
+    height: hp(45),
+    justifyContent: "flex-end",
+  },
+  heroBannerImage: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+    resizeMode: "cover",
+  },
+  heroBannerCaption: {
+    backgroundColor: "rgba(0, 0, 0, 0.45)",
+    paddingHorizontal: wp(6),
+    paddingTop: scaleVertical(12),
+    paddingBottom: scaleVertical(28),
+  },
   gfiLogoImage: {
     width: wp(25),
     height: wp(25),
     maxWidth: 120,
     maxHeight: 120,
     marginBottom: scaleVertical(20),
+  },
+  heroIcon: {
+    marginBottom: scaleVertical(10),
+  },
+  heroTagline: {
+    fontSize: getFontSize(15),
+    color: "#F2EDE4",
+    textAlign: "center",
+    marginBottom: scaleVertical(10),
+    fontFamily: "Inter_600SemiBold",
   },
   heroTitle: {
     fontSize: getFontSize(20),
@@ -41,7 +68,7 @@ export const styles = StyleSheet.create({
   },
   heroSubtitle: {
     fontSize: getFontSize(13),
-    color: "#fff",
+    color: "#F2EDE4",
     textAlign: "center",
     lineHeight: scale(22),
     textShadowColor: "rgba(0, 0, 0, 0.5)",

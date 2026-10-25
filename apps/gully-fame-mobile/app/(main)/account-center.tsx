@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,10 @@ import {
   Animated,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { toBackendGender, genderLabel } from "@/api/services/userService";
+import { AUTH_RULES } from "@/api/services/authService";
+import { showToast, toastSuccess } from "@/components/ui/Toast";
+import { SelfieCaptureModal } from "@/components/kyc/SelfieCaptureModal";
 import { useFocusEffect } from "expo-router/react-navigation";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path } from "react-native-svg";
@@ -23,6 +27,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { authService } from "@api/services/authService";
 import { BackIcon, CameraIcon, EditIcon, LockIcon } from "@/icons";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 const { width } = Dimensions.get("window");
 
@@ -42,6 +47,7 @@ export default function AccountCenterScreen() {
   const [role, setRole] = useState("");
   const [profileImage, setProfileImage] = useState<string | null>(null);
   const [imagePickerVisible, setImagePickerVisible] = useState(false);
+  const [selfieVisible, setSelfieVisible] = useState(false);
   const [isProcessingImage, setIsProcessingImage] = useState(false);
   const slideAnim = React.useRef(new Animated.Value(0)).current;
 
@@ -53,29 +59,39 @@ export default function AccountCenterScreen() {
   const [originalMobile, setOriginalMobile] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true); 
 
+  // The screen re-reads the saved profile when it regains focus, but never while the user
+  // is editing: a reload used to reset every typed value (for example the bio) on each keystroke.
+  const isEditingRef = useRef(false);
+  const bioRef = useRef("");
+  const profileImageRef = useRef<string | null>(null);
+  useEffect(() => {
+    isEditingRef.current = isEditing;
+  }, [isEditing]);
+  useEffect(() => {
+    bioRef.current = bio;
+  }, [bio]);
+  useEffect(() => {
+    profileImageRef.current = profileImage;
+  }, [profileImage]);
+
   useEffect(() => {
     loadUserData();
   }, []);
 
-  
   useFocusEffect(
     React.useCallback(() => {
-      loadUserData();
+      if (!isEditingRef.current) loadUserData();
 
-      
       if (fromKycFlow && kycStep) {
-        
         setTimeout(() => {
-          if (kycStep === "bio" && !bio.trim()) {
-            
+          if (kycStep === "bio" && !bioRef.current.trim()) {
             setIsEditing(true);
-          } else if (kycStep === "image" && !profileImage) {
-            
+          } else if (kycStep === "image" && !profileImageRef.current) {
             handlePickImage();
           }
         }, 500);
       }
-    }, [fromKycFlow, kycStep, bio, profileImage]),
+    }, [fromKycFlow, kycStep]),
   );
 
   const loadUserData = async () => {
@@ -140,10 +156,7 @@ export default function AccountCenterScreen() {
       setIsLoading(false);
 
       
-      if (__DEV__) {
-        console.log("\n📥 ========== LOADING USER DATA ==========");
-        console.log("Loaded from AsyncStorage first, now fetching from API...");
-        console.log("==========================================\n");
+      if (__DEV__) { /* intentionally ignored */
       }
 
       const profileResult = await authService.getUserProfile();
@@ -151,9 +164,7 @@ export default function AccountCenterScreen() {
       if (profileResult.success && profileResult.data) {
         const userData = profileResult.data;
 
-        if (__DEV__) {
-          console.log("✅ User data loaded from backend API");
-          console.log("User Data:", JSON.stringify(userData, null, 2));
+        if (__DEV__) { /* intentionally ignored */
         }
 
         const backendRole = userData.role || "";
@@ -178,10 +189,11 @@ export default function AccountCenterScreen() {
           email: userData.email || "",
           mobile: userData.mobile || "",
           dob: userData.dob || "",
-          gender: userData.gender || "",
+          gender: genderLabel(userData.gender),
           role: frontendRole,
           profileImage: userData.profileImage || "",
-          bio: userData.bio || "",
+          // Bio isn't stored by the backend; keep the one saved on this device.
+          bio: cachedData.bio,
           threeWords: backendThreeWords,
         };
 
@@ -215,14 +227,10 @@ export default function AccountCenterScreen() {
           ["userThreeWords", data.threeWords],
         ]);
       } else {
-        if (__DEV__) {
-          console.log(
-            "⚠️ Failed to load from API, using cached AsyncStorage data",
-          );
+        if (__DEV__) { /* intentionally ignored */
         }
       }
     } catch (error) {
-      console.error("Error loading user data:", error);
       
       setIsLoading(false);
     }
@@ -264,20 +272,7 @@ export default function AccountCenterScreen() {
 
     setIsSaving(true);
     try {
-      if (__DEV__) {
-        console.log("\n💾 ========== SAVING USER PROFILE ==========");
-        console.log("Original Data:", originalData);
-        console.log("Current Values:", {
-          firstName,
-          lastName,
-          email,
-          mobile,
-          dob: dateOfBirth,
-          gender,
-          bio,
-          role,
-        });
-        console.log("==========================================\n");
+      if (__DEV__) { /* intentionally ignored */
       }
 
       const backendRole = role === "participant" ? "participants" : "fan";
@@ -295,46 +290,35 @@ export default function AccountCenterScreen() {
         updateData.lastName = lastName;
       }
       if (email !== originalEmail) {
-        updateData.email = email;
-      }
-      if (mobile !== originalMobile) {
-        updateData.mobile = mobile;
+        const nextEmail = email.trim().toLowerCase();
+        if (!AUTH_RULES.email.test(nextEmail) || nextEmail.length > AUTH_RULES.emailMaxLength) {
+          Alert.alert("Invalid email", "Enter a valid email address (max 50 characters).");
+          return;
+        }
+        updateData.email = nextEmail;
       }
       if (dateOfBirth !== (originalData.dob || "")) {
         updateData.dob = dateOfBirth;
       }
       if (gender !== (originalData.gender || "")) {
-        updateData.gender = gender;
+        updateData.gender = toBackendGender(gender);
       }
-      if (bio !== (originalData.bio || "")) {
-        updateData.bio = bio || undefined;
-      }
+      // Bio and three words are not stored by the backend yet; they stay on this device.
       const threeWordsFormatted = threeWords
         .filter((w) => w.trim())
         .join(" | ");
-      if (threeWordsFormatted !== (originalData.threeWords || "")) {
-        (updateData as any).threeWords = threeWordsFormatted || undefined;
-      }
+
       if (profileImage !== (originalData.profileImage || "")) {
         updateData.profileImage = profileImage || undefined;
       }
 
-      if (__DEV__) {
-        console.log(
-          "\n📤 ========== UPDATE PROFILE REQUEST PAYLOAD ==========",
-        );
-        console.log(
-          "Only changed fields being sent:",
-          JSON.stringify(updateData, null, 2),
-        );
-        console.log("==========================================\n");
+      if (__DEV__) { /* intentionally ignored */
       }
 
       const updateResult = await authService.updateProfile(updateData);
 
       if (updateResult.success) {
-        if (__DEV__) {
-          console.log("✅ Profile updated successfully on backend");
+        if (__DEV__) { /* intentionally ignored */
         }
 
         
@@ -374,7 +358,7 @@ export default function AccountCenterScreen() {
           ["userThreeWords", updatedData.threeWords],
         ]);
 
-        Alert.alert("Success", "Your profile has been updated successfully!");
+        toastSuccess("Your profile has been updated successfully!");
 
         
         if (fromKycFlow) {
@@ -413,16 +397,10 @@ export default function AccountCenterScreen() {
 
         Alert.alert("Error", errorMsg);
 
-        if (__DEV__) {
-          console.error("❌ Failed to update profile on backend:", {
-            error: errorMsg,
-            status: errorStatus,
-            fullResponse: updateResult.data,
-          });
+        if (__DEV__) { /* intentionally ignored */
         }
       }
     } catch (error: any) {
-      console.error("Error saving user data:", error);
       let errorMsg = error.message || "Failed to save profile. Please try again.";
       
       // Check for network errors
@@ -460,7 +438,11 @@ export default function AccountCenterScreen() {
     closeImagePicker();
     setIsProcessingImage(true);
     try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Camera access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission needed",
@@ -491,8 +473,12 @@ export default function AccountCenterScreen() {
     closeImagePicker();
     setIsProcessingImage(true);
     try {
-      const { status } =
+      const { status, canAskAgain } =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Photo library access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission needed",
@@ -534,16 +520,12 @@ export default function AccountCenterScreen() {
         const base64Size = (base64Image.length * 3) / 4;
         const maxSize = 2 * 1024 * 1024; 
 
-        if (__DEV__) {
-          console.log("📸 Image size:", (base64Size / 1024).toFixed(2), "KB");
+        if (__DEV__) { /* intentionally ignored */
         }
 
         
         if (base64Size > maxSize) {
-          if (__DEV__) {
-            console.log(
-              "⚠️ Image too large, attempting to compress further...",
-            );
+          if (__DEV__) { /* intentionally ignored */
           }
 
           
@@ -562,13 +544,7 @@ export default function AccountCenterScreen() {
 
         const imageDataUri = `data:image/jpeg;base64,${base64Image}`;
 
-        if (__DEV__) {
-          console.log("📸 Image selected, uploading to backend...");
-          console.log(
-            "📸 Final image size:",
-            (base64Size / 1024).toFixed(2),
-            "KB",
-          );
+        if (__DEV__) { /* intentionally ignored */
         }
 
         setIsSaving(true);
@@ -580,17 +556,18 @@ export default function AccountCenterScreen() {
           });
 
           if (updateResult.success) {
-            if (__DEV__) {
-              console.log("✅ Profile image uploaded successfully");
+            if (__DEV__) { /* intentionally ignored */
             }
 
-            await AsyncStorage.setItem("userProfileImage", imageDataUri);
-            setOriginalData({ ...originalData, profileImage: imageDataUri });
-            setProfileImage(imageDataUri);
+            // updateProfile uploaded the photo to S3; keep its public URL.
+            const uploadedUrl = updateResult.data?.profileImage || imageDataUri;
+            await AsyncStorage.setItem("userProfileImage", uploadedUrl);
+            setOriginalData({ ...originalData, profileImage: uploadedUrl });
+            setProfileImage(uploadedUrl);
+            toastSuccess("Profile photo updated");
 
             
-            if (__DEV__) {
-              console.log("✅ Profile image updated successfully");
+            if (__DEV__) { /* intentionally ignored */
             }
 
             
@@ -619,12 +596,10 @@ export default function AccountCenterScreen() {
               Alert.alert("Error", errorMsg);
             }
 
-            if (__DEV__) {
-              console.error("❌ Failed to upload profile image:", errorMsg);
+            if (__DEV__) { /* intentionally ignored */
             }
           }
         } catch (error: any) {
-          console.error("Error uploading image:", error);
 
           
           if (
@@ -649,7 +624,6 @@ export default function AccountCenterScreen() {
         }
       }
     } catch (error: any) {
-      console.error("Error processing image:", error);
       setIsProcessingImage(false);
       Alert.alert("Error", error.message || "Failed to process image.");
     }
@@ -659,11 +633,10 @@ export default function AccountCenterScreen() {
     router.push("/(main)/change-password");
   };
 
+  // Opens the front-camera selfie capture. The photo is not uploaded: the backend
+  // has no selfie field on the KYC endpoint (see BACKEND GAPS).
   const handleVerificationSelfie = () => {
-    Alert.alert(
-      "Verification Selfie",
-      "This feature will open the camera for face verification.",
-    );
+    setSelfieVisible(true);
   };
 
   const fullName = `${firstName} ${lastName}`.trim() || "User";
@@ -738,7 +711,6 @@ export default function AccountCenterScreen() {
                     style={styles.profileImage}
                     resizeMode="cover"
                     onError={(error) => {
-                      console.error("Image load error:", error);
                       setProfileImage(null);
                     }}
                     onLoadStart={() => {
@@ -903,16 +875,10 @@ export default function AccountCenterScreen() {
             <View style={styles.fieldRow}>
               <Text style={styles.fieldLabel}>Mobile Number</Text>
               {isEditing ? (
-                <View style={styles.inputWithVerify}>
-                  <TextInput
-                    style={styles.input}
-                    value={mobile}
-                    onChangeText={setMobile}
-                    placeholder="Enter mobile number"
-                    placeholderTextColor="#999"
-                    keyboardType="phone-pad"
-                  />
-                </View>
+                <Text style={styles.fieldValue}>
+                  {mobile || "Not set"}
+                  {"\n"}Changing your mobile number isn&apos;t available yet.
+                </Text>
               ) : (
                 <Text style={styles.fieldValue}>{mobile || "Not set"}</Text>
               )}
@@ -1224,6 +1190,14 @@ export default function AccountCenterScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <SelfieCaptureModal
+        visible={selfieVisible}
+        onClose={() => setSelfieVisible(false)}
+        onCaptured={() =>
+          showToast("Selfie captured. Uploading selfies isn't available yet.", "info")
+        }
+      />
 
       {}
       <Modal

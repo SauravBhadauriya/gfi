@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,7 +8,6 @@ import {
   TextInput,
   Image,
   ActivityIndicator,
-  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { listStickers, searchStickers } from "@/api/services/stickerEmojiService";
@@ -89,10 +88,7 @@ export default function StickersToolPanel({
       }
 
       if (result.success && result.data) {
-        // Handle both array and paginated response
-        const stickerList = Array.isArray(result.data)
-          ? result.data
-          : result.data.stickers || [];
+        const stickerList = result.data;
 
         // Map service response to component interface
         const mappedStickers: Sticker[] = stickerList.map((s: any) => ({
@@ -111,7 +107,6 @@ export default function StickersToolPanel({
         setStickers([]);
       }
     } catch (err) {
-      console.error("[StickersToolPanel] Fetch error:", err);
       setError("Failed to load stickers");
       setStickers([]);
     } finally {
@@ -143,11 +138,6 @@ export default function StickersToolPanel({
     };
 
     onAddSticker(newSticker);
-    Alert.alert(
-      "Sticker Added",
-      "Tap and drag on the video preview to position the sticker. Pinch to scale and rotate.",
-      [{ text: "Got it", style: "default" }]
-    );
   };
 
   return (

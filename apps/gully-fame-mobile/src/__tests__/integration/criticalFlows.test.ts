@@ -4,7 +4,6 @@
  */
 
 import { authService } from '@/api/services/authService';
-import { followService } from '@/api/services/followService';
 import { reelsService } from '@/api/services/reelsService';
 
 describe('Critical Flow Integration Tests', () => {

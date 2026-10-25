@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Path } from "react-native-svg";
 
 export const UserProfileIcon = ({ width = 62, height = 66, color = "#000" }) => (
   <Svg width={width} height={height} viewBox="0 0 24 24" fill="none">

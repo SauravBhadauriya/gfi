@@ -23,21 +23,10 @@ import {
   AppState,
   Alert,
   ViewToken,
+  Share,
 } from "react-native";
 
-let FFmpegKit: any = null;
-let ReturnCode: any = null;
-let isFFmpegAvailable = false;
-
-try {
-  const ffmpeg = require("ffmpeg-kit-react-native-community");
-  FFmpegKit = ffmpeg.FFmpegKit;
-  ReturnCode = ffmpeg.ReturnCode;
-  isFFmpegAvailable = true;
-} catch (e) {
-  console.warn("FFmpeg not available in reel index - watermarking will fail gracefully in Expo Go");
-  isFFmpegAvailable = false;
-}
+import { H264_ENCODE, runFFmpeg } from "@modules/video-editor/camera-module/utils/ffmpeg";
 
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { VideoView, useVideoPlayer } from "expo-video";
@@ -45,21 +34,51 @@ import Svg, { Path } from "react-native-svg";
 import BottomNav from "@components/layout/BottomNav";
 import DrawerMenu from "@components/layout/DrawerMenu";
 import SupportModal from "@/components/modals/SupportModal/SupportModal";
-import InsufficientBalanceModal from "@/components/modals/InsufficientBalanceModal/InsufficientBalanceModal";
-import { ReelViewer } from "@components/reel/ReelViewer";
 import { useWalletBalance } from "@/hooks/useWalletBalance";
-import {
-  scale,
-  getFontSize,
-  wp,
-  hp,
-  getStatusBarHeight,
-  spacing,
-} from "@utils/responsive";
-import { followService } from "@api/services/followService";
+import { scale, getFontSize, wp, spacing } from "@utils/responsive";
+import { toggleFollow } from "@api/services/userService";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 import { followUpdateEmitter } from "@utils/followEmitter";
-import { reelsService } from "@api/services/reelsService";
-import { commentService } from "@api/services/commentService";
+import { listUiReels, toggleReelAction, toUiReel } from "@api/services/reelsService";
+import { getCompetitionReels } from "@api/services/competitionService";
+import {
+  addComment,
+  listComments,
+  commentAuthorName,
+  ReelComment,
+  COMMENT_MAX_LENGTH,
+} from "@api/services/commentService";
+import { getErrorMessage } from "@api/client";
+import { showToast, toastError, toastSuccess } from "@/components/ui/Toast";
+
+// Turns the backend's flat comment list into top-level comments with replies.
+function groupComments(list: ReelComment[]) {
+  const toUi = (c: ReelComment, idx: number) => ({
+    id: parseInt(c._id.slice(-8), 16) || idx + 1,
+    _backendId: c._id,
+    username: commentAuthorName(c.author),
+    avatar: typeof c.author === "object" ? c.author.profileImage || undefined : undefined,
+    level: undefined,
+    comment: c.text,
+    likes: 0,
+    isLiked: false,
+    createdAt: c.createdAt,
+    parentId: c.parentComment,
+    replies: [] as any[],
+  });
+  const all = list.map(toUi);
+  const byId = new Map(all.map((c) => [c._backendId, c]));
+  const top: typeof all = [];
+  for (const c of all) {
+    const parent = c.parentId ? byId.get(c.parentId) : undefined;
+    if (parent) parent.replies.push(c);
+    else top.push(c);
+  }
+  return top;
+}
 import {
   HomeIconSVG,
   ReelIconSVG,
@@ -70,8 +89,8 @@ import {
   CoinIcon,
   CommentIcon,
   DownloadIcon,
+  SaveIcon,
   FlagIcon,
-  FullScreenIcon,
   HeartIcon,
   MusicIcon,
   PauseIcon,
@@ -79,6 +98,8 @@ import {
   ShareIcon,
   ThreeDotsIcon,
 } from "@/icons";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
+import { saveDownload } from "@/services/downloadsStore";
 
 const { width, height } = Dimensions.get("window");
 
@@ -141,6 +162,7 @@ export default function GullyReelScreen() {
   const votePopupAnim = useRef(new Animated.Value(0)).current;
   const [reels, setReels] = useState<any[]>([]);
   const [isLoadingReels, setIsLoadingReels] = useState(true);
+  const [reelsError, setReelsError] = useState("");
   const [currentCursor, setCurrentCursor] = useState<string | undefined>(undefined);
   const [hasMoreReels, setHasMoreReels] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
@@ -162,7 +184,6 @@ export default function GullyReelScreen() {
 
   const threeDotsSlideAnim = useRef(new Animated.Value(height)).current;
   const [tipModalVisible, setTipModalVisible] = useState(false);
-  const [insufficientBalanceModalVisible, setInsufficientBalanceModalVisible] = useState(false);
   const [isFetchingBalance, setIsFetchingBalance] = useState(false);
   const walletBalance = useWalletBalance();
   const [downloadModalVisible, setDownloadModalVisible] = useState(false);
@@ -179,6 +200,17 @@ export default function GullyReelScreen() {
   const playPauseIconOpacity = useRef(new Animated.Value(0)).current;
   const THEME_COLOR = "#EC9A15";
 
+  // The signed-in user, to show their real profile photo and hide Follow on their own reels.
+  const [myUserId, setMyUserId] = useState("");
+  const [myAvatar, setMyAvatar] = useState<string | null>(null);
+  useEffect(() => {
+    AsyncStorage.multiGet(["userId", "userProfileImage"])
+      .then(([[, id], [, img]]) => {
+        setMyUserId(id || "");
+        setMyAvatar(resolveMediaUrl(img));
+      })
+      .catch(() => {});
+  }, []);
   const [followingStates, setFollowingStates] = useState<{ [key: string]: boolean }>({});
   
   const [shareModalFollowers, setShareModalFollowers] = useState<any[]>([]);
@@ -201,135 +233,83 @@ export default function GullyReelScreen() {
     }, [])
   );
 
-  useEffect(() => {
-    const fetchInitialReels = async () => {
+  // GET /reels (cursor), or GET /competitions/:id/reels for a competition's entries.
+  // From a profile (params.userId) only that author's reels are kept; there is no
+  // per-user reels endpoint, so the feed is filtered on the device.
+  const fetchPage = useCallback(
+    async (cursor: string | null | undefined) => {
+      if (params.competitionId) {
+        const res = await getCompetitionReels(String(params.competitionId), cursor, 10);
+        return { reels: res.reels.map(toUiReel), nextCursor: res.nextCursor, hasMore: res.hasMore };
+      }
+      return listUiReels(cursor, 10);
+    },
+    [params.competitionId]
+  );
+
+  const loadFeed = useCallback(
+    async (mode: "initial" | "refresh") => {
+      if (mode === "initial") setIsLoadingReels(true);
+      setReelsError("");
       try {
-        setIsLoadingReels(true);
-        let response: any;
-        
-        // 🛠️ FIX 3 & 4: Check if coming from Profile (userId exists) or GullyReel Tab
-        if (params.userId) {
-          // Profile Se Aaye -> Sirf is user ki reels dikhao
-          response = (reelsService as any).getUserReels 
-            ? await (reelsService as any).getUserReels(params.userId as string) 
-            : await reelsService.getReels(10, undefined, params.userId as string);
-        } else {
-          // Bottom Nav (GullyReel Tab) Se Aaye -> Sabki global/random reels dikhao
-          response = await reelsService.getReels(10);
-        }
-        
-        if (response.success && response.data?.reels) {
-          setReels(response.data.reels);
-          setCurrentCursor(response.data.nextCursor);
-          setHasMoreReels(response.data.hasMore);
-        } else {
+        const page = await fetchPage(null);
+        const list = params.userId ? page.reels.filter((r) => r.userId === params.userId) : page.reels;
+        setReels(list);
+        setCurrentCursor(page.nextCursor || undefined);
+        setHasMoreReels(page.hasMore);
+      } catch (error) {
+        if (mode === "initial") {
           setReels([]);
           setHasMoreReels(false);
         }
-      } catch (error: any) {
-        console.error("[ReelScreen] Error fetching reels:", error.message || error);
-        setReels([]);
-        setHasMoreReels(false);
+        setReelsError(getErrorMessage(error));
       } finally {
         setIsLoadingReels(false);
       }
-    };
-    
-    fetchInitialReels();
-  }, [params.userId]); // 👈 params.userId add karna zaruri hai
+    },
+    [params.userId, fetchPage]
+  );
 
   useFocusEffect(
     useCallback(() => {
-      const refetchFeedOnFocus = async () => {
-        try {
-          let response: any;
-          if (params.userId) {
-             response = (reelsService as any).getUserReels 
-              ? await (reelsService as any).getUserReels(params.userId as string) 
-              : await reelsService.getReels(10, undefined, params.userId as string);
-          } else {
-             response = await reelsService.getReels(10);
-          }
-
-          if (response.success && response.data?.reels) {
-            setReels(response.data.reels);
-            setCurrentCursor(response.data.nextCursor);
-            setHasMoreReels(response.data.hasMore);
-          }
-        } catch (error: any) {
-          // Silent catch
-        }
-      };
-
-      refetchFeedOnFocus();
-    }, [params.userId])
+      loadFeed(reels.length ? "refresh" : "initial");
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [loadFeed])
   );
 
+  // GET /reels/:id/comments returns a flat list; replies carry parentComment.
   useEffect(() => {
-    if (commentModalVisible && currentReelBackendId) {
-      const fetchComments = async () => {
-        try {
-          setIsLoadingComments(true);
-          const response = await commentService.getComments(currentReelBackendId);
-
-          if (response.success && response.data?.items) {
-            const mappedComments = response.data.items.map((comment: any, idx: number) => ({
-              id: idx + 1,
-              _backendId: comment._id,
-              username: comment.userName || "Unknown",
-              avatar: comment.userAvatar,
-              level: comment.level || undefined,
-              comment: comment.text,
-              likes: comment.likeCount || 0,
-              isLiked: comment.isLiked || false,
-              createdAt: comment.createdAt,
-              replies: comment.replies || [],
-            }));
-
-            setComments(mappedComments);
-          } else {
-            setComments([]);
-          }
-        } catch (error: any) {
+    if (!commentModalVisible || !currentReelBackendId) return;
+    let active = true;
+    (async () => {
+      setIsLoadingComments(true);
+      try {
+        const page = await listComments(currentReelBackendId, 1, 50);
+        if (!active) return;
+        setComments(groupComments(page.comments));
+      } catch (error) {
+        if (active) {
           setComments([]);
-        } finally {
-          setIsLoadingComments(false);
+          toastError(getErrorMessage(error));
         }
-      };
-
-      fetchComments();
-    }
+      } finally {
+        if (active) setIsLoadingComments(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [commentModalVisible, currentReelBackendId]);
-  
+
   useEffect(() => {
     setCommentLikes(new Map());
   }, []);
 
+  // There is no followers-list endpoint, so "share to followers" has no list to show.
   useEffect(() => {
     if (shareModalVisible) {
-      const fetchFollowers = async () => {
-        try {
-          setIsLoadingShareFollowers(true);
-          const response = await followService.getFollowers("me", { limit: 20 });
-
-          if (response.success && response.data?.items) {
-            const mappedFollowers = response.data.items.map((follower: any) => ({
-              id: follower._id || follower.id,
-              name: follower.name || follower.username || "User",
-              avatar: follower.avatar ? { uri: follower.avatar } : require("@assets/images/user1.png"),
-            }));
-            setShareModalFollowers(mappedFollowers);
-          } else {
-            setShareModalFollowers([]);
-          }
-        } catch (error: any) {
-          setShareModalFollowers([]);
-        } finally {
-          setIsLoadingShareFollowers(false);
-        }
-      };
-
-      fetchFollowers();
+      setShareModalFollowers([]);
+      setIsLoadingShareFollowers(false);
     }
   }, [shareModalVisible]);
 
@@ -350,8 +330,9 @@ export default function GullyReelScreen() {
   }, []);
 
   useEffect(() => {
-    if (params.reelId && flatListRef.current) {
-      const reelIndex = parseInt(params.reelId as string) - 1;
+    const startIndex = params.startReelId ? reels.findIndex((r) => r._backendId === params.startReelId) : -1;
+    if (startIndex >= 0 && flatListRef.current) {
+      const reelIndex = startIndex;
       if (reelIndex >= 0 && reelIndex < reels.length) {
         setCurrentVisibleIndex(reelIndex);
         setTimeout(() => {
@@ -368,7 +349,7 @@ export default function GullyReelScreen() {
     } else {
       setCurrentVisibleIndex(0);
     }
-  }, [params.reelId, reels.length]);
+  }, [params.startReelId, reels.length]);
 
   useFocusEffect(
     useCallback(() => {
@@ -404,27 +385,18 @@ export default function GullyReelScreen() {
   const [commentLikes, setCommentLikes] = useState<
     Map<number, { likes: number; isLiked: boolean }>
   >(new Map());
-  const [reelViewerVisible, setReelViewerVisible] = useState(false);
-  const [reelViewerInitialIndex, setReelViewerInitialIndex] = useState(0);
   const slideAnim = useRef(new Animated.Value(height)).current;
   const shareScrollViewRef = useRef<ScrollView>(null);
 
   const executeDownloadWithWatermark = async (reelData: any) => {
     setIsDownloading(true);
     try {
-      if (!isFFmpegAvailable) {
-        Alert.alert(
-          "Feature Not Available",
-          "Video watermarking requires a development build with FFmpeg. " +
-          "In Expo Go, you can only download videos without watermarks. " +
-          "To get full functionality, create a development build: eas build --platform android --profile preview"
-        );
+      const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Photo library access");
         setIsDownloading(false);
-        setDownloadModalVisible(false);
         return;
       }
-
-      const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== "granted") {
         Alert.alert("Permission Denied", "We need access to save the video.");
         setIsDownloading(false);
@@ -432,9 +404,10 @@ export default function GullyReelScreen() {
         return;
       }
 
-      const videoAsset = Asset.fromModule(reelData.video);
-      await videoAsset.downloadAsync();
-      const videoUri = videoAsset.localUri || videoAsset.uri;
+      const remoteUri: string = reelData.video?.uri || "";
+      if (!remoteUri) throw new Error("No video to download");
+      const videoUri = `${FileSystem.cacheDirectory}gully_reel_${Date.now()}.mp4`;
+      await FileSystem.downloadAsync(remoteUri, videoUri);
 
       const watermarkAsset = Asset.fromModule(require("@assets/images/gfi.png"));
       await watermarkAsset.downloadAsync();
@@ -442,30 +415,29 @@ export default function GullyReelScreen() {
 
       const outputUri = `${FileSystem.cacheDirectory}gully_watermarked_${Date.now()}.mp4`;
 
-      const ffmpegCommand = `-i ${videoUri} -i ${watermarkUri} -filter_complex "[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.6[wm];[0:v][wm]overlay=W-w-20:H-h-20" -preset ultrafast -c:a copy ${outputUri}`;
+      const ffmpegCommand = `-i ${videoUri} -i ${watermarkUri} -filter_complex "[1:v]scale=120:-1,format=rgba,colorchannelmixer=aa=0.6[wm];[0:v][wm]overlay=W-w-20:H-h-20" ${H264_ENCODE} -c:a copy ${outputUri}`;
 
-      const session = await FFmpegKit.execute(ffmpegCommand);
-      const returnCode = await session.getReturnCode();
+      await runFFmpeg(ffmpegCommand, "watermark reel");
+      const asset = await MediaLibrary.createAssetAsync(outputUri);
+      const existingAlbum = await MediaLibrary.getAlbumAsync("GullyFame");
 
-      if (ReturnCode.isSuccess(returnCode)) {
-        const asset = await MediaLibrary.createAssetAsync(outputUri);
-        const existingAlbum = await MediaLibrary.getAlbumAsync("GullyFame");
-
-        if (existingAlbum) {
-          await MediaLibrary.addAssetsToAlbumAsync([asset], existingAlbum, false);
-        } else {
-          await MediaLibrary.createAlbumAsync("GullyFame", asset, false);
-        }
-
-        await FileSystem.deleteAsync(outputUri, { idempotent: true });
-
-        Alert.alert("Success!", "Reel saved to your gallery with +10 XP!");
+      if (existingAlbum) {
+        await MediaLibrary.addAssetsToAlbumAsync([asset], existingAlbum, false);
       } else {
-        console.error("FFmpeg failed to render watermark");
-        Alert.alert("Error", "Failed to process video.");
+        await MediaLibrary.createAlbumAsync("GullyFame", asset, false);
       }
+
+      // Keep a copy in the app's Downloads (listed on the Downloads screen).
+      await saveDownload({
+        title: reelData.caption || reelData.username || "Gully Fame reel",
+        thumbnail: reelData.thumbnail || "",
+        sourceUri: outputUri,
+      });
+
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+      await FileSystem.deleteAsync(videoUri, { idempotent: true });
+      toastSuccess("Saved to your gallery and Downloads");
     } catch (error) {
-      console.error("Export Error:", error);
       Alert.alert("Error", "Something went wrong during download.");
     } finally {
       setIsDownloading(false);
@@ -474,82 +446,55 @@ export default function GullyReelScreen() {
     }
   };
 
+  // Opens the app, else a web link, else the system share sheet.
+  const openApp = async (appUrl: string, webUrl: string | null, text: string) => {
+    try {
+      await Linking.openURL(appUrl);
+      return;
+    } catch {
+      // App not installed (or its scheme is not allowed to be opened).
+    }
+    if (webUrl) {
+      await Linking.openURL(webUrl);
+    } else {
+      await Share.share({ message: text });
+    }
+  };
+
   const handleShare = async (option: string) => {
-    const reelUrl = `https://gullyfame.com/reel/${currentReelId}`;
+    const backendId = reels.find((r) => r.id === currentReelId)?._backendId || String(currentReelId);
+    const reelUrl = `https://gullyfame.com/reel/${backendId}`;
     const reelText = `Check out this amazing reel on Gully Fame! ${reelUrl}`;
 
     try {
       switch (option) {
         case "copy":
-          try {
-            if (Platform.OS === "web") {
-              await navigator.clipboard.writeText(reelUrl);
-              Alert.alert("Copied!", "Link copied to clipboard");
-            } else {
-              Alert.alert("Copy Link", reelUrl, [{ text: "OK" }]);
-            }
-          } catch {
-            Alert.alert("Copy Link", reelUrl);
-          }
+          await Clipboard.setStringAsync(reelUrl);
+          toastSuccess("Link copied");
           break;
         case "whatsapp":
-          const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(reelText)}`;
-          const canOpen = await Linking.canOpenURL(whatsappUrl);
-          if (canOpen) {
-            await Linking.openURL(whatsappUrl);
-          } else {
-            Alert.alert("WhatsApp not installed", "Please install WhatsApp to share");
-          }
-          break;
         case "whatsappstatus":
-          const statusUrl = `whatsapp://send?text=${encodeURIComponent(reelText)}`;
-          const canOpenStatus = await Linking.canOpenURL(statusUrl);
-          if (canOpenStatus) {
-            await Linking.openURL(statusUrl);
-          } else {
-            Alert.alert("WhatsApp not installed", "Please install WhatsApp to share");
-          }
+          await openApp(`whatsapp://send?text=${encodeURIComponent(reelText)}`, `https://wa.me/?text=${encodeURIComponent(reelText)}`, reelText);
           break;
         case "instagram":
-          const instagramUrl = `instagram://share`;
-          const canOpenInsta = await Linking.canOpenURL(instagramUrl);
-          if (canOpenInsta) {
-            await Linking.openURL(instagramUrl);
-          } else {
-            Alert.alert("Instagram not installed", "Please install Instagram to share");
-          }
+          await openApp("instagram://share", null, reelText);
           break;
         case "snapchat":
-          const snapchatUrl = `snapchat://`;
-          const canOpenSnap = await Linking.canOpenURL(snapchatUrl);
-          if (canOpenSnap) {
-            await Linking.openURL(snapchatUrl);
-          } else {
-            Alert.alert("Snapchat not installed", "Please install Snapchat to share");
+          await openApp("snapchat://", null, reelText);
+          break;
+        case "download": {
+          const target = reels.find((r) => r.id === currentReelId);
+          if (target) {
+            setSelectedReelForDownload(target);
+            setDownloadModalVisible(true);
           }
           break;
-        case "download":
-          Alert.alert("Download", "Download feature coming soon!");
-          break;
+        }
         case "facebook":
-          const facebookUrl = `fb://share?text=${encodeURIComponent(reelText)}`;
-          const canOpenFB = await Linking.canOpenURL(facebookUrl);
-          if (canOpenFB) {
-            await Linking.openURL(facebookUrl);
-          } else {
-            const fbWebUrl = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(reelUrl)}`;
-            await Linking.openURL(fbWebUrl);
-          }
+          await openApp(`fb://share?text=${encodeURIComponent(reelText)}`, `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(reelUrl)}`, reelText);
           break;
         case "twitter":
-          const twitterUrl = `twitter://post?message=${encodeURIComponent(reelText)}`;
-          const canOpenTwitter = await Linking.canOpenURL(twitterUrl);
-          if (canOpenTwitter) {
-            await Linking.openURL(twitterUrl);
-          } else {
-            const twitterWebUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(reelText)}`;
-            await Linking.openURL(twitterWebUrl);
-          }
+          await openApp(`twitter://post?message=${encodeURIComponent(reelText)}`, `https://twitter.com/intent/tweet?text=${encodeURIComponent(reelText)}`, reelText);
           break;
       }
       
@@ -562,19 +507,24 @@ export default function GullyReelScreen() {
         setShowMoreShareOptions(false);
       });
     } catch (error) {
-      console.error("Error sharing:", error);
       Alert.alert("Error", "Unable to share. Please try again.");
     }
   };
 
+  // The star button is "Vote": POST /reels/:id/action { action_type: "vote" }.
+  // The backend only accepts votes on entries in a LIVE competition.
+  const voteInFlight = useRef<Set<number>>(new Set());
   const handleLike = useCallback(
     async (id: number) => {
       const targetReel = reels.find((r) => r.id === id);
-      if (!targetReel || !targetReel._backendId) {
+      if (!targetReel || !targetReel._backendId || voteInFlight.current.has(id)) return;
+      // One vote per user per reel: the backend action is a toggle, so never send a second one.
+      if (targetReel.hasVoted) {
+        showToast("You have already voted", "error");
         return;
       }
-
-      if (targetReel && !targetReel.isLiked) {
+      voteInFlight.current.add(id);
+      if (!targetReel.hasVoted) {
         setShowVotePopup(id);
         votePopupAnim.setValue(0);
         Animated.timing(votePopupAnim, {
@@ -583,31 +533,32 @@ export default function GullyReelScreen() {
           useNativeDriver: true,
         }).start(() => setShowVotePopup(null));
       }
-
-      const previousReels = reels;
-
-      setReels((prevReels) =>
-        prevReels.map((reel) =>
+      setReels((prev) =>
+        prev.map((reel) =>
           reel.id === id
-            ? {
-              ...reel,
-              isLiked: !reel.isLiked,
-              likes: reel.isLiked ? reel.likes - 1 : reel.likes + 1,
-            }
+            ? { ...reel, hasVoted: !reel.hasVoted, votes: reel.hasVoted ? reel.votes - 1 : reel.votes + 1 }
             : reel
         )
       );
-
       try {
-        const response = await reelsService.toggleLikeReel(targetReel._backendId);
-
-        if (!response.success) {
-          setReels(previousReels);
-          Alert.alert("Error", response.message || "Failed to like reel");
-        }
-      } catch (error: any) {
-        setReels(previousReels);
-        Alert.alert("Error", "Failed to like reel");
+        const result = await toggleReelAction(targetReel._backendId, "vote");
+        setReels((prev) =>
+          prev.map((reel) =>
+            reel.id === id
+              ? {
+                  ...reel,
+                  hasVoted: result.user_interactions.has_voted,
+                  votes: result.updated_stats.votes,
+                  isSaved: result.user_interactions.is_saved,
+                }
+              : reel
+          )
+        );
+      } catch (error) {
+        setReels((prev) => prev.map((reel) => (reel.id === id ? targetReel : reel)));
+        toastError(getErrorMessage(error));
+      } finally {
+        voteInFlight.current.delete(id);
       }
     },
     [reels, votePopupAnim]
@@ -616,35 +567,29 @@ export default function GullyReelScreen() {
   const handleSave = useCallback(
     async (id: number) => {
       const targetReel = reels.find((r) => r.id === id);
-      if (!targetReel || !targetReel._backendId) {
-        return;
-      }
-
-      const previousReels = reels;
-
-      // Optimistic UI update
-      setReels((prevReels) =>
-        prevReels.map((reel) =>
+      if (!targetReel || !targetReel._backendId) return;
+      setReels((prev) =>
+        prev.map((reel) =>
           reel.id === id
             ? {
-              ...reel,
-              isSaved: !reel.isSaved,
-              saves: reel.isSaved ? Math.max(0, (reel.saves || 0) - 1) : (reel.saves || 0) + 1,
-            }
+                ...reel,
+                isSaved: !reel.isSaved,
+                saves: reel.isSaved ? Math.max(0, (reel.saves || 0) - 1) : (reel.saves || 0) + 1,
+              }
             : reel
         )
       );
-
       try {
-        const response = await reelsService.toggleSaveReel(targetReel._backendId);
-
-        if (!response.success) {
-          setReels(previousReels);
-          Alert.alert("Error", response.message || "Failed to save reel");
-        }
-      } catch (error: any) {
-        setReels(previousReels);
-        Alert.alert("Error", "Failed to save reel");
+        const result = await toggleReelAction(targetReel._backendId, "save");
+        setReels((prev) =>
+          prev.map((reel) =>
+            reel.id === id ? { ...reel, isSaved: result.user_interactions.is_saved, saves: result.updated_stats.saves } : reel
+          )
+        );
+        toastSuccess(result.user_interactions.is_saved ? "Saved" : "Removed from saved");
+      } catch (error) {
+        setReels((prev) => prev.map((reel) => (reel.id === id ? targetReel : reel)));
+        toastError(getErrorMessage(error));
       }
     },
     [reels]
@@ -689,20 +634,17 @@ export default function GullyReelScreen() {
           setShowPlayPauseIcon(null);
         });
       }, 1000);
-    } catch (error) {
-      console.error("Error toggling video playback:", error);
+    } catch (error) { /* intentionally ignored */
     }
   }, []);
 
   const handleDoubleTap = useCallback(
     (id: number) => {
-      const now = Date.now();
-      const DOUBLE_TAP_DELAY = 300;
-
-      if (now - lastTap.current.time < DOUBLE_TAP_DELAY && lastTap.current.id === id) {
+      // Called by the tap handler once it has detected a double tap.
+      {
         const targetReel = reels.find((r) => r.id === id);
 
-        if (targetReel && !targetReel.isLiked) {
+        if (targetReel && !targetReel.hasVoted) {
           if (!starAnimations.current.has(id)) {
             starAnimations.current.set(id, {
               scale: new Animated.Value(0),
@@ -733,18 +675,10 @@ export default function GullyReelScreen() {
           });
         }
 
-        setReels((prevReels) =>
-          prevReels.map((r) =>
-            r.id === id && !r.isLiked ? { ...r, isLiked: true, likes: r.likes + 1 } : r
-          )
-        );
-
-        lastTap.current = { time: 0, id: null };
-      } else {
-        lastTap.current = { time: now, id };
+        if (targetReel && !targetReel.hasVoted) handleLike(id);
       }
     },
-    [reels]
+    [reels, handleLike]
   );
 
   const handleEndReached = useCallback(() => {
@@ -753,171 +687,93 @@ export default function GullyReelScreen() {
     }
 
     const fetchMoreReels = async () => {
+      setIsLoadingMore(true);
       try {
-        setIsLoadingMore(true);
-        const response = await reelsService.getReels(10, currentCursor);
-
-        const pageData = response.data;
-        if (response.success && pageData?.reels && pageData.reels.length > 0) {
-          setReels((prevReels) => [...prevReels, ...pageData.reels]);
-          setCurrentCursor(pageData.nextCursor);
-          setHasMoreReels(pageData.hasMore);
-        } else {
-          setHasMoreReels(false);
-        }
-      } catch (error: any) {
-        console.error("[ReelScreen] Error fetching more reels:", error.message || error);
+        const page = await fetchPage(currentCursor);
+        const list = params.userId ? page.reels.filter((r) => r.userId === params.userId) : page.reels;
+        setReels((prev) => {
+          const seen = new Set(prev.map((r) => r._backendId));
+          return [...prev, ...list.filter((r) => !seen.has(r._backendId))];
+        });
+        setCurrentCursor(page.nextCursor || undefined);
+        setHasMoreReels(page.hasMore);
+      } catch (error) {
+        toastError(getErrorMessage(error));
       } finally {
         setIsLoadingMore(false);
       }
     };
-
     fetchMoreReels();
-  }, [isLoadingMore, hasMoreReels, currentCursor]);
+  }, [isLoadingMore, hasMoreReels, currentCursor, params.userId, fetchPage]);
 
+  const [isPostingComment, setIsPostingComment] = useState(false);
   const handlePostComment = useCallback(async () => {
-    if (!commentText.trim() || !currentReelBackendId) {
-      Alert.alert("Error", "Comment cannot be empty");
+    const text = commentText.trim();
+    if (!text || !currentReelBackendId || isPostingComment) return;
+    if (text.length > COMMENT_MAX_LENGTH) {
+      toastError(`Comments can be up to ${COMMENT_MAX_LENGTH} characters.`);
       return;
     }
-
+    const parent = replyingToComment !== null ? comments.find((c) => c.id === replyingToComment) : null;
+    setIsPostingComment(true);
     try {
-      const response = await commentService.addComment(currentReelBackendId, {
-        text: commentText.trim(),
-      });
-
-      if (response.success && response.data) {
-        const newComment = {
-          id: comments.length + 1,
-          _backendId: response.data._id,
-          username: response.data.userName || "You",
-          level: response.data.level || undefined,
-          comment: response.data.text,
-          likes: response.data.likeCount || 0,
-          isLiked: false,
-          replies: [],
-        };
-
-        setComments((prev) => [newComment, ...prev]);
-        setCommentText("");
-        setReplyingToComment(null);
-
-        Alert.alert("Success", "Comment posted!");
-      } else {
-        Alert.alert("Error", response.message || "Failed to post comment");
-      }
-    } catch (error: any) {
-      Alert.alert("Error", "Failed to post comment");
-    }
-  }, [commentText, currentReelBackendId, comments.length]);
-
-  const handleToggleCommentLike = useCallback(
-    async (comment: any) => {
-      if (!comment._backendId) return;
-
-      const commentLikeData = commentLikes.get(comment.id) || {
-        likes: comment.likes,
-        isLiked: comment.isLiked,
-      };
-
-      setCommentLikes((prev) => {
-        const newMap = new Map(prev);
-        newMap.set(comment.id, {
-          likes: commentLikeData.isLiked ? commentLikeData.likes - 1 : commentLikeData.likes + 1,
-          isLiked: !commentLikeData.isLiked,
-        });
-        return newMap;
-      });
-
-      try {
-        const response = commentLikeData.isLiked
-          ? await commentService.unlikeComment(comment._backendId)
-          : await commentService.likeComment(comment._backendId);
-
-        if (!response.success) {
-          setCommentLikes((prev) => {
-            const newMap = new Map(prev);
-            newMap.set(comment.id, commentLikeData);
-            return newMap;
-          });
-        }
-      } catch (error: any) {
-        setCommentLikes((prev) => {
-          const newMap = new Map(prev);
-          newMap.set(comment.id, commentLikeData);
-          return newMap;
-        });
-      }
-    },
-    [commentLikes]
-  );
-
-  const handleFollowUser = async (userId: string, username: string, reelId: number) => {
-    try {
-      const response = await followService.followUser(userId);
-
-      if (response.success) {
-        setReels((prevReels) =>
-          prevReels.map((reel) =>
-            reel.id === reelId ? { ...reel, isFollowed: true } : reel
-          )
-        );
-
-        setFollowingStates((prev) => ({
-          ...prev,
-          [userId]: true,
-        }));
-        followUpdateEmitter.emit({ type: "follow", userId });
-        Alert.alert("Success", `Now following ${username}!`);
-      } else {
-        Alert.alert("Error", response.message || "Failed to follow user");
-      }
+      await addComment(currentReelBackendId, text, parent?._backendId);
+      // Re-read so the new comment shows with its author populated.
+      const page = await listComments(currentReelBackendId, 1, 50);
+      setComments(groupComments(page.comments));
+      setReels((prev) =>
+        prev.map((r) => (r._backendId === currentReelBackendId ? { ...r, comments: (r.comments || 0) + 1 } : r))
+      );
+      if (parent) setExpandedReplies((prev) => new Set(prev).add(parent.id));
+      setCommentText("");
+      setReplyingToComment(null);
+      toastSuccess("Comment posted");
     } catch (error) {
-      Alert.alert("Error", "Failed to follow user");
+      toastError(getErrorMessage(error));
+    } finally {
+      setIsPostingComment(false);
+    }
+  }, [commentText, currentReelBackendId, comments, replyingToComment, isPostingComment]);
+
+  // The backend has no comment-like endpoint.
+  const handleToggleCommentLike = useCallback((_comment: any) => {
+    showToast("Liking comments isn't available yet.", "info");
+  }, []);
+
+  // POST /user/:userId/follow toggles; the response says the new state.
+  const handleToggleFollow = async (userId: string, username: string, reelId: number) => {
+    if (!userId) return;
+    try {
+      const { following } = await toggleFollow(userId);
+      setReels((prev) => prev.map((reel) => (reel.userId === userId ? { ...reel, isFollowed: following } : reel)));
+      setFollowingStates((prev) => ({ ...prev, [userId]: following }));
+      followUpdateEmitter.emit({ type: following ? "follow" : "unfollow", userId });
+      toastSuccess(following ? `Now following ${username}` : `Unfollowed ${username}`);
+    } catch (error) {
+      toastError(getErrorMessage(error));
     }
   };
-
-  const handleUnfollowUser = async (userId: string, username: string, reelId: number) => {
-    try {
-      const response = await followService.unfollowUser(userId);
-
-      if (response.success) {
-        setReels((prevReels) =>
-          prevReels.map((reel) =>
-            reel.id === reelId ? { ...reel, isFollowed: false } : reel
-          )
-        );
-
-        setFollowingStates((prev) => ({
-          ...prev,
-          [userId]: false,
-        }));
-        followUpdateEmitter.emit({ type: "unfollow", userId });
-        Alert.alert("Success", `Unfollowed ${username}`);
-      } else {
-        Alert.alert("Error", response.message || "Failed to unfollow user");
-      }
-    } catch (error) {
-      Alert.alert("Error", "Failed to unfollow user");
-    }
-  };
+  const handleFollowUser = handleToggleFollow;
+  const handleUnfollowUser = handleToggleFollow;
 
   const handleSupportPress = useCallback(async (reelId: number, creatorId: string | undefined) => {
     try {
       setIsFetchingBalance(true);
       const balance = await walletBalance.fetchBalance();
+      if (balance === null) {
+        toastError(walletBalance.error || "Couldn't check your wallet balance.");
+        return;
+      }
 
       if (balance < 1) {
-        setCurrentTipReelId(reelId);
-        setCurrentTipCreatorId(creatorId);
-        setInsufficientBalanceModalVisible(true);
+        toastError("Insufficient balance. Please add coins to your wallet.");
+        router.push("/(main)/coins");
       } else {
         setCurrentTipReelId(reelId);
         setCurrentTipCreatorId(creatorId);
         setTipModalVisible(true);
       }
     } catch (error) {
-      console.error("[handleSupportPress] Error:", error);
       Alert.alert("Error", "Failed to check balance. Please try again.");
     } finally {
       setIsFetchingBalance(false);
@@ -1047,6 +903,16 @@ export default function GullyReelScreen() {
               >
                 <DownloadIcon size={32} />
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.rightActionButton}
+                onPress={() => handleSave(reel.id)}
+                accessibilityRole="button"
+                accessibilityLabel={reel.isSaved ? "Remove from saved" : "Save reel"}
+              >
+                <SaveIcon filled={!!reel.isSaved} color={reel.isSaved ? "#EC9A15" : "#fff"} size={32} />
+                <Text style={styles.actionIconCount}>{reel.saves || 0}</Text>
+              </TouchableOpacity>
             </View>
 
             {showPlayPauseIcon && showPlayPauseIcon.reelId === reel.id && (
@@ -1071,16 +937,25 @@ export default function GullyReelScreen() {
                 <View style={styles.profileRow}>
                   <TouchableOpacity style={styles.profileImageContainer}>
                     <Image
-                      source={reel.avatar ? { uri: reel.avatar } : require("@assets/images/user1.png")}
+                      source={
+                        reel.userId && reel.userId === myUserId && myAvatar
+                          ? { uri: myAvatar }
+                          : resolveMediaUrl(reel.profileImage)
+                            ? { uri: resolveMediaUrl(reel.profileImage) as string }
+                            : require("@assets/images/user1.png")
+                      }
                       style={styles.profileImage}
                     />
-                    <View style={styles.followButton}>
-                      <Text style={styles.followButtonText}>+</Text>
-                    </View>
+                    {reel.userId !== myUserId && (
+                      <View style={styles.followButton}>
+                        <Text style={styles.followButtonText}>+</Text>
+                      </View>
+                    )}
                   </TouchableOpacity>
                   <TouchableOpacity>
                     <Text style={styles.username}>{reel.username}</Text>
                   </TouchableOpacity>
+                  {reel.userId !== myUserId && (
                   <TouchableOpacity style={styles.followButtonBox}
                     onPress={() => {
                       const userId = reel.userId || "";
@@ -1096,6 +971,7 @@ export default function GullyReelScreen() {
                       {reel.isFollowed || followingStates[reel.userId || ""] ? "Following" : "Follow"}
                     </Text>
                   </TouchableOpacity>
+                  )}
                 </View>
 
                 <View style={styles.captionContainer}>
@@ -1181,32 +1057,32 @@ export default function GullyReelScreen() {
                       ]}
                       pointerEvents="none"
                     >
-                      <Text style={styles.floatingXPText}>+50 FAME! 🔥</Text>
+                      <Text style={styles.floatingXPText}>+5 XP 🔥</Text>
                     </Animated.View>
                   )}
 
                   <TouchableOpacity
                     style={[
                       styles.tipButton,
-                      reel.isLiked ? styles.voteButtonActive : styles.voteButtonInactive,
+                      reel.hasVoted ? styles.voteButtonActive : styles.voteButtonInactive,
                     ]}
                     onPress={() => handleLike(reel.id)}
                   >
                     <StarIcon
-                      filled={reel.isLiked}
+                      filled={reel.hasVoted}
                       size={18}
-                      color={reel.isLiked ? "#fff" : THEME_COLOR}
-                      themeColor={reel.isLiked ? "#fff" : THEME_COLOR}
+                      color={reel.hasVoted ? "#fff" : THEME_COLOR}
+                      themeColor={reel.hasVoted ? "#fff" : THEME_COLOR}
                     />
                     <Text
                       style={[
                         styles.tipButtonText,
                         {
-                          color: reel.isLiked ? "#fff" : THEME_COLOR,
+                          color: reel.hasVoted ? "#fff" : THEME_COLOR,
                         },
                       ]}
                     >
-                      {reel.isLiked ? "Voted" : "Vote"} • {reel.likes}
+                      {reel.hasVoted ? "Voted" : "Vote"} • {reel.votes}
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1225,6 +1101,9 @@ export default function GullyReelScreen() {
       handleSave,
       handleSupportPress,
       reels,
+      myUserId,
+      myAvatar,
+      followingStates,
     ]
   );
 
@@ -1246,6 +1125,20 @@ export default function GullyReelScreen() {
         </TouchableOpacity>
       </View>
 
+      {isLoadingReels && reels.length === 0 ? (
+        <View style={feedStateStyles.center}>
+          <ActivityIndicator size="large" color={THEME_COLOR} />
+        </View>
+      ) : reels.length === 0 ? (
+        <View style={feedStateStyles.center}>
+          <Text style={feedStateStyles.title}>
+            {reelsError || (params.competitionId ? "No entries in this competition yet" : "No reels yet")}
+          </Text>
+          <TouchableOpacity onPress={() => loadFeed("initial")} style={feedStateStyles.retry}>
+            <Text style={feedStateStyles.retryText}>{reelsError ? "Retry" : "Refresh"}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
       <FlatList
         ref={flatListRef}
         data={memoizedReels}
@@ -1363,7 +1256,7 @@ export default function GullyReelScreen() {
                         <View key={comment.id} style={styles.cleanCommentRow}>
                           <View style={styles.commentItemInner}>
                             <Image
-                              source={comment.avatar ? { uri: comment.avatar } : require("@assets/images/user1.png")}
+                              source={resolveMediaUrl(comment.avatar) ? { uri: resolveMediaUrl(comment.avatar) as string } : require("@assets/images/user1.png")}
                               style={styles.commentAvatar}
                             />
                             <View style={styles.commentContent}>
@@ -1450,7 +1343,7 @@ export default function GullyReelScreen() {
                                   return (
                                     <View key={reply.id} style={styles.cleanReplyRow}>
                                       <Image
-                                        source={reply.avatar ? { uri: reply.avatar } : require("@assets/images/user1.png")}
+                                        source={resolveMediaUrl(reply.avatar) ? { uri: resolveMediaUrl(reply.avatar) as string } : require("@assets/images/user1.png")}
                                         style={styles.replyAvatar}
                                       />
                                       <View style={styles.replyContent}>
@@ -1498,7 +1391,7 @@ export default function GullyReelScreen() {
                   <View style={styles.gamifiedInputWrapper}>
                     <View style={styles.gamifiedInputContainer}>
                       <Image
-                        source={require("@assets/images/user1.png")}
+                        source={myAvatar ? { uri: myAvatar } : require("@assets/images/user1.png")}
                         style={styles.commentInputAvatar}
                       />
                       <TextInput
@@ -1628,12 +1521,8 @@ export default function GullyReelScreen() {
                   style={styles.shareOptionsList}
                 >
                   <TouchableOpacity style={styles.shareOption} onPress={() => handleShare("copy")}>
-                    <View style={[styles.shareOptionIconCircle, { backgroundColor: "#66620" }]}>
-                      <Image
-                        source={require("@assets/ShareIcon/copy.png")}
-                        style={styles.shareIconImage}
-                        resizeMode="contain"
-                      />
+                    <View style={[styles.shareOptionIconCircle, { backgroundColor: "#FFFFFF26" }]}>
+                      <MaterialCommunityIcons name="link-variant" size={scale(26)} color="#fff" />
                     </View>
                     <Text style={styles.shareOptionName} numberOfLines={1}>
                       Copy Link
@@ -1651,11 +1540,7 @@ export default function GullyReelScreen() {
                         },
                       ]}
                     >
-                      <Image
-                        source={require("@assets/ShareIcon/whatsapp.png")}
-                        style={styles.shareIconImage}
-                        resizeMode="contain"
-                      />
+                      <MaterialCommunityIcons name="whatsapp" size={scale(26)} color="#25D366" />
                     </View>
                     <Text style={styles.shareOptionName} numberOfLines={1}>
                       WhatsApp
@@ -1673,11 +1558,7 @@ export default function GullyReelScreen() {
                         },
                       ]}
                     >
-                      <Image
-                        source={require("@assets/ShareIcon/status.png")}
-                        style={styles.shareIconImage}
-                        resizeMode="contain"
-                      />
+                      <MaterialCommunityIcons name="progress-clock" size={scale(26)} color="#25D366" />
                     </View>
                     <Text style={styles.shareOptionName} numberOfLines={1}>
                       Status
@@ -1695,11 +1576,7 @@ export default function GullyReelScreen() {
                         },
                       ]}
                     >
-                      <Image
-                        source={require("@assets/ShareIcon/instagram.png")}
-                        style={styles.shareIconImage}
-                        resizeMode="contain"
-                      />
+                      <MaterialCommunityIcons name="instagram" size={scale(26)} color="#E4405F" />
                     </View>
                     <Text style={styles.shareOptionName} numberOfLines={1}>
                       Instagram
@@ -1720,11 +1597,7 @@ export default function GullyReelScreen() {
                             },
                           ]}
                         >
-                          <Image
-                            source={require("@assets/ShareIcon/snapchat.png")}
-                            style={styles.shareIconImage}
-                            resizeMode="contain"
-                          />
+                          <MaterialCommunityIcons name="snapchat" size={scale(26)} color="#FFFC00" />
                         </View>
                         <Text style={styles.shareOptionName} numberOfLines={1}>
                           Snapchat
@@ -1738,15 +1611,11 @@ export default function GullyReelScreen() {
                           style={[
                             styles.shareOptionIconCircle,
                             {
-                              backgroundColor: "#66620",
+                              backgroundColor: "#FFFFFF26",
                             },
                           ]}
                         >
-                          <Image
-                            source={require("@assets/ShareIcon/download.svg")}
-                            style={styles.shareIconImage}
-                            resizeMode="contain"
-                          />
+                          <MaterialCommunityIcons name="download" size={scale(26)} color="#fff" />
                         </View>
                         <Text style={styles.shareOptionName} numberOfLines={1}>
                           Download
@@ -1764,11 +1633,7 @@ export default function GullyReelScreen() {
                             },
                           ]}
                         >
-                          <Image
-                            source={require("@assets/ShareIcon/facebook.svg")}
-                            style={styles.shareIconImage}
-                            resizeMode="contain"
-                          />
+                          <MaterialCommunityIcons name="facebook" size={scale(26)} color="#4267B2" />
                         </View>
                         <Text style={styles.shareOptionName} numberOfLines={1}>
                           Facebook
@@ -1786,11 +1651,7 @@ export default function GullyReelScreen() {
                             },
                           ]}
                         >
-                          <Image
-                            source={require("@assets/ShareIcon/twitter.png")}
-                            style={styles.shareIconImage}
-                            resizeMode="contain"
-                          />
+                          <MaterialCommunityIcons name="twitter" size={scale(26)} color="#1DA1F2" />
                         </View>
                         <Text style={styles.shareOptionName} numberOfLines={1}>
                           Twitter
@@ -1816,11 +1677,11 @@ export default function GullyReelScreen() {
                         style={[
                           styles.shareOptionIconCircle,
                           {
-                            backgroundColor: "#66620",
+                            backgroundColor: "#FFFFFF26",
                           },
                         ]}
                       >
-                        <Text style={styles.shareOptionIconText}>⋯</Text>
+                        <MaterialCommunityIcons name="dots-horizontal" size={scale(28)} color="#fff" />
                       </View>
                       <Text style={styles.shareOptionName} numberOfLines={1}>
                         More
@@ -1866,30 +1727,6 @@ export default function GullyReelScreen() {
               <Text style={styles.commandPanelTitle}>OPTIONS</Text>
 
               <View style={styles.commandGrid}>
-                <TouchableOpacity
-                  style={styles.commandItem}
-                  onPress={() => {
-                    Animated.timing(threeDotsSlideAnim, {
-                      toValue: height,
-                      duration: 300,
-                      useNativeDriver: true,
-                    }).start(() => {
-                      setShowThreeDotsMenu(false);
-                      if (currentReelForMenu !== null) {
-                        const reelIndex = reels.findIndex((r) => r.id === currentReelForMenu);
-                        if (reelIndex >= 0) {
-                          setReelViewerInitialIndex(reelIndex);
-                          setReelViewerVisible(true);
-                        }
-                      }
-                    });
-                  }}
-                >
-                  <View style={styles.commandIconBox}>
-                    <FullScreenIcon color="#EC9A15" size={22} />
-                  </View>
-                  <Text style={styles.commandItemText}>Full Screen</Text>
-                </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.commandItem}
@@ -1900,7 +1737,7 @@ export default function GullyReelScreen() {
                       useNativeDriver: true,
                     }).start(() => {
                       setShowThreeDotsMenu(false);
-                      Alert.alert("Interested", "Marked as interested! +5 XP");
+                      showToast("Feed preferences aren't available yet.", "info");
                     });
                   }}
                 >
@@ -1919,7 +1756,7 @@ export default function GullyReelScreen() {
                       useNativeDriver: true,
                     }).start(() => {
                       setShowThreeDotsMenu(false);
-                      Alert.alert("Not Interested", "We'll show you less content like this.");
+                      showToast("Feed preferences aren't available yet.", "info");
                     });
                   }}
                 >
@@ -1938,17 +1775,11 @@ export default function GullyReelScreen() {
                       useNativeDriver: true,
                     }).start(() => {
                       setShowThreeDotsMenu(false);
-                      Alert.alert("Report", "Report this content", [
-                        {
-                          text: "Cancel",
-                          style: "cancel",
-                        },
-                        {
-                          text: "Report",
-                          style: "destructive",
-                          onPress: () => Alert.alert("Reported", "Thank you for reporting."),
-                        },
-                      ]);
+                      // There is no report endpoint on the backend yet.
+                      Alert.alert(
+                        "Reporting not available yet",
+                        "To report this reel, please contact support@gullyfame.com."
+                      );
                     });
                   }}
                 >
@@ -2029,15 +1860,6 @@ export default function GullyReelScreen() {
 
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
 
-      <InsufficientBalanceModal
-        visible={insufficientBalanceModalVisible}
-        onDismiss={() => {
-          setInsufficientBalanceModalVisible(false);
-          setCurrentTipReelId(null);
-          setCurrentTipCreatorId(undefined);
-        }}
-      />
-
       {currentTipReelId !== null && (
         <SupportModal
           visible={tipModalVisible}
@@ -2046,10 +1868,10 @@ export default function GullyReelScreen() {
             setCurrentTipReelId(null);
             setCurrentTipCreatorId(undefined);
           }}
-          reelId={String(currentTipReelId)}
+          reelId={reels.find((r) => r.id === currentTipReelId)?._backendId || ""}
           creatorId={currentTipCreatorId ?? ''}
           creatorName={
-            reels.find((r) => r.id === currentTipReelId)?.creatorName || "Creator"
+            reels.find((r) => r.id === currentTipReelId)?.username || "Creator"
           }
           onSupportSent={() => {
             if (currentTipReelId !== null) {
@@ -2064,26 +1886,13 @@ export default function GullyReelScreen() {
                       : reel
                   )
                 );
-              } catch (error) {
-                console.error("Error updating tip count:", error);
+              } catch (error) { /* intentionally ignored */
               }
             }
           }}
         />
       )}
 
-      <ReelViewer
-        visible={reelViewerVisible}
-        reels={reels.map((reel) => ({
-          ...reel,
-          type: "video" as const,
-          source: reel.video,
-        }))}
-        initialIndex={reelViewerInitialIndex}
-        onClose={() => setReelViewerVisible(false)}
-        hasBottomNav={false}
-        insets={insets}
-      />
     </SafeAreaView>
   );
 }
@@ -3108,5 +2917,35 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
     zIndex: 10,
     marginBottom: scale(4),
+  },
+});
+
+const feedStateStyles = StyleSheet.create({
+  center: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 32,
+    zIndex: 1,
+  },
+  title: {
+    color: "#ccc",
+    fontSize: 15,
+    textAlign: "center",
+  },
+  retry: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: "#EC9A15",
+  },
+  retryText: {
+    color: "#fff",
+    fontWeight: "600",
   },
 });

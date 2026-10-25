@@ -1,11 +1,10 @@
 
-import React, { useEffect } from 'react';
+import { useEffect } from 'react';
 import { router } from 'expo-router';
 import { View, Text } from 'react-native';
 
 export default function Index() {
   useEffect(() => {
-    console.log("[Index] App starting - navigating to splash screen");
     
     const timer = setTimeout(() => {
       // Navigate to splash screen which handles auth state checking

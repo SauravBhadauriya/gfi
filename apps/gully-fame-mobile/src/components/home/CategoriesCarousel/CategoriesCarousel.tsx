@@ -2,57 +2,67 @@ import { ScrollView } from "react-native-gesture-handler";
 import { styles } from "./styles";
 import { categoriesFullData } from "@/types/categories";
 import { View, Text } from "react-native";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { router } from "expo-router";
+import { TALENT_CATEGORIES } from "@/constants/talentCategories";
 import CategoryItem from "@/components/CategoryItem/CategoryItem";
 interface CategoriesCarouselProps {
     categories: categoriesFullData[];
 }
-const FALLBACK_CATEGORIES: categoriesFullData[] = [
-    { id: "fallback-1", name: "Comedy", icon: "comedy" },
-    { id: "fallback-2", name: "Dance", icon: "dance" },
-    { id: "fallback-3", name: "Music", icon: "music" },
-    { id: "fallback-4", name: "Cook", icon: "cook" },
-];
 function CategoriesCarousel({ categories }: CategoriesCarouselProps) {
     const [selectedCategory, setSelectedCategory] = useState<
         number | string | null
     >(0);
-    const displayCategories =
-        categories && categories.length > 0 ? categories : FALLBACK_CATEGORIES;
-    const [activeIndex, setActiveIndex] = useState(0);
+    // Fixed 12 talent categories; reuse the backend id when a name matches so the category page still loads.
+    const displayCategories: categoriesFullData[] = TALENT_CATEGORIES.map((c) => {
+        const match = (categories || []).find((b) => {
+            const n = String(b.name || "").trim().toLowerCase();
+            return n === c.name.toLowerCase() || n === c.key;
+        });
+        return { id: match?.id ?? c.key, name: c.name, iconName: c.icon };
+    });
+    const [pos, setPos] = useState(0);
+    const scrollRef = useRef<any>(null);
+    const itemX = useRef<number[]>([]);
     const handleCategoryPress = (categoryId: number | string) => {
         setSelectedCategory(
             categoryId === selectedCategory ? null : categoryId,
         );
         router.push(`/(main)/category/${categoryId}`);
     };
+    const n = displayCategories.length;
+    // Three copies of the list: play in the middle copy and jump back silently, so the loop never ends.
+    const loopItems = [...displayCategories, ...displayCategories, ...displayCategories];
+    const activeIndex = n ? pos % n : 0;
+    const goTo = (p: number, animated: boolean) =>
+        scrollRef.current?.scrollTo({ x: Math.max(0, (itemX.current[p] ?? 0) - 8), animated });
     useEffect(() => {
-        if (displayCategories.length === 0) return;
-        const maxIndex = Math.min(displayCategories.length - 1, 3);
-        const sequence =
-            maxIndex >= 0
-                ? [
-                      0,
-                      Math.min(1, maxIndex),
-                      Math.min(2, maxIndex),
-                      Math.min(3, maxIndex),
-                      Math.min(3, maxIndex),
-                      Math.min(2, maxIndex),
-                      Math.min(1, maxIndex),
-                      0,
-                  ]
-                : [];
-        if (sequence.length === 0) return;
-
-        let step = 0;
+        if (n === 0) return;
+        const t = setTimeout(() => {
+            setPos(n);
+            goTo(n, false);
+        }, 100);
+        return () => clearTimeout(t);
+    }, [n]);
+    useEffect(() => {
+        if (n === 0) return;
         const intervalId = setInterval(() => {
-            step = (step + 1) % sequence.length;
-            setActiveIndex(sequence[step]);
-        }, 3500); // Moves every 3.5 seconds
-
+            setPos((p) => {
+                const next = p + 1;
+                goTo(next, true);
+                if (next >= 2 * n) {
+                    setTimeout(() => {
+                        goTo(n, false);
+                        setPos(n);
+                    }, 500);
+                }
+                return next;
+            });
+        }, 3500);
         return () => clearInterval(intervalId);
-    }, [displayCategories.length]);
+    }, [n]);
+    if (displayCategories.length === 0) return null;
+
     return (
         <View style={styles.section}>
             <View style={styles.sectionHeader}>
@@ -60,19 +70,26 @@ function CategoriesCarousel({ categories }: CategoriesCarouselProps) {
             </View>
 
             <ScrollView
+                ref={scrollRef}
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.categoriesScroll}
                 nestedScrollEnabled={true}
             >
-                {displayCategories.map((category, index) => (
-                    <CategoryItem
-                        key={category.id}
-                        category={category}
-                        isActive={activeIndex === index}
-                        isSelected={category.id === selectedCategory}
-                        onPress={() => handleCategoryPress(category.id)}
-                    />
+                {loopItems.map((category, index) => (
+                    <View
+                        key={`${category.id}-${index}`}
+                        onLayout={(e) => {
+                            itemX.current[index] = e.nativeEvent.layout.x;
+                        }}
+                    >
+                        <CategoryItem
+                            category={category}
+                            isActive={activeIndex === index}
+                            isSelected={category.id === selectedCategory}
+                            onPress={() => handleCategoryPress(category.id)}
+                        />
+                    </View>
                 ))}
             </ScrollView>
         </View>

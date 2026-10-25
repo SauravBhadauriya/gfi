@@ -53,6 +53,17 @@ export const homeScreenStyles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#1a0a00",
   },
+  notificationDot: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    width: scale(10),
+    height: scale(10),
+    borderRadius: scale(5),
+    backgroundColor: "#FF0000",
+    borderWidth: 1.5,
+    borderColor: "#1a0a00",
+  },
   notificationBadgeText: {
     color: "#fff",
     fontSize: getFontSize(10),

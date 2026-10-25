@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
@@ -38,11 +38,14 @@ export default function OnboardingFaceScan() {
     }
   })();
 
-  const [scanComplete, setScanComplete] = useState(false);
+  const scanComplete = false;
 
+  // There is no face-verification service on the backend yet, so the scan
+  // can't actually verify anything; the step is skippable.
   const handleScan = () => {
-    setScanComplete(true);
-    Alert.alert("Face scan complete", "We captured your best angles. You're ready for the spotlight!");
+    Alert.alert("Not available yet", "Face verification isn't available yet. You can continue without it.", [
+      { text: "Continue", onPress: () => handleFinish(true) },
+    ]);
   };
 
   const handleFinish = async (force?: boolean) => {
@@ -53,47 +56,12 @@ export default function OnboardingFaceScan() {
 
     try {
       
-      await AsyncStorage.setItem("faceScanDone", "true");
-      
-      
-      try {
-        const { autoVerifyKycIfComplete } = await import("@utils/kycValidation");
-        await autoVerifyKycIfComplete();
-      } catch (error) {
-        console.log("Could not auto-verify KYC:", error);
-      }
-      
-      
       if (fromKycFlow) {
-        
         await AsyncStorage.removeItem('kycFlowActive');
-        
-        
-        try {
-          const { autoVerifyKycIfComplete, areAllKycStepsCompleted } = await import("@utils/kycValidation");
-          
-          
-          const allStepsCompleted = await areAllKycStepsCompleted();
-          
-          if (allStepsCompleted) {
-            
-            await autoVerifyKycIfComplete();
-            
-            if (__DEV__) {
-              console.log('[face-scan] All KYC steps completed, status should be updated to "completed"');
-            }
-          }
-        } catch (error) {
-          console.log("Could not auto-verify KYC:", error);
-        }
-        
-        
-        const { navigateToNextKycStep } = await import("@utils/kycValidation");
-        await navigateToNextKycStep('kycCompleted');
+        router.replace("/onboarding/all-done");
         return;
       }
-      
-      
+
       if (fromVerified) {
         const query = [
           `role=${encodeURIComponent(role)}`,
@@ -192,10 +160,7 @@ export default function OnboardingFaceScan() {
           <TouchableOpacity
             style={styles.secondaryButton}
             activeOpacity={0.75}
-            onPress={() => {
-              setScanComplete(true);
-              setTimeout(() => handleFinish(true), 0);
-            }}
+            onPress={() => handleFinish(true)}
           >
             {}
           </TouchableOpacity>

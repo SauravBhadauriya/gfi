@@ -57,7 +57,7 @@ export const LeaderboardStyles = StyleSheet.create({
         backgroundColor: "#EC9A15", // Adds a sharp gaming edge
     },
     rankBadgeContainer: {
-        width: 32,
+        width: 40,
         height: 32,
         borderRadius: 8, // Squarish gaming badge instead of a circle
         backgroundColor: "rgba(0,0,0,0.4)",
@@ -73,6 +73,9 @@ export const LeaderboardStyles = StyleSheet.create({
     },
     leaderboardAvatarWrapper: {
         position: "relative",
+        width: 46,
+        alignItems: "center",
+        justifyContent: "center",
     },
     leaderboardAvatarImage: {
         width: 46,
@@ -83,6 +86,7 @@ export const LeaderboardStyles = StyleSheet.create({
     },
     leaderboardInfo: {
         flex: 1,
+        minWidth: 0,
         justifyContent: "center",
     },
     leaderboardName: {

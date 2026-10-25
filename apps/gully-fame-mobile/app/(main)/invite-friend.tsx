@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -12,10 +12,13 @@ import {
   Linking,
   Alert,
   Share,
+  ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
+import { getCurrentUser } from "@/api/services/userService";
 
 const socialPlatforms = [
   { id: 1, name: "WhatsApp", icon: "whatsapp", provider: FontAwesome5, color: "#25D366" },
@@ -26,23 +29,53 @@ const socialPlatforms = [
 ];
 
 export default function InviteFriendScreen() {
+  const insets = useSafeAreaInsets();
   
-  const [userReferralCode] = useState("GULLY-8X9P");
+  const [userReferralCode, setUserReferralCode] = useState<string | null>(null);
+  const [codeLoading, setCodeLoading] = useState(true);
+  const [codeError, setCodeError] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // The referral code comes from the signed-in user's profile. Nothing is hardcoded.
+  const loadReferralCode = useCallback(async () => {
+    setCodeLoading(true);
+    setCodeError(false);
+    try {
+      const result = await getCurrentUser();
+      const code = (result.data as any)?.referralCode;
+      if (result.success && typeof code === "string" && code.trim()) {
+        setUserReferralCode(code.trim());
+      } else {
+        setUserReferralCode(null);
+        setCodeError(true);
+      }
+    } catch {
+      setUserReferralCode(null);
+      setCodeError(true);
+    } finally {
+      setCodeLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadReferralCode();
+  }, [loadReferralCode]);
+
   const shareUrl = "https://gullyfame.com/download";
-  const shareMessage = `Join me on Gully Fame and win exciting rewards! 🎉\n\nUse my Referral Code: *${userReferralCode}* while signing up to get a bonus!\n\nDownload now: ${shareUrl}`;
+  const shareMessage = `Join me on Gully Fame!${userReferralCode ? ` My referral code: ${userReferralCode}` : ""}\n\nDownload now: ${shareUrl}`;
 
   const copyToClipboard = async () => {
+    if (!userReferralCode) return;
     await Clipboard.setStringAsync(userReferralCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleShare = async (platform: string) => {
+    if (!userReferralCode) return;
     try {
       switch (platform) {
-        case "WhatsApp":
+        case "WhatsApp": {
           const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(shareMessage)}`;
           const canOpenWhatsApp = await Linking.canOpenURL(whatsappUrl);
           if (canOpenWhatsApp) {
@@ -51,10 +84,11 @@ export default function InviteFriendScreen() {
             Alert.alert("WhatsApp not installed", "Please install WhatsApp to share.");
           }
           break;
+        }
         case "Instagram":
           await Share.share({ message: shareMessage, title: "Invite to Gully Fame" });
           break;
-        case "Snapchat":
+        case "Snapchat": {
           const snapchatUrl = `snapchat://share?text=${encodeURIComponent(shareMessage)}`;
           const canOpenSnap = await Linking.canOpenURL(snapchatUrl);
           if (canOpenSnap) {
@@ -63,7 +97,8 @@ export default function InviteFriendScreen() {
             Alert.alert("Snapchat not installed", "Please install Snapchat to share.");
           }
           break;
-        case "Twitter":
+        }
+        case "Twitter": {
           const twitterUrl = `twitter://post?message=${encodeURIComponent(shareMessage)}`;
           const canOpenTwitter = await Linking.canOpenURL(twitterUrl);
           if (canOpenTwitter) {
@@ -72,7 +107,8 @@ export default function InviteFriendScreen() {
             await Linking.openURL(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareMessage)}`);
           }
           break;
-        case "Facebook":
+        }
+        case "Facebook": {
           const facebookUrl = `fb://share?text=${encodeURIComponent(shareMessage)}`;
           const canOpenFB = await Linking.canOpenURL(facebookUrl);
           if (canOpenFB) {
@@ -81,11 +117,11 @@ export default function InviteFriendScreen() {
             await Linking.openURL(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`);
           }
           break;
+        }
         default:
           await Share.share({ message: shareMessage, title: "Invite to Gully Fame" });
       }
     } catch (error) {
-      console.error("Error sharing:", error);
       Alert.alert("Error", "Unable to share. Please try again.");
     }
   };
@@ -103,25 +139,42 @@ export default function InviteFriendScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
+      <ScrollView
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {}
         <View style={styles.referralCard}>
           <Text style={styles.referralTitle}>Your Referral Code</Text>
-          <View style={styles.codeBox}>
-            <Text style={styles.codeText}>{userReferralCode}</Text>
-            <TouchableOpacity 
-              style={[styles.copyButton, copied && styles.copiedButton]} 
-              onPress={copyToClipboard}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={copied ? "checkmark-circle" : "copy-outline"} size={20} color="#fff" />
-              <Text style={styles.copyText}>{copied ? "Copied!" : "Copy"}</Text>
-            </TouchableOpacity>
-          </View>
-          <Text style={styles.referralSubText}>
-            Share this code. When a friend signs up, you both get a price reward in your wallet!
-          </Text>
+          {codeLoading ? (
+            <View style={styles.codeBox}>
+              <ActivityIndicator size="small" color="#EC9A15" />
+            </View>
+          ) : userReferralCode ? (
+            <View style={styles.codeBox}>
+              <Text style={styles.codeText}>{userReferralCode}</Text>
+              <TouchableOpacity
+                style={[styles.copyButton, copied && styles.copiedButton]}
+                onPress={copyToClipboard}
+                activeOpacity={0.7}
+              >
+                <Ionicons name={copied ? "checkmark-circle" : "copy-outline"} size={20} color="#fff" />
+                <Text style={styles.copyText}>{copied ? "Copied!" : "Copy"}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.codeBox}>
+              <Text style={styles.codeText}>{codeError ? "Referral code isn't available yet" : "No referral code yet"}</Text>
+              {codeError ? (
+                <TouchableOpacity style={styles.copyButton} onPress={loadReferralCode} activeOpacity={0.7}>
+                  <Text style={styles.copyText}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          )}
+          {userReferralCode ? (
+            <Text style={styles.referralSubText}>Share this code with your friends.</Text>
+          ) : null}
         </View>
 
         {}
@@ -134,6 +187,7 @@ export default function InviteFriendScreen() {
                 key={platform.id}
                 style={styles.platformCard}
                 onPress={() => handleShare(platform.name)}
+                disabled={!userReferralCode}
                 activeOpacity={0.7}
               >
                 <View style={styles.iconContainer}>
@@ -145,22 +199,6 @@ export default function InviteFriendScreen() {
           })}
         </ScrollView>
 
-        {}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>How it works?</Text>
-          <View style={styles.stepRow}>
-            <View style={styles.stepNumber}><Text style={styles.stepNumberText}>1</Text></View>
-            <Text style={styles.stepText}>Share your code with friends</Text>
-          </View>
-          <View style={styles.stepRow}>
-            <View style={styles.stepNumber}><Text style={styles.stepNumberText}>2</Text></View>
-            <Text style={styles.stepText}>Friend downloads and signs up using your code</Text>
-          </View>
-          <View style={styles.stepRow}>
-            <View style={styles.stepNumber}><Text style={styles.stepNumberText}>3</Text></View>
-            <Text style={styles.stepText}>Both of you receive money prize in your wallets!</Text>
-          </View>
-        </View>
       </ScrollView>
     </View>
   );
@@ -206,6 +244,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   referralTitle: {
+    alignSelf: "stretch",
+    textAlign: "center",
     color: "#ccc",
     fontSize: 16,
     marginBottom: 12,

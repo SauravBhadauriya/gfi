@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Path, G } from "react-native-svg";
 
 export const CommunityIcon = ({ color = "#000000" }) => (
   <Svg width="24" height="24" viewBox="0 0 128 128" fill="none">

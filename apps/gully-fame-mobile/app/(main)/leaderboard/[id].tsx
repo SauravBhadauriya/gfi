@@ -1,6 +1,5 @@
 import { router, useLocalSearchParams } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { LeaderboardStyles as styles } from "@/components/TopTenLeaderboard/styles";
 import {
   Dimensions,
@@ -23,8 +22,9 @@ import {
 import Svg, { Path } from "react-native-svg";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from '@expo/vector-icons';
-import { competitionService } from "@/api/services/competitionService";
-import { BASE_URL } from "@/api/axios";
+import { getLeaderboard, LeaderboardRow } from "@/api/services/competitionService";
+import { getErrorMessage } from "@/api/client";
+import { toastError } from "@/components/ui/Toast";
 
 const { width, height } = Dimensions.get("window");
 
@@ -43,68 +43,68 @@ export default function MyFameScreen() {
   const [activeTab, setActiveTab] = useState("Home");
   const [isLoading, setIsLoading] = useState(true);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  const [loadError, setLoadError] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const toRows = (rows: LeaderboardRow[]) =>
+    rows.map((entry) => {
+      const [firstName, ...rest] = (entry.name || "").split(" ");
+      return {
+        rank: entry.rank,
+        isTop: entry.rank <= 3,
+        name: entry.name || "Participant",
+        firstName: firstName || "",
+        lastName: rest.join(" "),
+        role: "participants",
+        userId: entry.id,
+        isYou: !!entry.isCurrentUser,
+        points: entry.points ?? entry.votes ?? 0,
+        avatarUrl: entry.profilePictureUrl || "",
+        profileImage: entry.profilePictureUrl ? { uri: entry.profilePictureUrl } : require("@assets/images/user1.png"),
+      };
+    });
+
+  // GET /competitions/:id/leaderboard?page&limit (ranked by votes).
+  const loadPage = useCallback(
+    async (nextPage: number) => {
+      const res = await getLeaderboard(competitionId, nextPage, 20);
+      setLeaderboardData((prev) => (nextPage === 1 ? toRows(res.leaderboard) : [...prev, ...toRows(res.leaderboard)]));
+      setPage(nextPage);
+      setHasMore(res.hasMore);
+    },
+    [competitionId]
+  );
+
+  const initialLoad = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError("");
+    try {
+      await loadPage(1);
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [loadPage]);
 
   useEffect(() => {
-    let isMounted = true;
+    if (competitionId) initialLoad();
+  }, [competitionId, initialLoad]);
 
-    const initializeData = async () => {
-      try {
-        const [isLoggedIn, token, storedUser] = await Promise.all([
-          AsyncStorage.getItem("isLoggedIn"),
-          AsyncStorage.getItem("authToken"),
-          AsyncStorage.getItem("user")
-        ]);
-
-        if (isMounted) {
-          if (isLoggedIn !== "true" && !token) {
-            router.replace("/auth/signin" as any);
-            return;
-          }
-          
-          if (storedUser) {
-             const user = JSON.parse(storedUser);
-             setCurrentUserId(user._id || user.id);
-          }
-
-          if (competitionId) {
-             const response = await competitionService.getCompetitionLeaderboard(competitionId, { page: 1, limit: 50 });
-             if (response.success && response.data?.leaderboard) {
-                // Parse the backend API format into the UI format
-                const formattedData = response.data.leaderboard.map((entry: any) => ({
-                    rank: entry.rank,
-                    isTop: entry.rank <= 3,
-                    name: `${entry.user?.firstName || ''} ${entry.user?.lastName || ''}`.trim() || entry.user?.username || 'Unknown User',
-                    firstName: entry.user?.firstName || '',
-                    lastName: entry.user?.lastName || '',
-                    role: 'participants',
-                    userId: entry.user?._id,
-                    isYou: entry.user?._id === currentUserId,
-                    points: entry.reel?.stats?.votes || entry.votes || 0,
-                    profileImage: entry.user?.profileImage ? { uri: `${BASE_URL}${entry.user.profileImage}` } : require("@assets/images/user1.png"),
-                }));
-
-                // Ensure data is sorted by rank
-                formattedData.sort((a: any, b: any) => a.rank - b.rank);
-                setLeaderboardData(formattedData);
-             }
-          }
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error("Error initializing leaderboard:", error);
-        if (isMounted) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    initializeData();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [competitionId, currentUserId]);
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      await loadPage(page + 1);
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleTabPress = (tabName: string) => {
     if (tabName === "Home") {
@@ -119,11 +119,20 @@ export default function MyFameScreen() {
   const topThree = leaderboardData.filter((item) => item.isTop);
   const restOfList = leaderboardData.filter((item) => !item.isTop);
 
-  if (isLoading) {
+  if (isLoading || loadError) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center", padding: 24 }]}>
         <StatusBar barStyle="light-content" />
-        <ActivityIndicator size="large" color="#EC9A15" />
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#EC9A15" />
+        ) : (
+          <>
+            <Text style={{ color: "#ccc", textAlign: "center" }}>{loadError}</Text>
+            <TouchableOpacity onPress={initialLoad} style={{ marginTop: 16 }}>
+              <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     );
   }
@@ -280,7 +289,7 @@ export default function MyFameScreen() {
                     } else if (item.userId) {
                         router.push({
                         pathname: "/(main)/profile/[id]",
-                        params: { id: item.userId, userId: item.userId, firstName: item.firstName, lastName: item.lastName, role: item.role, bio: item.bio },
+                        params: { id: item.userId, userId: item.userId, firstName: item.firstName, lastName: item.lastName, role: item.role, avatar: item.avatarUrl },
                         } as any);
                     }
                     }}
@@ -305,13 +314,20 @@ export default function MyFameScreen() {
                     </View>
                     </View>
 
+                    <View style={{ width: 20, alignItems: "center" }}>
                     {item.isYou && (
                     <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
                         <Path d="M9 18l6-6-6-6" stroke="#000" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
                     </Svg>
                     )}
+                    </View>
                 </TouchableOpacity>
                 ))}
+              {hasMore && (
+                <TouchableOpacity onPress={loadMore} disabled={loadingMore} style={{ alignItems: "center", paddingVertical: 16 }}>
+                  {loadingMore ? <ActivityIndicator color="#EC9A15" /> : <Text style={{ color: "#EC9A15" }}>Load more</Text>}
+                </TouchableOpacity>
+              )}
             </ScrollView>
             </View>
         </View>

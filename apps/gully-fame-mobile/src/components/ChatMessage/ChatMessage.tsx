@@ -1,6 +1,6 @@
 import { View, TouchableOpacity, Text, Image, Dimensions } from "react-native";
 import { chatMessageStyles as styles } from "./styles";
-import { type ChatMessageAPIData } from "@/api/services/chatService";
+import { type ChatMessage as ChatMessageAPIData } from "@/api/services/chatService";
 import React from "react";
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.8;
@@ -71,7 +71,7 @@ function ChatMessage({
                 isSent ? styles.messageTextSent : styles.messageTextReceived,
               ]}
             >
-              {message.message}
+              {message.is_deleted ? "This message was deleted" : message.message}
             </Text>
             {reactions.length > 0 && (
               <View style={styles.reactionsContainer}>

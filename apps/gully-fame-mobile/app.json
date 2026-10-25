@@ -5,31 +5,27 @@
     "version": "1.0.0",
     "backgroundColor": "#000000",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.jpeg",
+    "icon": "./assets/images/app-icon.png",
     "scheme": "gullyfamemobile",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "ios": {
       "backgroundColor": "#3C2610",
       "supportsTablet": false,
       "bundleIdentifier": "com.gullyfame.mobile",
       "buildNumber": "1",
-      "icon": "./assets/images/icon.jpeg",
+      "icon": "./assets/images/app-icon.png",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
       "backgroundColor": "#000000",
-      "usesCleartextTraffic": false,
       "versionCode": 1,
       "package": "com.gullyfame.mobile",
-      "icon": "./assets/images/icon.jpeg",
+      "icon": "./assets/images/app-icon.png",
       "adaptiveIcon": {
-        "backgroundColor": "#3C2610",
-        "foregroundImage": "./assets/images/icon.jpeg",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/icon.jpeg"
+        "foregroundImage": "./assets/images/app-icon-adaptive-foreground.png",
+        "backgroundColor": "#100B07"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -53,6 +49,12 @@
       "expo-router",
       "expo-dev-client",
       "@react-native-google-signin/google-signin",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Gully Fame to use your location to show contests and creators near you."
+        }
+      ],
       [
         "expo-camera",
         {

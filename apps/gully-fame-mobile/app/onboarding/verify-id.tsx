@@ -76,7 +76,7 @@ export default function OnboardingVerifyId() {
 
         <View style={styles.welcomeCard}>
           <Text style={styles.welcomeTitle}>Hey {friendlyName} 👋</Text>
-          <Text style={styles.welcomeSubtitle}>Before we open the stage, we'll do a lightning- fast face check to keep things fair.</Text>
+          <Text style={styles.welcomeSubtitle}>Before we open the stage, we'll do a lightning-fast face check to keep things fair.</Text>
         </View>
 
         <View style={styles.instructionsCard}>

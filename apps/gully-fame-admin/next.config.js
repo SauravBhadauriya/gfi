@@ -13,7 +13,7 @@ const nextConfig = {
     return [
       {
         source: '/v1/api/:path*',
-        destination: 'https://gullyfame.com/v1/api/:path*',
+        destination: 'https://backend.gullyfame.com/v1/api/:path*',
       },
     ];
   },

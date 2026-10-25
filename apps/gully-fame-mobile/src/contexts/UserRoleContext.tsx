@@ -38,17 +38,13 @@ export const UserRoleProvider = ({
 
         // Validate and set role with fallback to default
         if (storedRole === "participants" || storedRole === "fan") {
-          console.log("[UserRoleContext] Loaded role from storage:", storedRole);
           setRoleState(storedRole as roles);
         } else if (storedRole) {
-          console.warn("[UserRoleContext] Invalid stored role:", storedRole, "- using default");
           setRoleState(DEFAULT_ROLE);
         } else {
-          console.log("[UserRoleContext] No stored role - using default:", DEFAULT_ROLE);
           setRoleState(DEFAULT_ROLE);
         }
       } catch (error) {
-        console.error("[UserRoleContext] Failed to load role from storage:", error);
         if (isMounted) {
           setRoleState(DEFAULT_ROLE);
         }
@@ -69,16 +65,13 @@ export const UserRoleProvider = ({
   const setRole = async (newRole: roles) => {
     // Validate role before setting
     if (newRole !== "participants" && newRole !== "fan") {
-      console.warn("[UserRoleContext] Invalid role attempted:", newRole);
       return;
     }
 
     try {
-      console.log("[UserRoleContext] Setting role to:", newRole);
       setRoleState(newRole);
       await AsyncStorage.setItem("userRole", newRole);
     } catch (error) {
-      console.error("[UserRoleContext] Failed to save role:", error);
       // Revert on error
       setRoleState(DEFAULT_ROLE);
     }

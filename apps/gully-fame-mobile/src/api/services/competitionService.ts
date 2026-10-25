@@ -1,369 +1,181 @@
-import apiClient from '../axios';
-import { ApiResponse } from '../types';
+import { apiGet, apiPost, toResult } from "../client";
+import { searchCompetitionsPage, normalizeCompetitionStatus, SearchCompetition } from "./searchService";
+import type { FeedReel } from "./reelsService";
 
-// ==================== Type Definitions ====================
+/**
+ * Competitions.
+ * GET  /competitions/:id                 -> details (shape depends on status)
+ * GET  /competitions/:id/leaderboard     -> paginated ranking by votes
+ * GET  /competitions/:id/reels           -> cursor-paginated entries
+ * POST /competitions/:id/join            -> UPCOMING / LIVE only
+ * POST /competitions/:id/invite          -> { toUserId }
+ * GET  /user/competitions                -> competitions I joined or entered
+ * GET  /feed/matrix                      -> LIVE competitions with their top reels
+ * There is no "list all competitions" endpoint; GET /search?type=competitions
+ * with an empty query lists them all (raw status values) and is used for the
+ * live / upcoming / past lists.
+ */
 
-export interface CompetitionSponsor {
-  _id: string;
-  email: string;
-  sponsorCode?: string;
-  [key: string]: any;
-}
+export type CompetitionStatus = "LIVE" | "UPCOMING" | "ENDED" | "CANCELLED";
 
-export interface CompetitionWinner {
-  userId: string;
+export interface LeaderboardRow {
+  id: string;
+  name: string;
+  profilePictureUrl: string;
   rank: number;
-  prize: number;
-  _id: string;
-  [key: string]: any;
+  votes?: number;
+  points?: number;
+  isCurrentUser?: boolean;
+  prizeMoneyWon?: number;
 }
 
-export interface LeaderboardEntry {
-  rank: number;
-  user: {
-    _id: string;
-    firstName?: string;
-    lastName?: string;
-    profileImage?: string;
-    is_followed_by_me?: boolean;
-  };
-  reel?: {
-    _id: string;
-    thumbnail_url?: string;
-    stats?: {
-      votes?: number;
-      likes?: number;
-    };
-  };
-  votes?: number; // For backward compatibility
-}
-
-export interface LeaderboardResponse {
-  page: number;
-  limit: number;
-  total: number;
-  leaderboard: LeaderboardEntry[];
-}
-
-export interface Competition {
+interface BaseDetails {
   _id: string;
   title: string;
+  subtitle: string;
   description: string;
-  sponsorId?: CompetitionSponsor;
-  entryFee: number;
-  prizePool: number;
   startDate: string;
   endDate: string;
-  status: 'CREATED' | 'APPROVED' | 'CANCELLED' | 'COMPLETED' | 'live';
-  participants: any[];
-  isActive: boolean;
-  isDeleted: boolean;
-  winners: CompetitionWinner[];
-  createdAt: string;
-  updatedAt: string;
-  __v?: number;
-  [key: string]: any;
+  prizePool: number;
 }
 
-export interface CompetitionsResponse {
-  items: Competition[];
-  total?: number;
-  page?: number;
-  limit?: number;
+export interface LiveCompetitionDetails extends BaseDetails {
+  status: "LIVE";
+  totalEntries: number;
+  is_current_user_entered: boolean;
+  leaderboardPreview: LeaderboardRow[];
 }
 
-// ==================== API Functions ====================
+export interface UpcomingCompetitionDetails extends BaseDetails {
+  status: "UPCOMING";
+  entryFee: number;
+  totalParticipantsJoined: number;
+  is_current_user_joined: boolean;
+  participantsPreview: { id: string; name: string; profilePictureUrl: string; isCurrentUser: boolean }[];
+}
+
+export interface EndedCompetitionDetails extends BaseDetails {
+  status: "ENDED";
+  totalParticipants: number;
+  totalViews: number;
+  results: LeaderboardRow[];
+  recommendedPastCompetitions: {
+    _id: string;
+    title: string;
+    winnerName: string;
+    prizePool: number;
+    startDate: string;
+    endDate: string;
+  }[];
+}
+
+export type CompetitionDetails = LiveCompetitionDetails | UpcomingCompetitionDetails | EndedCompetitionDetails;
+
+export interface LeaderboardPage {
+  competitionId: string;
+  currentPage: number;
+  hasMore: boolean;
+  leaderboard: LeaderboardRow[];
+}
+
+export interface MyCompetition {
+  _id: string;
+  title: string;
+  subtitle: string;
+  image: string;
+  status: CompetitionStatus;
+  prizePool: number;
+  entryFee: number;
+  startDate: string;
+  endDate: string;
+  participation: "joined" | "submitted";
+}
+
+export interface CompetitionReelsPage {
+  competitionId: string;
+  nextCursor: string | null;
+  hasMore: boolean;
+  reels: FeedReel[];
+}
+
+export interface MatrixCompetition {
+  _id: string;
+  title: string;
+  prize: number;
+  endDate: string;
+  totalEntries: number;
+  initialReels: FeedReel[];
+}
+
+/** A competition row in the browse lists, with a normalized status. */
+export interface CompetitionListItem extends SearchCompetition {
+  normalizedStatus: CompetitionStatus;
+  imageUrl: string;
+}
+
+export const getCompetitionDetails = (competitionId: string) =>
+  apiGet<CompetitionDetails>(`competitions/${competitionId}`);
+
+export const getLeaderboard = (competitionId: string, page = 1, limit = 20) =>
+  apiGet<LeaderboardPage>(`competitions/${competitionId}/leaderboard`, { params: { page, limit } });
+
+export const getCompetitionReels = (competitionId: string, cursor?: string | null, limit = 10) =>
+  apiGet<CompetitionReelsPage>(`competitions/${competitionId}/reels`, {
+    params: { limit, ...(cursor ? { cursor } : {}) },
+  });
+
+export const joinCompetition = (competitionId: string) =>
+  apiPost<{ competitionId: string; participantsCount: number }>(`competitions/${competitionId}/join`, {});
+
+export const inviteToCompetition = (competitionId: string, toUserId: string) =>
+  apiPost<{ competitionId: string; toUserId: string; invited: boolean }>(`competitions/${competitionId}/invite`, {
+    toUserId,
+  });
+
+export const getMyCompetitions = (page = 1, limit = 20) =>
+  apiGet<{ currentPage: number; hasMore: boolean; total: number; competitions: MyCompetition[] }>(
+    "user/competitions",
+    { params: { page, limit } }
+  );
+
+export const getLiveMatrix = (page = 1, limit = 5) =>
+  apiGet<{ currentPage: number; hasMore: boolean; competitions: MatrixCompetition[] }>("feed/matrix", {
+    params: { page, limit },
+  });
 
 /**
- * Get all competitions
- * Spec: GET /competitions?page=1&limit=20
+ * Browse competitions by status. Pages through GET /search?type=competitions
+ * and keeps the requested status (the backend has no status filter).
  */
-export async function getCompetitions(params?: {
-  page?: number;
-  limit?: number;
-}): Promise<ApiResponse<CompetitionsResponse>> {
-  const page = params?.page || 1;
-  const limit = params?.limit || 20;
-  
-  try {
-    console.log('[competitionService] GET /competitions', { page, limit });
-    
-    const response = await apiClient.get<any>('competitions', {
-      params: { page, limit },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let competitions: Competition[] = [];
-      
-      if (Array.isArray(responseData.data)) {
-        competitions = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        competitions = responseData.data.items;
-      } else if (Array.isArray(responseData.data.competitions)) {
-        competitions = responseData.data.competitions;
+export async function listCompetitionsByStatus(
+  status: CompetitionStatus,
+  maxPages = 5
+): Promise<CompetitionListItem[]> {
+  const out: CompetitionListItem[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const result = await searchCompetitionsPage("", page, 50);
+    for (const c of result.results) {
+      const normalizedStatus = normalizeCompetitionStatus(c.status);
+      if (normalizedStatus === status) {
+        out.push({ ...c, normalizedStatus, imageUrl: c.image || c.image_url || "" });
       }
-
-      const result: CompetitionsResponse = {
-        items: competitions,
-        total: responseData.data.total || competitions.length,
-        page,
-        limit,
-      };
-
-      console.log('[competitionService] GET /competitions - Success:', competitions.length, 'competitions');
-      return {
-        success: true,
-        data: result,
-        message: responseData.message || 'Competitions fetched successfully',
-      };
     }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch competitions',
-      error: 'API returned unsuccessful response',
-      data: {
-        items: [],
-        total: 0,
-      },
-    };
-  } catch (error: any) {
-    console.error('[competitionService] GET /competitions error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: {
-        items: [],
-        total: 0,
-      },
-    };
+    if (!result.hasMore) break;
   }
+  return out;
 }
-
-/**
- * Get competition by ID
- */
-export async function getCompetitionById(competitionId: string): Promise<ApiResponse<Competition>> {
-  try {
-    console.log('[competitionService] GET competitions/:id', { competitionId });
-    
-    // First get competitions, then find the one with matching ID
-    const competitionsResponse = await getCompetitions({ page: 1, limit: 100 });
-    
-    if (competitionsResponse.success && competitionsResponse.data) {
-      const competition = competitionsResponse.data.items.find(
-        (comp) => comp._id === competitionId || comp.id === competitionId
-      );
-      
-      if (competition) {
-        return {
-          success: true,
-          data: competition,
-          message: 'Competition fetched successfully',
-        };
-      }
-    }
-
-    return {
-      success: false,
-      message: 'Competition not found',
-      error: 'NOT_FOUND',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[competitionService] GET competitions/:id error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-/**
- * Get competitions by status
- */
-export async function getCompetitionsByStatus(
-  status: 'CREATED' | 'APPROVED' | 'CANCELLED' | 'COMPLETED' | 'live',
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<CompetitionsResponse>> {
-  try {
-    console.log('[competitionService] GET competitions by status', { status });
-    
-    const competitionsResponse = await getCompetitions(params);
-    
-    if (competitionsResponse.success && competitionsResponse.data) {
-      const filteredCompetitions = competitionsResponse.data.items.filter(
-        (comp) => comp.status === status
-      );
-      
-      return {
-        success: true,
-        data: {
-          items: filteredCompetitions,
-          total: filteredCompetitions.length,
-        },
-        message: 'Competitions fetched successfully',
-      };
-    }
-
-    return competitionsResponse;
-  } catch (error: any) {
-    console.error('[competitionService] GET competitions by status error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: {
-        items: [],
-        total: 0,
-      },
-    };
-  }
-}
-
-/**
- * Get competition leaderboard
- * Spec: GET competitions/{competitionId}/leaderboard?page=1&limit=20
- */
-export async function getCompetitionLeaderboard(
-  competitionId: string,
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<LeaderboardResponse>> {
-  const page = params?.page || 1;
-  const limit = params?.limit || 20;
-  
-  try {
-    console.log('[competitionService] GET competitions/:id/leaderboard', { competitionId, page, limit });
-    
-    const response = await apiClient.get<any>(
-      `competitions/${competitionId}/leaderboard`,
-      { params: { page, limit } }
-    );
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const data = responseData.data as LeaderboardResponse;
-      
-      console.log('[competitionService] GET leaderboard - Success:', data.leaderboard.length, 'entries');
-      return {
-        success: true,
-        data,
-        message: responseData.message || 'Leaderboard fetched successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch leaderboard',
-      error: 'API returned unsuccessful response',
-      data: {
-        page: 1,
-        limit: 20,
-        total: 0,
-        leaderboard: [],
-      },
-    };
-  } catch (error: any) {
-    console.error('[competitionService] GET leaderboard error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: {
-        page: 1,
-        limit: 20,
-        total: 0,
-        leaderboard: [],
-      },
-    };
-  }
-}
-
-/**
- * Join a competition
- * Spec: POST /competitions/{competitionId}/join
- */
-export async function joinCompetition(competitionId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
-  try {
-    console.log('[competitionService] POST competitions/:id/join', { competitionId });
-    
-    const response = await apiClient.post<any>(`competitions/${competitionId}/join`);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      console.log('[competitionService] JOIN competition - Success');
-      return {
-        success: true,
-        data: { success: true, message: responseData.message || 'Successfully joined competition' },
-        message: responseData.message || 'Successfully joined competition',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to join competition',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[competitionService] JOIN competition error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-/**
- * Leave a competition
- * Spec: POST /competitions/{competitionId}/leave
- */
-export async function leaveCompetition(competitionId: string): Promise<ApiResponse<{ success: boolean; message: string }>> {
-  try {
-    console.log('[competitionService] POST competitions/:id/leave', { competitionId });
-    
-    const response = await apiClient.post<any>(`competitions/${competitionId}/leave`);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      console.log('[competitionService] LEAVE competition - Success');
-      return {
-        success: true,
-        data: { success: true, message: responseData.message || 'Successfully left competition' },
-        message: responseData.message || 'Successfully left competition',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to leave competition',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[competitionService] LEAVE competition error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-// ==================== Service Export ====================
 
 export const competitionService = {
-  getCompetitions,
-  getCompetitionById,
-  getCompetitionsByStatus,
-  getCompetitionLeaderboard,
+  getCompetitionDetails,
+  getLeaderboard,
+  getCompetitionReels,
   joinCompetition,
-  leaveCompetition,
+  inviteToCompetition,
+  getMyCompetitions,
+  getLiveMatrix,
+  listCompetitionsByStatus,
+  getDetails: (id: string) => toResult(() => getCompetitionDetails(id)),
+  join: (id: string) => toResult(() => joinCompetition(id), "You're in! Competition joined."),
 };
+
+export default competitionService;

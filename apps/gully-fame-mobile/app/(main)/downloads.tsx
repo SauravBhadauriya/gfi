@@ -1,73 +1,80 @@
-
-
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Platform,
-  Image,
+  ActivityIndicator,
   Alert,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { router } from "expo-router";
-import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { router, useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { DownloadItem, listDownloads, removeDownload } from "@/services/downloadsStore";
 
+const formatMb = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
-const initialDownloads = [
-  {
-    id: "1",
-    title: "Insane Gully Rap Battle Finale",
-    duration: "02:45",
-    size: "14.2 MB",
-    author: "@gully_rapper",
-    thumbnail: "https://picsum.photos/seed/rap1/120/120",
-  },
-  {
-    id: "2",
-    title: "Street Popping & Locking Semi-Finals",
-    duration: "01:30",
-    size: "8.5 MB",
-    author: "@dance_mechanics",
-    thumbnail: "https://picsum.photos/seed/dance2/120/120",
-  },
-  {
-    id: "3",
-    title: "Fastest Beatboxing Tutorial in Hindi",
-    duration: "04:15",
-    size: "22.1 MB",
-    author: "@beatbox_guru",
-    thumbnail: "https://picsum.photos/seed/beat3/120/120",
-  },
-];
+function DownloadPlayer({ uri, onClose }: { uri: string; onClose: () => void }) {
+  const player = useVideoPlayer(uri, (p) => {
+    p.loop = true;
+    p.play();
+  });
+  return (
+    <Modal visible animationType="fade" onRequestClose={onClose}>
+      <View style={styles.playerContainer}>
+        <VideoView style={styles.player} player={player} contentFit="contain" nativeControls />
+        <TouchableOpacity style={styles.playerClose} onPress={onClose} accessibilityLabel="Close player">
+          <Ionicons name="close" size={28} color="#fff" />
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+}
 
 export default function DownloadsScreen() {
-  const [downloads, setDownloads] = useState(initialDownloads);
+  const [downloads, setDownloads] = useState<DownloadItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [playing, setPlaying] = useState<DownloadItem | null>(null);
 
-  const handleDeleteDownload = (id: string, title: string) => {
-    Alert.alert(
-      "Delete Download",
-      `Kya aap "${title}" ko offline downloads se hatana chahte hain?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        { 
-          text: "Delete", 
-          style: "destructive",
-          onPress: () => {
-            setDownloads(downloads.filter(item => item.id !== id));
-          }
-        }
-      ]
-    );
+  const load = useCallback(async () => {
+    setLoading(true);
+    setDownloads(await listDownloads());
+    setLoading(false);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  const handleDelete = (item: DownloadItem) => {
+    Alert.alert("Delete download", `Remove "${item.title}" from Downloads? This doesn't delete it from your gallery.`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          await removeDownload(item.id);
+          load();
+        },
+      },
+    ]);
   };
+
+  const totalBytes = downloads.reduce((sum, item) => sum + item.sizeBytes, 0);
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3C2610" />
 
-      {}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={28} color="#fff" />
@@ -76,61 +83,55 @@ export default function DownloadsScreen() {
         <View style={styles.backButton} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {downloads.length > 0 ? (
-          <View style={styles.listContainer}>
-            <Text style={styles.storageText}>
-              💾 {downloads.length} Videos Offline Saved ({downloads.reduce((acc, item) => acc + parseFloat(item.size), 0).toFixed(1)} MB Used)
-            </Text>
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#EC9A15" />
+        </View>
+      ) : downloads.length === 0 ? (
+        <View style={styles.center}>
+          <Ionicons name="download-outline" size={56} color="#EC9A15" />
+          <Text style={styles.emptyTitle}>No downloads yet</Text>
+          <Text style={styles.emptyText}>Tap the download button on a reel to save it here for offline viewing.</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+          <Text style={styles.summary}>
+            {downloads.length} {downloads.length === 1 ? "video" : "videos"} · {formatMb(totalBytes)}
+          </Text>
 
-            {downloads.map((item) => (
-              <View key={item.id} style={styles.downloadCard}>
-                {}
-                <View style={styles.thumbnailContainer}>
-                  <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
-                  <View style={styles.durationBadge}>
-                    <Text style={styles.durationText}>{item.duration}</Text>
+          {downloads.map((item) => (
+            <View key={item.id} style={styles.card}>
+              <TouchableOpacity style={styles.thumbWrap} onPress={() => setPlaying(item)} accessibilityLabel="Play">
+                {item.thumbnail ? (
+                  <Image source={{ uri: item.thumbnail }} style={styles.thumb} />
+                ) : (
+                  <View style={[styles.thumb, styles.thumbPlaceholder]}>
+                    <Ionicons name="play" size={28} color="#EC9A15" />
                   </View>
+                )}
+                <View style={styles.playBadge}>
+                  <Ionicons name="play" size={14} color="#000" />
                 </View>
+              </TouchableOpacity>
 
-                {}
-                <View style={styles.videoInfo}>
-                  <Text style={styles.videoTitle} numberOfLines={2}>{item.title}</Text>
-                  <Text style={styles.videoAuthor}>{item.author}</Text>
-                  <Text style={styles.videoSize}>{item.size}</Text>
-                </View>
-
-                {}
-                <View style={styles.actionsContainer}>
-                  <TouchableOpacity style={styles.playButton} activeOpacity={0.7}>
-                    <Ionicons name="play" size={20} color="#fff" />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity 
-                    style={styles.deleteButton} 
-                    onPress={() => handleDeleteDownload(item.id, item.title)}
-                    activeOpacity={0.7}
-                  >
-                    <MaterialIcons name="delete-outline" size={22} color="#FF4444" />
-                  </TouchableOpacity>
-                </View>
+              <View style={styles.info}>
+                <Text style={styles.title} numberOfLines={2}>
+                  {item.title}
+                </Text>
+                <Text style={styles.meta}>
+                  {formatDate(item.createdAt)} · {formatMb(item.sizeBytes)}
+                </Text>
               </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIconCircle}>
-              <Ionicons name="download-outline" size={48} color="#EC9A15" />
-            </View>
-            <Text style={styles.emptyStateTitle}>No Offline Videos</Text>
-            <Text style={styles.emptyStateDesc}>
-              Aapke paas abhi koi downloaded video nahi hai. Videos dekhte waqt download icon par tap karke unhe bina internet ke yahan dekh sakte hain.
-            </Text>
-          </View>
-        )}
 
-      </ScrollView>
+              <TouchableOpacity onPress={() => handleDelete(item)} style={styles.deleteButton} accessibilityLabel="Delete download">
+                <Ionicons name="trash-outline" size={22} color="#FF6B6B" />
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {playing ? <DownloadPlayer uri={playing.localUri} onClose={() => setPlaying(null)} /> : null}
     </View>
   );
 }
@@ -161,130 +162,110 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 0.5,
   },
-  scrollContent: {
-    padding: 20,
-    paddingBottom: 40,
-  },
-  storageText: {
-    color: "#EC9A15",
-    fontSize: 13,
-    fontWeight: "600",
-    marginBottom: 16,
-    backgroundColor: "rgba(236, 154, 21, 0.1)",
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignSelf: "flex-start",
-  },
-  listContainer: {
-    gap: 14,
-  },
-  downloadCard: {
-    flexDirection: "row",
-    backgroundColor: "#252525",
-    borderRadius: 14,
-    padding: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(236, 154, 21, 0.1)",
-  },
-  thumbnailContainer: {
-    position: "relative",
-    width: 80,
-    height: 80,
-    borderRadius: 10,
-    overflow: "hidden",
-    marginRight: 14,
-    backgroundColor: "#1A1A1A",
-  },
-  thumbnail: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  durationBadge: {
-    position: "absolute",
-    bottom: 4,
-    right: 4,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  durationText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "bold",
-  },
-  videoInfo: {
+  center: {
     flex: 1,
-    marginRight: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 32,
+    gap: 10,
   },
-  videoTitle: {
+  emptyTitle: {
     color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-    marginBottom: 4,
-    lineHeight: 18,
-  },
-  videoAuthor: {
-    color: "#aaa",
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  videoSize: {
-    color: "#666",
-    fontSize: 11,
-    fontWeight: "500",
-  },
-  actionsContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  playButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#EC9A15",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  deleteButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "rgba(255, 68, 68, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  emptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 60,
-    paddingHorizontal: 20,
-  },
-  emptyIconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: "rgba(236, 154, 21, 0.1)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: "rgba(236, 154, 21, 0.3)",
-  },
-  emptyStateTitle: {
-    color: "#fff",
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: "700",
-    marginBottom: 12,
+    marginTop: 8,
   },
-  emptyStateDesc: {
-    color: "#aaa",
+  emptyText: {
+    color: "#C9B9A6",
     fontSize: 14,
     textAlign: "center",
-    lineHeight: 22,
+    lineHeight: 20,
+  },
+  list: {
+    paddingHorizontal: 16,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  summary: {
+    color: "#C9B9A6",
+    fontSize: 13,
+    marginBottom: 4,
+  },
+  card: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#2A1A0B",
+    borderRadius: 14,
+    padding: 10,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "rgba(236,154,21,0.2)",
+  },
+  thumbWrap: {
+    width: 84,
+    height: 112,
+    borderRadius: 10,
+    overflow: "hidden",
+  },
+  thumb: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#1E1005",
+  },
+  thumbPlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playBadge: {
+    position: "absolute",
+    right: 6,
+    bottom: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#EC9A15",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 2,
+  },
+  info: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  title: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "600",
+    lineHeight: 20,
+  },
+  meta: {
+    color: "#C9B9A6",
+    fontSize: 12,
+  },
+  deleteButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playerContainer: {
+    flex: 1,
+    backgroundColor: "#000",
+    justifyContent: "center",
+  },
+  player: {
+    flex: 1,
+  },
+  playerClose: {
+    position: "absolute",
+    top: 48,
+    right: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

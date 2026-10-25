@@ -1,7 +1,7 @@
 import { getAuthHeaders } from './authApi';
 import type { ApiResponse } from './apiTypes';
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://gullyfame.com/v1/api/';
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'https://backend.gullyfame.com/v1/api/';
 
 export interface NewUser {
   _id: string;

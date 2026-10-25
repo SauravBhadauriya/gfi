@@ -63,7 +63,6 @@ function DrawerMenu({ visible, onClose }) {
             setUserName("");
           }
         } catch (e) {
-          console.error("Failed to fetch login status", e);
           setIsLoggedIn(false);
           setProfileImage(null);
           setUserName("");

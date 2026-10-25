@@ -1,32 +1,16 @@
 import { useState, useEffect } from "react";
-import {
-  StyleSheet,
-  Alert,
-  Text,
-  TouchableOpacity,
-  View,
-  Image,
-  ScrollView,
-  Dimensions,
-  Platform,
-  TextInput,
-} from "react-native";
+import { StyleSheet, Text, TouchableOpacity, View, Image, ScrollView, Dimensions, Platform, TextInput } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { showGuestModeUnavailable } from "@utils/guestMode";
 import { ThemedView } from "@components/themed-view";
 import { ThemedText } from "@components/themed-text";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  GoogleIcon,
-  InstagramIcon,
-  AppleIcon,
-  EyeIcon,
-  EyeOffIcon,
-} from "@/icons";
-import { authService } from "@api/services/authService";
+import { AppleIcon, EyeIcon, EyeOffIcon } from "@/icons";
+import { authService, AUTH_RULES } from "@api/services/authService";
+import { getErrorMessage } from "@api/client";
+import { registerPushTokenWithBackend } from "@utils/pushToken";
 import { ActivityIndicator } from "react-native";
 import { saveUserSession } from "@utils/userSession";
-import * as Google from "expo-auth-session/providers/google";
-import * as WebBrowser from "expo-web-browser";
 import { useUserRole } from "@/contexts/UserRoleContext";
 
 const { width, height } = Dimensions.get("window");
@@ -40,24 +24,7 @@ export default function SignIn() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isSocialLoading, setIsSocialLoading] = useState(false);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isInstagramLoading, setIsInstagramLoading] = useState(false);
-
-  
-  
-  
-
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
+  const isSocialLoading = false;
 
   useEffect(() => {
     if (params.email) {
@@ -72,328 +39,43 @@ export default function SignIn() {
   }, [params.email, params.passwordUpdated]);
 
   const handleSignIn = async () => {
+    if (isLoading) return;
     setErrorMessage("");
     setSuccessMessage("");
-    if (!emailOrMobile || !password) {
+    const identifier = emailOrMobile.trim().toLowerCase();
+    if (!identifier || !password) {
       setErrorMessage("Please fill all fields");
       return;
     }
-    try {
-      const accountCreatedVia = await AsyncStorage.getItem("accountCreatedVia");
-      const storedEmail = await AsyncStorage.getItem("userEmail");
-      if (
-        accountCreatedVia === "google" &&
-        storedEmail &&
-        storedEmail.toLowerCase() === emailOrMobile.trim().toLowerCase()
-      ) {
-        setErrorMessage(
-          "This account was created using Google. Please use Google Sign-In to log in.",
-        );
-        return;
-      }
-    } catch (error) {
-      if (__DEV__) {
-        console.log("Error checking account creation method:", error);
-      }
+    const isEmail = identifier.includes("@");
+    if (isEmail ? !AUTH_RULES.email.test(identifier) : !AUTH_RULES.mobile.test(identifier)) {
+      setErrorMessage("Enter a valid email or 10-digit mobile number.");
+      return;
     }
     setIsLoading(true);
     try {
-      const isEmail = emailOrMobile.includes("@");
-      const identifier = emailOrMobile.trim().toLowerCase();
-      if (__DEV__) {
-        console.log("\n🚀 ========== STARTING LOGIN ==========");
-        console.log("Login Method: Email/Mobile + Password");
-        console.log("Identifier:", identifier);
-        console.log("Is Email:", isEmail);
-        console.log("Is Mobile:", !isEmail);
-        console.log("Note: All login methods map to the same user account");
-        console.log("========================================\n");
+      const result = await authService.login({ userId: identifier, viaPassword: true, password });
+      if (!result.success || !result.data?.token) {
+        setErrorMessage(result.message);
+        return;
       }
-      const result = await authService.login({
-        userId: identifier,
-        viaPassword: true,
-        password: password,
-      });
-      if (result.success) {
-        if (__DEV__) {
-          console.log("\n✅ ========== LOGIN SUCCESS ==========");
-          console.log("Full Result:", JSON.stringify(result, null, 2));
-          console.log("Result Data:", JSON.stringify(result.data, null, 2));
-          console.log("Result Data Type:", typeof result.data);
-          console.log("Has User:", !!result.data?.user);
-          console.log(
-            "User Object:",
-            JSON.stringify(result.data?.user, null, 2),
-          );
-          console.log(
-            "Token:",
-            result.data?.token ? "Received" : "Not received",
-          );
-          console.log("=====================================\n");
-        }
-        setSuccessMessage("Login successful!");
-        if (!result.data?.token) {
-          setErrorMessage("Login failed: No token received from server.");
-          return;
-        }
-        let userData = result.data?.user;
-        if (!userData && result.data && typeof result.data === "object") {
-          if (__DEV__) {
-            console.log(
-              "⚠️ User data not in result.data.user, checking alternative locations...",
-            );
-          }
-          if ((result.data as any).email || (result.data as any).firstName) {
-            userData = result.data as any;
-            if (__DEV__) {
-              console.log("✅ Found user data directly in result.data");
-            }
-          }
-        }
-        await saveUserSession(
-          result.data.token,
-          userData || undefined,
-          isEmail ? identifier : undefined,
-          !isEmail ? identifier : undefined,
-        );
-        await AsyncStorage.setItem("accountCreatedVia", "normal");
-        if (result.data.role === "participants" || result.data.role === "fan") {
-          setRole(result.data.role);
-        }
-        router.replace("location");
-      } else {
-        
-        const isNetworkError = (result as any).isNetworkError;
-        let errorMsg =
-          result.data?.message ||
-          result.error ||
-          "Login failed. Please try again.";
-        if (isNetworkError) {
-          errorMsg =
-            result.error ||
-            "Network error: Unable to connect to server. Please check your internet connection and try again.";
-        }
-        setErrorMessage(errorMsg);
-        if (__DEV__) {
-          console.error("\n❌ ========== LOGIN FAILED ==========");
-          console.error("Error:", errorMsg);
-          console.error("Status:", result.status);
-          console.error("Is Network Error:", isNetworkError);
-          console.error("====================================\n");
-        }
-      }
-    } catch (error: any) {
-      let errorMsg = "Something went wrong. Please try again.";
-      
-      if (error.message && error.message.toLowerCase().includes("network")) {
-        errorMsg =
-          "Network error: Please check your internet connection and try again.";
-      } else if (
-        error.message &&
-        (error.message.toLowerCase().includes("timeout") ||
-          error.message.toLowerCase().includes("econnrefused"))
-      ) {
-        errorMsg =
-          "Cannot connect to server. Please check your internet connection or try again later.";
-      } else if (
-        error.message &&
-        error.message.toLowerCase().includes("failed to fetch")
-      ) {
-        errorMsg =
-          "Failed to connect to server. Please check your internet connection.";
-      } else if (error.originalError && error.originalError.message) {
-        errorMsg = error.originalError.message;
-      } else if (error.message) {
-        errorMsg = error.message;
-      } else if (error.error) {
-        errorMsg = error.error;
-      }
-      setErrorMessage(errorMsg);
-      if (__DEV__) {
-        console.error("\n❌ ========== LOGIN EXCEPTION ==========");
-        console.error("Exception:", error);
-        console.error("Error Message:", error.message);
-        console.error("Error Status:", error.status);
-        console.error("Error Data:", error.data);
-        console.error("Original Error:", error.originalError);
-        console.error("========================================\n");
-      }
+      const profile = await saveUserSession(result.data.token, result.data.user);
+      await AsyncStorage.setItem("accountCreatedVia", "normal");
+      setRole(profile.role);
+      registerPushTokenWithBackend();
+      setSuccessMessage("Login successful!");
+      router.replace("/auth/location");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const getDeviceToken = async (): Promise<string> => {
-    try {
-      if (Platform.OS === "web") {
-        return "web-device-token";
-      }
-
-      const token = await AsyncStorage.getItem("deviceToken");
-      if (token) {
-        return token;
-      }
-
-      const generatedToken = `device-token-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      await AsyncStorage.setItem("deviceToken", generatedToken);
-      return generatedToken;
-    } catch (error) {
-      console.error("Error getting device token:", error);
-      return `fallback-token-${Date.now()}`;
-    }
-  };
-
-  const getDeviceType = (): "android" | "ios" | "web" | "" => {
-    if (Platform.OS === "android") return "android";
-    if (Platform.OS === "ios") return "ios";
-    if (Platform.OS === "web") return "web";
-    return "";
-  };
-
-  
-
-
-
-
-
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-
-  const handleAppleLogin = async () => {
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
+  const handleAppleLogin = () => {
+    // POST /auth/login/social accepts an appleId, but the app has no Apple
+    // Sign-In module installed yet, so there is no appleId to send.
+    setErrorMessage("Sign in with Apple is not available yet. Please use email or OTP.");
   };
 
   return (
@@ -531,33 +213,6 @@ export default function SignIn() {
           <View style={styles.socialIconsContainer}>
             {
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
             {Platform.OS === "ios" && (
               <TouchableOpacity
@@ -595,7 +250,7 @@ export default function SignIn() {
         {}
         <View style={styles.skipContainer}>
           <TouchableOpacity
-            onPress={() => router.replace("location?skip=true")}
+            onPress={showGuestModeUnavailable}
           >
             <Text style={styles.skipText}>
               Let me have a look!{" "}

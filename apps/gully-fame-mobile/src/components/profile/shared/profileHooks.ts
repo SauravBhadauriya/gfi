@@ -1,15 +1,20 @@
-// Shared hooks for profile screens - API integrated
+// Shared hooks for profile screens.
 import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams } from "expo-router";
-import { authService } from "@api/services/authService";
-import { userService } from "@api/services/userService";
+import { getProfile, getProgress } from "@api/services/userService";
+import { getMyKyc } from "@api/services/kycService";
+import { searchUsersPage } from "@api/services/searchService";
+import { apiGet, getErrorMessage } from "@api/client";
+import { cacheUserProfile } from "@utils/userSession";
 
 export interface ProfileData {
     id?: string;
     _id?: string;
     firstName: string;
     lastName: string;
+    username?: string;
+    /** Bio, three words and social links are not stored by the backend yet; kept on this device. */
     bio: string;
     threeWords?: string;
     profileImage: string | null;
@@ -17,8 +22,12 @@ export interface ProfileData {
     isVerified: boolean;
     competitionCount: number;
     levelPercentage: number;
+    levelTitle?: string;
+    level?: number;
     xLink: string;
     instagramLink: string;
+    followersCount?: number;
+    isFollowing?: boolean;
     // Participant-specific fields
     rank?: number;
     currentRank?: number;
@@ -29,181 +38,117 @@ export interface ProfileData {
     email?: string;
 }
 
-// Hook for loading own profile data (with API integration)
+const EMPTY_PROFILE: ProfileData = {
+    firstName: "",
+    lastName: "",
+    bio: "",
+    profileImage: null,
+    role: "",
+    isVerified: false,
+    competitionCount: 0,
+    levelPercentage: 0,
+    xLink: "",
+    instagramLink: "",
+};
+
+// Own profile: cached fields render instantly, then the backend profile,
+// progress, competitions and KYC status replace them.
 export function useOwnProfile() {
-    const [profileData, setProfileData] = useState<ProfileData>({
-        firstName: "",
-        lastName: "",
-        bio: "",
-        profileImage: null,
-        role: "",
-        isVerified: false,
-        competitionCount: 0,
-        levelPercentage: 0,
-        xLink: "",
-        instagramLink: "",
-    });
+    const [profileData, setProfileData] = useState<ProfileData>(EMPTY_PROFILE);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState("");
 
     const loadUserData = useCallback(async () => {
-        try {
-            // First, load from AsyncStorage immediately (fast, cached data)
-            const [
-                userFirstName,
-                userLastName,
-                userBio,
-                userThreeWords,
-                userProfileImage,
-                userRole,
-                userInstagram,
-                userXLink,
-            ] = await Promise.all([
-                AsyncStorage.getItem("userFirstName"),
-                AsyncStorage.getItem("userLastName"),
-                AsyncStorage.getItem("userBio"),
-                AsyncStorage.getItem("userThreeWords"),
-                AsyncStorage.getItem("userProfileImage"),
-                AsyncStorage.getItem("userRole"),
-                AsyncStorage.getItem("userInstagram"),
-                AsyncStorage.getItem("userXLink"),
-            ]);
+        setError("");
+        const cached = Object.fromEntries(
+            await AsyncStorage.multiGet([
+                "userFirstName",
+                "userLastName",
+                "userBio",
+                "userThreeWords",
+                "userProfileImage",
+                "userRole",
+                "userInstagram",
+                "userXLink",
+            ])
+        );
+        setProfileData((prev) => ({
+            ...prev,
+            firstName: cached.userFirstName || prev.firstName,
+            lastName: cached.userLastName || prev.lastName,
+            bio: cached.userBio || "",
+            threeWords: cached.userThreeWords || undefined,
+            profileImage: cached.userProfileImage || prev.profileImage,
+            role: cached.userRole || prev.role,
+            instagramLink: cached.userInstagram || "",
+            xLink: cached.userXLink || "",
+        }));
 
-            // Set cached data immediately to prevent flash
+        try {
+            const [user, progress, competitions, kyc] = await Promise.all([
+                getProfile(),
+                getProgress().catch(() => null),
+                apiGet<{ total: number }>("user/competitions", { params: { page: 1, limit: 1 } }).catch(() => null),
+                getMyKyc().catch(() => null),
+            ]);
+            await cacheUserProfile(user);
             setProfileData((prev) => ({
                 ...prev,
-                firstName: userFirstName || "",
-                lastName: userLastName || "",
-                bio: userBio || "",
-                threeWords: userThreeWords || undefined,
-                profileImage: userProfileImage || null,
-                role: userRole || "",
-                instagramLink: userInstagram || "",
-                xLink: userXLink || "",
+                id: user._id,
+                _id: user._id,
+                firstName: user.firstName || "",
+                lastName: user.lastName || "",
+                username: user.username || "",
+                email: user.email || "",
+                profileImage: user.profileImage || null,
+                role: user.role || "",
+                isVerified: kyc?.status === "APPROVED",
+                competitionCount: competitions?.total || 0,
+                level: progress?.level,
+                levelTitle: progress?.levelTitle,
+                levelPercentage: progress ? Math.round((progress.xpIntoLevel / progress.xpPerLevel) * 100) : 0,
             }));
-
-            setIsLoading(false);
-
-            // Then fetch from API in the background (non-blocking)
-            authService
-                .getUserProfile()
-                .then((profileResult) => {
-                    if (profileResult.success && profileResult.data) {
-                        const userData = profileResult.data;
-
-                        // Get userId from backend response
-                        const userId =
-                            userData.id || (userData as any)._id || "";
-
-                        // Check if user is verified
-                        const hasAllRequiredFields = !!(
-                            userData.firstName &&
-                            userData.lastName &&
-                            userData.email &&
-                            userData.mobile &&
-                            userData.profileImage &&
-                            userData.role &&
-                            userData.gender &&
-                            userData.dob
-                        );
-
-                        // Use functional state update
-                        setProfileData((prev) => {
-                            // Preserve social links if API doesn't return them
-                            const finalInstagram =
-                                (userData as any).instagramLink ||
-                                (userData as any).instagram ||
-                                prev.instagramLink;
-                            const finalXLink = (userData as any).xLink || prev.xLink;
-                            const finalBio = userData.bio || prev.bio;
-                            const finalThreeWords =
-                                (userData as any).threeWords ||
-                                prev.threeWords ||
-                                "";
-
-                            // Update cache with fresh API data
-                            const cacheUpdates: Array<[string, string]> = [
-                                ["userFirstName", userData.firstName || ""],
-                                ["userLastName", userData.lastName || ""],
-                                [
-                                    "userProfileImage",
-                                    userData.profileImage || "",
-                                ],
-                                ["userBio", finalBio],
-                                ["userThreeWords", finalThreeWords],
-                                ["userRole", userData.role || ""],
-                                ["userInstagram", finalInstagram],
-                                ["userXLink", finalXLink],
-                            ];
-                            
-                            if (userId) {
-                                cacheUpdates.push(["userId", userId]);
-                            }
-                            
-                            AsyncStorage.multiSet(cacheUpdates).catch((err) =>
-                                console.error("Error updating cache:", err),
-                            );
-
-                            return {
-                                id: userId,
-                                _id: userId,
-                                firstName: userData.firstName || "",
-                                lastName: userData.lastName || "",
-                                bio: finalBio,
-                                threeWords: finalThreeWords || undefined,
-                                profileImage: userData.profileImage || null,
-                                role: userData.role || "",
-                                isVerified:
-                                    hasAllRequiredFields ||
-                                    (userData as any).isVerified === true,
-                                competitionCount:
-                                    (userData as any).competitionCount || 0,
-                                levelPercentage:
-                                    (userData as any).levelPercentage || 0,
-                                xLink: finalXLink,
-                                instagramLink: finalInstagram,
-                            };
-                        });
-                    }
-                })
-                .catch((error) => {
-                    console.error("Error fetching profile from API:", error);
-                });
-        } catch (error) {
-            console.error("Error loading user data:", error);
+        } catch (err) {
+            setError(getErrorMessage(err));
+        } finally {
             setIsLoading(false);
         }
     }, []);
 
     useEffect(() => {
         loadUserData();
-    }, []);
+    }, [loadUserData]);
 
     return {
         profileData,
         setProfileData,
         isLoading,
+        error,
         reloadProfile: loadUserData,
     };
 }
 
-// Hook for loading other user's profile data (with API integration)
+// Another user's profile. The backend has no "get user by id" endpoint, so the
+// header is seeded from navigation params and enriched from user search
+// (follower count and follow state) when a name or username is known.
 export function useOtherUserProfile() {
     const params = useLocalSearchParams();
-
-    // Extract stable values from params
     const userId = (params.userId as string) || (params.id as string) || "";
+    const firstName = (params.firstName as string) || "";
+    const lastName = (params.lastName as string) || "";
+    const username = (params.username as string) || "";
+    const avatar = (params.avatar as string) || "";
+    const role = (params.role as string) || "";
 
     const [profileData, setProfileData] = useState<ProfileData>({
-        firstName: "",
-        lastName: "",
-        bio: "",
-        profileImage: null,
-        role: "",
-        isVerified: false,
-        competitionCount: 0,
-        levelPercentage: 0,
-        xLink: "",
-        instagramLink: "",
+        ...EMPTY_PROFILE,
+        id: userId,
+        _id: userId,
+        firstName,
+        lastName,
+        username,
+        profileImage: avatar || null,
+        role,
     });
     const [isLoading, setIsLoading] = useState(!!userId);
 
@@ -212,52 +157,37 @@ export function useOtherUserProfile() {
             setIsLoading(false);
             return;
         }
-
-        // Fetch from API
-        const fetchUserProfile = async () => {
+        const query = (username || `${firstName} ${lastName}`).replace(/^@/, "").trim();
+        if (!query) {
+            setIsLoading(false);
+            return;
+        }
+        let active = true;
+        (async () => {
             try {
-                setIsLoading(true);
-                const result = await userService.getPublicUserProfile(userId);
-                
-                if (result.success && result.data) {
-                    const userData = result.data;
-                    
-                    // Check if user is verified
-                    const hasAllRequiredFields = !!(
-                        userData.firstName &&
-                        userData.lastName &&
-                        userData.email &&
-                        userData.mobile &&
-                        userData.profileImage &&
-                        userData.role &&
-                        userData.gender &&
-                        userData.dob
-                    );
-
-                    setProfileData({
-                        id: userData.id || (userData as any)._id,
-                        _id: userData.id || (userData as any)._id,
-                        firstName: userData.firstName || "",
-                        lastName: userData.lastName || "",
-                        bio: userData.bio || "",
-                        profileImage: userData.profileImage || null,
-                        role: userData.role || "",
-                        isVerified: hasAllRequiredFields || (userData as any).isVerified === true,
-                        competitionCount: (userData as any).competitionCount || 0,
-                        levelPercentage: (userData as any).levelPercentage || 0,
-                        xLink: (userData as any).xLink || "",
-                        instagramLink: (userData as any).instagramLink || (userData as any).instagram || "",
-                    });
+                const page = await searchUsersPage(query, 1, 30);
+                const match = page.results.find((u) => u._id === userId);
+                if (active && match) {
+                    setProfileData((prev) => ({
+                        ...prev,
+                        firstName: match.first_name || prev.firstName,
+                        lastName: match.last_name || prev.lastName,
+                        username: match.username || prev.username,
+                        profileImage: match.profile_picture_url || prev.profileImage,
+                        followersCount: match.followers_count,
+                        isFollowing: match.is_followed_by_me,
+                    }));
                 }
-            } catch (error) {
-                console.error("Error fetching public profile:", error);
+            } catch {
+                // The seeded header is still shown.
             } finally {
-                setIsLoading(false);
+                if (active) setIsLoading(false);
             }
+        })();
+        return () => {
+            active = false;
         };
-
-        fetchUserProfile();
-    }, [userId]);
+    }, [userId, username, firstName, lastName]);
 
     return { profileData, setProfileData, isLoading };
 }

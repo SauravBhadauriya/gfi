@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,6 @@ import {
   Modal,
   Alert,
   Animated,
-  Clipboard,
   FlatList,
   Keyboard,
   ActivityIndicator,
@@ -22,8 +21,22 @@ import {
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle } from "react-native-svg";
-import { ChatMessageAPIData, chatService } from "@api/services/chatService";
+import * as Clipboard from "expo-clipboard";
+import {
+  ChatMessage,
+  getChatDetails,
+  getChatList,
+  sendMessage,
+  toggleReaction,
+  deleteMessages,
+  markConversationRead,
+  MESSAGE_MAX_LENGTH,
+  DeleteType,
+} from "@api/services/chatService";
 import { socketChatService } from "@api/services/socketChatService";
+import { getErrorMessage } from "@api/client";
+import { getChatContacts, rememberChatContact, fallbackChatName } from "@utils/chatContacts";
+import { showToast, toastError, toastSuccess } from "@components/ui/Toast";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { BackIcon, MicIcon, SendIcon } from "@/icons";
 import { chatScreenStyles as styles } from "@/styles/chatScreenStyles";
@@ -31,30 +44,9 @@ import Message from "@/components/ChatMessage/ChatMessage";
 
 const getDimensions = () => Dimensions.get("window");
 const SCREEN_WIDTH = Dimensions.get("window").width;
-const allChatsForForward = [
-  {
-    id: 1,
-    name: "Sarah Johnson",
-    avatar: require("@assets/images/user1.png"),
-    isOnline: true,
-  },
-  {
-    id: 2,
-    name: "Mike Chen",
-    avatar: require("@assets/images/user2.png"),
-    isOnline: false,
-  },
-  {
-    id: 3,
-    name: "Emma Davis",
-    avatar: require("@assets/images/user1.png"),
-    isOnline: true,
-  },
-];
-
 const REACTION_EMOJIS = ["❤️", "😂", "😮", "😢", "🙏", "🔥"];
 export default function ChatDetailScreen() {
-  const { id, name } = useLocalSearchParams();
+  const { id, name, avatar } = useLocalSearchParams();
   const chatUserId = id as string;
   const [dimensions, setDimensions] = useState(getDimensions());
   const [message, setMessage] = useState("");
@@ -63,16 +55,14 @@ export default function ChatDetailScreen() {
   const [selectedMessage, setSelectedMessage] = useState<any>(null);
   const [showForwardScreen, setShowForwardScreen] = useState(false);
   const [forwardingMessages, setForwardingMessages] = useState<any[]>([]);
-  const [selectedForwardChats, setSelectedForwardChats] = useState<number[]>(
+  const [forwardTargets, setForwardTargets] = useState<{ id: string; name: string; avatar: any }[]>([]);
+  const [selectedForwardChats, setSelectedForwardChats] = useState<string[]>(
     [],
   );
   const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
   const [selectedMessages, setSelectedMessages] = useState<Set<string>>(
     new Set(),
   );
-  const [messageReactions, setMessageReactions] = useState<{
-    [key: string]: string[];
-  }>({});
   const insets = useSafeAreaInsets();
   const scrollViewRef = useRef<ScrollView>(null);
   const actionBarPosition = useRef<Animated.ValueXY>(
@@ -83,7 +73,7 @@ export default function ChatDetailScreen() {
 
   
   const [loading, setLoading] = useState(true);
-  const [messages, setMessages] = useState<ChatMessageAPIData[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatUserName, setChatUserName] = useState(name || "User");
   const [chatUserAvatar, setChatUserAvatar] = useState(
     require("@assets/images/user1.png"),
@@ -114,175 +104,62 @@ export default function ChatDetailScreen() {
   }, []);
 
   
+  // Who I am (cached from the profile) and who I'm talking to.
   useEffect(() => {
-    const fetchUserData = async () => {
-      try {
-        const userId = await AsyncStorage.getItem("userId");
-        setCurrentUserId(userId);
+    (async () => {
+      setCurrentUserId(await AsyncStorage.getItem("userId"));
+      const contacts = await getChatContacts();
+      const known = contacts[chatUserId];
+      const displayName = (name as string) || known?.name || fallbackChatName(chatUserId || "");
+      setChatUserName(displayName);
+      const avatarUrl = (avatar as string) || known?.avatar || "";
+      if (avatarUrl) setChatUserAvatar({ uri: avatarUrl });
+      if (name || avatar) rememberChatContact(chatUserId, { name: name as string, avatar: avatar as string });
+    })();
+  }, [chatUserId, name, avatar]);
 
-        
-        if (chatUserId && chatUserId !== "new") {
-          try {
-            
-            
-            if (name) {
-              setChatUserName(name);
-            }
-            
-          } catch (error) {
-            console.error("Error fetching chat user profile:", error);
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching current user ID:", error);
-      }
-    };
-    fetchUserData();
-  }, [chatUserId, name]);
-
-  
-  useEffect(() => {
-    const fetchChatDetails = async () => {
-      if (!chatUserId || chatUserId === "new") {
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        console.log(
-          "[ChatDetailScreen] Fetching chat details for:",
-          chatUserId,
-        );
-
-        const response = await chatService.getChatDetails(chatUserId, 1, 50);
-
-        if (response.success && response.data) {
-          setMessages(response.data.messages);
-          console.log("Set messages correctly", response.data.messages);
-        } else {
-          console.error(
-            "[ChatDetailScreen] Failed to fetch chat:",
-            response.message,
-          );
-          
-          Alert.alert(
-            "Error Loading Chat",
-            response.message || "Failed to load conversation. Please try again.",
-            [{ text: "OK", onPress: () => router.back() }]
-          );
-          setMessages([]);
-        }
-      } catch (error: any) {
-        console.error("[ChatDetailScreen] Error fetching chat:", error);
-        Alert.alert(
-          "Error",
-          "Failed to load chat. Please try again.",
-          [{ text: "OK", onPress: () => router.back() }]
-        );
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    if (currentUserId) {
-      fetchChatDetails();
+  // GET /chat/chatDetails returns newest first; the screen shows oldest -> newest.
+  const loadMessages = useCallback(async () => {
+    if (!chatUserId || chatUserId === "new") {
+      setLoading(false);
+      return;
     }
-  }, [chatUserId, currentUserId]);
+    try {
+      const page = await getChatDetails(chatUserId, 1, 50);
+      setMessages([...page.messages].reverse());
+      markConversationRead(chatUserId).catch(() => undefined);
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, [chatUserId]);
 
-  
-  useEffect(() => {
-    const connectSocket = async () => {
-      if (!chatUserId || chatUserId === "new" || !currentUserId) return;
-
-      try {
-        console.log("[ChatDetailScreen] Connecting socket...");
-        await socketChatService.connect(chatUserId, {
-          onMessageReceived: (newMessage: ChatMessageAPIData) => {
-            console.log("[ChatDetailScreen] Real-time message received:", newMessage._id);
-            setMessages((prev) => {
-              
-              if (prev.find((m) => m._id === newMessage._id)) {
-                return prev;
-              }
-              return [...prev, newMessage];
-            });
-          },
-          onMessageDelivered: (messageId: string) => {
-            console.log("[ChatDetailScreen] Message delivered:", messageId);
-            
-          },
-          onMessageDeleted: (messageId: string) => {
-            console.log("[ChatDetailScreen] Message deleted:", messageId);
-            setMessages((prev) => prev.filter((m) => m._id !== messageId));
-          },
-          onConnected: () => {
-            console.log("[ChatDetailScreen] Socket connected");
-            setSocketConnected(true);
-            setSocketError(null);
-            
-            socketChatService.markConversationRead(chatUserId);
-          },
-          onDisconnected: () => {
-            console.log("[ChatDetailScreen] Socket disconnected");
-            setSocketConnected(false);
-          },
-          onError: (error: string) => {
-            console.error("[ChatDetailScreen] Socket error:", error);
-            setSocketError(error);
-          },
-        });
-      } catch (error: any) {
-        console.error("[ChatDetailScreen] Socket connection failed:", error.message);
-        setSocketError(error.message);
-      }
-    };
-
-    connectSocket();
-
-    
-    return () => {
-      console.log("[ChatDetailScreen] Disconnecting socket on unmount");
-      socketChatService.disconnect();
-    };
-  }, [chatUserId, currentUserId]);
-
-  // Auto-reconnect socket if disconnected when screen comes into focus
   useFocusEffect(
-    React.useCallback(() => {
-      if (chatUserId && chatUserId !== "new" && currentUserId) {
-        // Check if socket is disconnected and reconnect if needed
-        if (!socketChatService.isConnected()) {
-          console.log("[ChatDetailScreen] Socket disconnected on focus, reconnecting...");
-          socketChatService.connect(chatUserId, {
-            onMessageReceived: (newMessage: ChatMessageAPIData) => {
-              console.log("[ChatDetailScreen] Real-time message received:", newMessage._id);
-              setMessages((prev) => {
-                if (prev.find((m) => m._id === newMessage._id)) {
-                  return prev;
-                }
-                return [...prev, newMessage];
-              });
-            },
-            onConnected: () => {
-              console.log("[ChatDetailScreen] Socket reconnected");
-              setSocketConnected(true);
-              setSocketError(null);
-              socketChatService.markConversationRead(chatUserId);
-            },
-            onDisconnected: () => {
-              console.log("[ChatDetailScreen] Socket disconnected");
-              setSocketConnected(false);
-            },
-            onError: (error: string) => {
-              console.error("[ChatDetailScreen] Socket error:", error);
-              setSocketError(error);
-            },
-          }).catch(err => console.error("[ChatDetailScreen] Reconnect error:", err));
-        }
-      }
-    }, [chatUserId, currentUserId])
+    useCallback(() => {
+      loadMessages();
+    }, [loadMessages])
   );
+
+  // Live delivery: the backend emits `new_message` to the receiver's room.
+  useEffect(() => {
+    socketChatService.connect();
+    setSocketConnected(socketChatService.isConnected());
+    const offStatus = socketChatService.onStatusChange((connected) => {
+      setSocketConnected(connected);
+      setSocketError(connected ? null : "Reconnecting…");
+    });
+    const offMessage = socketChatService.onMessage((incoming) => {
+      if (String(incoming.sender_id) !== chatUserId) return;
+      setMessages((prev) => (prev.some((m) => m._id === incoming._id) ? prev : [...prev, incoming]));
+      markConversationRead(chatUserId).catch(() => undefined);
+    });
+    return () => {
+      offStatus();
+      offMessage();
+    };
+  }, [chatUserId]);
+
   useEffect(() => {
     if (scrollViewRef.current && messages.length > 0) {
       setTimeout(() => {
@@ -291,78 +168,33 @@ export default function ChatDetailScreen() {
     }
   }, [messages]);
 
+  // POST /chat/sendChat; the response carries the saved message.
   const handleSend = async () => {
-    if (!message.trim() || !chatUserId || chatUserId === "new" || sending) {
+    const messageText = message.trim();
+    if (!messageText || !chatUserId || chatUserId === "new" || sending) return;
+    if (messageText.length > MESSAGE_MAX_LENGTH) {
+      toastError(`Messages can be up to ${MESSAGE_MAX_LENGTH} characters.`);
       return;
     }
+    setSending(true);
+    setMessage("");
     try {
-      setSending(true);
-      const messageText = message.trim();
-      setMessage(""); 
-
-      console.log("[ChatDetailScreen] Sending message to:", chatUserId);
-
-      
-      if (socketChatService.isConnected()) {
-        console.log("[ChatDetailScreen] Sending via socket");
-        const socketResult = await socketChatService.sendMessage(
-          chatUserId,
-          chatUserId,
-          messageText
-        );
-
-        if (socketResult.success) {
-          console.log("[ChatDetailScreen] Message sent via socket");
-          
-          return;
-        } else {
-          console.warn("[ChatDetailScreen] Socket send failed, falling back to REST");
-        }
-      }
-
-      
-      console.log("[ChatDetailScreen] Sending via REST API");
-      const response = await chatService.sendChat(chatUserId, messageText);
-
-      if (response.success) {
-        
-        if (!currentUserId) return;
-        const newMessage: ChatMessageAPIData = {
-          _id: Date.now().toString(), 
-          message: messageText,
-          receiver_id: chatUserId,
-          sender_id: currentUserId,
-          createdAt: new Date().toISOString(),
-        };
-
-        setMessages((prev) => [...prev, newMessage]);
-      } else {
-        if (!currentUserId) return;
-        const newMessage: ChatMessageAPIData = {
-          _id: Date.now().toString(), 
-          message: messageText,
-          receiver_id: chatUserId,
-          sender_id: currentUserId,
-          createdAt: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, newMessage]);
-        console.warn("Couldn't send message to backend, updating UI");
-        setMessage(messageText); 
-      }
-    } catch (error: any) {
-      console.error("[ChatDetailScreen] Error sending message:", error);
-      Alert.alert("Error", "Failed to send message. Please try again.");
-      setMessage(message.trim()); 
+      const result = await sendMessage(chatUserId, messageText);
+      setMessages((prev) => [...prev, result.message]);
+      rememberChatContact(chatUserId, { name: String(chatUserName) });
+    } catch (error) {
+      setMessage(messageText);
+      toastError(getErrorMessage(error));
     } finally {
       setSending(false);
     }
   };
 
   const handleMicPress = () => {
+    showToast("Voice messages aren't available yet.", "info");
     // Voice recording feature not implemented in managed Expo workflow
     // Would require native audio module (expo-av supports playback but not voice memo recording)
     // TODO: Implement voice message recording when available
-    console.warn("[ChatDetailScreen] Voice recording not implemented");
   };
 
   
@@ -427,7 +259,8 @@ export default function ChatDetailScreen() {
   
   const handleCopyMessage = useCallback(() => {
     if (selectedMessage) {
-      Clipboard.setString(selectedMessage.text);
+      Clipboard.setStringAsync(selectedMessage.message || "");
+      toastSuccess("Copied");
       hideActionBar();
       
       Alert.alert("Copied", "Message copied to clipboard");
@@ -459,84 +292,63 @@ export default function ChatDetailScreen() {
   ]);
 
   
-  const handleDeleteMessage = useCallback(() => {
-    if (isMultiSelectMode && selectedMessages.size > 0) {
-      Alert.alert(
-        "Delete Messages",
-        `Delete ${selectedMessages.size} message(s)?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: async () => {
-              try {
-                
-                const deletePromises = Array.from(selectedMessages).map((msgId) =>
-                  chatService.deleteMessage(msgId)
-                );
-                await Promise.all(deletePromises);
-
-                setMessages((prev) =>
-                  prev.filter((msg) => !selectedMessages.has(msg._id)),
-                );
-
-                setIsMultiSelectMode(false);
-                setSelectedMessages(new Set());
-                hideActionBar();
-              } catch (error: any) {
-                Alert.alert("Error", "Failed to delete messages");
-              }
-            },
-          },
-        ],
-      );
-    } else if (selectedMessage) {
-      Alert.alert("Delete Message", "Delete this message?", [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              
-              await chatService.deleteMessage(selectedMessage._id);
-              setMessages((prev) =>
-                prev.filter((msg) => msg._id !== selectedMessage._id),
-              );
-              hideActionBar();
-            } catch (error: any) {
-              Alert.alert("Error", "Failed to delete message");
-            }
-          },
-        },
-      ]);
-    }
-  }, [isMultiSelectMode, selectedMessages, selectedMessage, hideActionBar]);
-
-  
-  const handleReactToMessage = useCallback(
-    (emoji: string) => {
-      if (selectedMessage) {
-        setMessageReactions((prev) => {
-          const msgId = selectedMessage._id;
-          const currentReactions = prev[msgId] || [];
-          if (currentReactions.includes(emoji)) {
-            return {
-              ...prev,
-              [msgId]: currentReactions.filter((e) => e !== emoji),
-            };
-          } else {
-            return { ...prev, [msgId]: [...currentReactions, emoji] };
-          }
-        });
+  // POST /chat/message/delete { message_ids, delete_type }. "For everyone" only
+  // works for my own messages that haven't been read yet.
+  const runDelete = useCallback(
+    async (ids: string[], type: DeleteType) => {
+      try {
+        await deleteMessages(ids, type);
+        setMessages((prev) =>
+          type === "for_me"
+            ? prev.filter((m) => !ids.includes(m._id))
+            : prev.map((m) => (ids.includes(m._id) ? { ...m, is_deleted: true, message: "" } : m))
+        );
+        toastSuccess(ids.length > 1 ? "Messages deleted" : "Message deleted");
+      } catch (error) {
+        toastError(getErrorMessage(error));
+      } finally {
+        setIsMultiSelectMode(false);
+        setSelectedMessages(new Set());
         hideActionBar();
+      }
+    },
+    [hideActionBar]
+  );
+
+  const handleDeleteMessage = useCallback(() => {
+    const ids =
+      isMultiSelectMode && selectedMessages.size > 0
+        ? Array.from(selectedMessages)
+        : selectedMessage
+          ? [selectedMessage._id]
+          : [];
+    if (ids.length === 0) return;
+    const allMine = ids.every((mid) => messages.find((m) => m._id === mid)?.sender_id === currentUserId);
+    Alert.alert(ids.length > 1 ? "Delete Messages" : "Delete Message", `Delete ${ids.length} message(s)?`, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete for me", style: "destructive", onPress: () => runDelete(ids, "for_me") },
+      ...(allMine
+        ? [{ text: "Delete for everyone", style: "destructive" as const, onPress: () => runDelete(ids, "for_everyone") }]
+        : []),
+    ]);
+  }, [isMultiSelectMode, selectedMessages, selectedMessage, messages, currentUserId, runDelete]);
+
+  // POST /chat/message/:id/react toggles my emoji; the response has all reactions.
+  const handleReactToMessage = useCallback(
+    async (emoji: string) => {
+      if (!selectedMessage) return;
+      const msgId = selectedMessage._id;
+      hideActionBar();
+      try {
+        const result = await toggleReaction(msgId, emoji);
+        setMessages((prev) => prev.map((m) => (m._id === msgId ? { ...m, reactions: result.reactions } : m)));
+      } catch (error) {
+        toastError(getErrorMessage(error));
       }
     },
     [selectedMessage, hideActionBar],
   );
 
-  
   const handleSelectMessage = useCallback(() => {
     if (selectedMessage) {
       setIsMultiSelectMode(true);
@@ -546,24 +358,49 @@ export default function ChatDetailScreen() {
   }, [selectedMessage, hideActionBar]);
 
   
-  const handleSendForwardedMessages = useCallback(() => {
+  const handleSendForwardedMessages = useCallback(async () => {
     if (selectedForwardChats.length === 0) {
-      Alert.alert(
-        "Select Chats",
-        "Please select at least one chat to forward to",
-      );
+      Alert.alert("Select Chats", "Please select at least one chat to forward to");
       return;
     }
+    try {
+      for (const target of selectedForwardChats) {
+        for (const msg of forwardingMessages) {
+          if (msg?.message) await sendMessage(target, msg.message, null, true);
+        }
+      }
+      toastSuccess(`Forwarded to ${selectedForwardChats.length} chat(s)`);
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setShowForwardScreen(false);
+      setSelectedForwardChats([]);
+      setForwardingMessages([]);
+    }
+  }, [selectedForwardChats, forwardingMessages]);
 
-    
-    Alert.alert(
-      "Forwarded",
-      `Message forwarded to ${selectedForwardChats.length} chat(s)`,
-    );
-    setShowForwardScreen(false);
-    setSelectedForwardChats([]);
-    setForwardingMessages([]);
-  }, [selectedForwardChats]);
+  // Forward targets are the people I already chat with.
+  useEffect(() => {
+    if (!showForwardScreen) return;
+    (async () => {
+      try {
+        const [list, contacts] = await Promise.all([getChatList("all"), getChatContacts()]);
+        setForwardTargets(
+          list.chatlist
+            .filter((c) => c.chatter_user_id !== chatUserId)
+            .map((c) => ({
+              id: c.chatter_user_id,
+              name: contacts[c.chatter_user_id]?.name || fallbackChatName(c.chatter_user_id),
+              avatar: contacts[c.chatter_user_id]?.avatar
+                ? { uri: contacts[c.chatter_user_id].avatar }
+                : require("@assets/images/user1.png"),
+            }))
+        );
+      } catch (error) {
+        toastError(getErrorMessage(error));
+      }
+    })();
+  }, [showForwardScreen, chatUserId]);
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -683,7 +520,7 @@ export default function ChatDetailScreen() {
                   message={msg}
                   onLongPress={handleMessageLongPress}
                   onPress={handleMessagePress}
-                  reactions={messageReactions[msg._id] || []}
+                  reactions={(msg.reactions || []).map((r) => r.emoji)}
                 ></Message>
               ))
             )}
@@ -850,8 +687,11 @@ export default function ChatDetailScreen() {
           </View>
 
           <FlatList
-            data={allChatsForForward}
-            keyExtractor={(item) => item.id.toString()}
+            data={forwardTargets}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={
+              <Text style={[styles.forwardChatName, { textAlign: "center", marginTop: 24 }]}>No other chats yet</Text>
+            }
             renderItem={({ item }) => (
               <TouchableOpacity
                 style={styles.forwardChatItem}

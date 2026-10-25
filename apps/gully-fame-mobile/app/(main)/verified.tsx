@@ -1,18 +1,9 @@
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Platform,
-  Image,
-  Dimensions,
-} from "react-native";
+import { useState, useEffect, useCallback } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Platform, Dimensions } from "react-native";
 import { router } from "expo-router";
+import { getMyKyc } from "@/api/services/kycService";
 import { useFocusEffect } from "expo-router/react-navigation";
-import Svg, { Path, Circle } from "react-native-svg";
+import { Circle } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useOwnProfile } from "@/components/profile/shared/profileHooks";
 import {
@@ -58,30 +49,17 @@ export default function VerifiedScreen() {
       const hasDob = dob.trim().length > 0;
       const hasGender = gender.trim().length > 0;
 
-      const allStepsCompleted =
-        hasBio && hasImage && hasFaceScan && hasDob && hasGender;
-
+      // "Verified" means an admin approved the KYC document on the backend.
+      const kyc = await getMyKyc().catch(() => null);
       setVerificationStatus({
-        isVerified: profileData?.isVerified || allStepsCompleted,
+        isVerified: kyc?.status === "APPROVED",
         hasBio,
         hasImage,
         hasFaceScan,
         hasDob,
         hasGender,
       });
-
-      
-      if (allStepsCompleted) {
-        try {
-          const { autoVerifyKycIfComplete } =
-            await import("@utils/kycValidation");
-          await autoVerifyKycIfComplete();
-        } catch (error) {
-          console.error("Error auto-verifying KYC:", error);
-        }
-      }
-    } catch (error) {
-      console.error("Error checking verification status:", error);
+    } catch (error) { /* intentionally ignored */
     }
   };
 
@@ -99,7 +77,7 @@ export default function VerifiedScreen() {
         router.push("/(main)/account-center?fromVerified=true" as any);
         break;
       case "dob":
-      case "gender":
+      case "gender": {
         
         const query = [
           `role=${encodeURIComponent(role)}`,
@@ -110,7 +88,8 @@ export default function VerifiedScreen() {
         ].join("&");
         router.push(`/onboarding/personal-details?${query}` as any);
         break;
-      case "faceScan":
+      }
+      case "faceScan": {
         
         const faceScanQuery = [
           `role=${encodeURIComponent(role)}`,
@@ -121,27 +100,12 @@ export default function VerifiedScreen() {
         ].join("&");
         router.push(`/onboarding/face-scan?${faceScanQuery}` as any);
         break;
+      }
     }
   };
 
-  const handleVerifyNow = async () => {
-    
-    await AsyncStorage.setItem("faceScanDone", "true");
-    
-    const role = (await AsyncStorage.getItem("userRole")) || "participant";
-    const firstName = profileData?.firstName || "";
-    const lastName = profileData?.lastName || "";
-    const email = profileData?.email || "";
-
-    const query = [
-      `role=${encodeURIComponent(role)}`,
-      `firstName=${encodeURIComponent(firstName)}`,
-      `lastName=${encodeURIComponent(lastName)}`,
-      `email=${encodeURIComponent(email)}`,
-      `fromVerified=true`,
-    ].join("&");
-
-    router.push(`/onboarding/verify-id?${query}` as any);
+  const handleVerifyNow = () => {
+    router.push("/(main)/settings/kyc-status" as any);
   };
 
   const { isVerified, hasBio, hasImage, hasFaceScan, hasDob, hasGender } =

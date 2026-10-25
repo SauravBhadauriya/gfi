@@ -13,7 +13,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { authService } from "@/api";
 import { router } from "expo-router";
 import { useUserRole } from "@/contexts/UserRoleContext";
-const upgradeBanner = require("@assets/images/upgrade_banner.jpeg");
+const upgradeBanner = require("@assets/images/becomeaparticipant.png");
 type benefits = {
     text: string;
     icon?: any;
@@ -47,21 +47,12 @@ function UpgradeFanToParticipantModal({
                 role: targetRole,
             });
             if (response.success) {
-                console.log(
-                    "[AuthService] Update Profile Status is 200, setting Async Local Storage",
-                );
-                console.log(
-                    "[AuthService] This is the response: ",
-                    response.data,
-                );
                 setRole(targetRole);
                 onUpgradeSuccess();
                 router.replace(`/profile/me?refresh=${Date.now()}`);
-            } else {
-                console.error("[AuthService] Couldn't get to backend.");
+            } else { /* intentionally ignored */
             }
-        } catch (err) {
-            console.error("Error trying to upgrade to participants: ", err);
+        } catch (err) { /* intentionally ignored */
         } finally {
             setChangingRole(false);
         }

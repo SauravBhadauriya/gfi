@@ -10,102 +10,50 @@ import {
   ActivityIndicator,
 } from "react-native";
 import * as Location from "expo-location";
-import { router, useLocalSearchParams } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
+import { apiPut, getAuthToken } from "@/api/client";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 export default function LocationScreen() {
-  const params = useLocalSearchParams();
-  const role = params.role ? String(params.role) : "participant";
-  const firstName = params.firstName ? decodeURIComponent(String(params.firstName)) : "";
-  const lastName = params.lastName ? decodeURIComponent(String(params.lastName)) : "";
-  const email = params.email ? decodeURIComponent(String(params.email)) : "";
 
-  const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
   const [loading, setLoading] = useState(false); 
 
-const handleEnableLocation = async () => {
-  try {
-    setLoading(true);
+const finish = async () => {
+  // The backend needs a signed-in user for every content screen.
+  const token = await getAuthToken();
+  router.replace(token ? ("/(main)/home" as any) : "/auth/signin");
+};
 
-    const { status } = await Location.requestForegroundPermissionsAsync();
+const handleEnableLocation = async () => {
+  if (loading) return;
+  setLoading(true);
+  try {
+    const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
-      setLoading(false);
-      Alert.alert("Permission Denied", "Location access is needed.");
+      if (!canAskAgain) showPermissionSettingsAlert("Location access");
+      else Alert.alert("Permission Denied", "Location access is needed to show results near you.");
       return;
     }
-
-    
-    const locationPromise = Location.getCurrentPositionAsync({});
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("Location timeout")), 5000)
-    );
-
-    const userLocation = await Promise.race([locationPromise, timeoutPromise]);
-    console.log("User Location:", userLocation);
-
-    
-    const isSkipFlow = params.skip === "true";
-    const isLoggedIn = await AsyncStorage.getItem("isLoggedIn");
-    const isFromSignIn = !firstName && !lastName && email && !isSkipFlow;
-    const accountCreated = await AsyncStorage.getItem("accountCreated");
-
-    if (isSkipFlow) {
-      
-      if (accountCreated === "true") {
-        
-        const userEmail = await AsyncStorage.getItem("userEmail") || email;
-        const query = `email=${encodeURIComponent(userEmail)}`;
-        router.replace(`/auth/verify-otp?${query}` as any);
-      } else {
-        
-        
-        router.replace("/(main)/home" as any);
-      }
-    } else if (isFromSignIn || isLoggedIn === "true") {
-      
-      await AsyncStorage.multiSet([
-        ["isLoggedIn", "true"],
-        ["profileCompleted", "true"],
-      ]);
-      router.replace("/(main)/home" as any);
-    } else {
-      
-      router.replace("/auth/signin");
+    const position = await Promise.race([
+      Location.getCurrentPositionAsync({}),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Location timeout")), 8000)),
+    ]);
+    if (await getAuthToken()) {
+      // PUT /user/profile stores latitude/longitude as a GeoJSON point.
+      await apiPut("user/profile", {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      }).catch(() => undefined);
     }
-  } catch (error) {
-    console.error(error);
+    await finish();
+  } catch {
+    Alert.alert("Error", "Could not fetch your location. You can enable it later.");
+  } finally {
     setLoading(false);
-    Alert.alert("Error", "Could not fetch location. Please try again.");
   }
 };
 
-const handleSkip = async () => {
-  try {
-    const isSkipFlow = params.skip === "true";
-    const accountCreated = await AsyncStorage.getItem("accountCreated");
-    
-    if (isSkipFlow) {
-      
-      if (accountCreated === "true") {
-        
-        const userEmail = await AsyncStorage.getItem("userEmail") || email;
-        const query = `email=${encodeURIComponent(userEmail)}`;
-        router.replace(`/auth/verify-otp?${query}` as any);
-      } else {
-        
-        
-        router.replace("/(main)/home" as any);
-      }
-    } else {
-      
-      
-      router.replace("/(main)/home" as any);
-    }
-  } catch (error) {
-    console.error("Error skipping location:", error);
-    router.replace("/(main)/home" as any);
-  }
-};
+const handleSkip = () => finish();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -123,9 +71,7 @@ const handleSkip = async () => {
 
         <Text style={styles.title}>Location</Text>
         <Text style={styles.subtitle}>
-          Please enable location access so we{"\n"}could provide you accurate
-          results of{"\n"}
-          nearest properties.
+          Please enable location access so we can show you accurate results nearby.
         </Text>
 
         <TouchableOpacity
@@ -191,7 +137,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 20,
     marginBottom: 30,
-    width: "80%",
+    marginHorizontal: 24,
   },
   button: {
     backgroundColor: "#3C2610",

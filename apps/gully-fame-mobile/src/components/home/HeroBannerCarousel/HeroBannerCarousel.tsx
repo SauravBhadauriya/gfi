@@ -2,41 +2,77 @@ import { homePageHeroSlidesAPIData } from "@/types/homePageHeroSlides";
 import { useEffect, useRef, useState } from "react";
 import {
   ScrollView,
-  View,
   Image,
+  View,
   Text,
   NativeSyntheticEvent,
   NativeScrollEvent,
   Dimensions,
 } from "react-native";
 import { styles } from "./styles";
-import SafeImage from "@/components/SafeImage";
-import { BASE_URL } from "@/api/axios";
+import { wp } from "@/utils/responsive";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { TALENT_CATEGORIES } from "@/constants/talentCategories";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
+
+const HERO_IMAGE = require("@assets/images/carousel1.png");
+const LOCAL_SLIDES = TALENT_CATEGORIES.map((c, i) => ({ id: i + 1, ...c }));
 const getDimensions = () => Dimensions.get("window");
-const HeroBannerCarousel = ({
-  slides,
-}: {
-  slides: homePageHeroSlidesAPIData[];
+type Slide =
+  | { kind: "banner"; id: string | number; title: string; image: string }
+  | ({ kind: "local" } & (typeof LOCAL_SLIDES)[number]);
+
+const HeroBannerCarousel = ({ slides: remoteSlides }: {
+  slides?: homePageHeroSlidesAPIData[];
 }) => {
-  const carouselRef = useRef<ScrollView | null>(null);
-  const [activeSlide, setActiveSlide] = useState(0);
-  const [dimensions, setDimensions] = useState(getDimensions());
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const slideIndex = Math.round(
-      e.nativeEvent.contentOffset.x / dimensions.width,
+  // Banners added in the admin panel (App Content > Home Banners) replace the built-in category
+  // slides. The built-in slides only show while there are no active banners.
+  const bannerSlides: Slide[] = (remoteSlides ?? [])
+    .map((b, i): Slide | null => {
+      const image = resolveMediaUrl(b.image);
+      return image ? { kind: "banner", id: b.id ?? i, title: b.title ?? "", image } : null;
+    })
+    .filter((s): s is Slide => s !== null);
+  const slides: Slide[] = bannerSlides.length > 0 ? bannerSlides : LOCAL_SLIDES.map((s) => ({ kind: "local" as const, ...s }));
+  const renderSlideContent = (slide: Slide) =>
+    slide.kind === "banner" ? (
+      <View style={styles.heroBannerWrapper}>
+        <Image source={{ uri: slide.image }} style={styles.heroBannerImage} />
+        {slide.title ? (
+          <View style={styles.heroBannerCaption}>
+            <Text style={styles.heroTitle} numberOfLines={2}>
+              {slide.title}
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    ) : (
+      <View style={styles.heroContent}>
+        <MaterialCommunityIcons name={slide.icon} size={wp(14)} color="#fff" style={styles.heroIcon} />
+        <Text style={styles.heroTitle}>{slide.name}</Text>
+        <Text style={styles.heroTagline}>{slide.tagline}</Text>
+        <Text style={styles.heroSubtitle}>{slide.description}</Text>
+      </View>
     );
-    const actualIndex = slideIndex === slides.length ? 0 : slideIndex;
-    if (activeSlide !== actualIndex) {
-      setActiveSlide(slideIndex);
+  const carouselRef = useRef<ScrollView | null>(null);
+  const [dimensions, setDimensions] = useState(getDimensions());
+  const indexRef = useRef(0);
+  const widthRef = useRef(dimensions.width);
+  widthRef.current = dimensions.width;
+  const jumpTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // The last slide is followed by a copy of the first; once it is reached, jump back silently.
+  const resetIfAtEnd = (x: number) => {
+    const slideIndex = Math.round(x / widthRef.current);
+    if (slideIndex >= slides.length) {
+      carouselRef.current?.scrollTo({ x: 0, animated: false });
+      indexRef.current = 0;
+    } else {
+      indexRef.current = slideIndex;
     }
   };
   const onMomentumScrollEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const slideIndex = Math.round(
-      e.nativeEvent.contentOffset.x / dimensions.width,
-    );
-    if (slideIndex === slides.length) {
-      carouselRef.current?.scrollTo({ x: 0, animated: false });
-    }
+    resetIfAtEnd(e.nativeEvent.contentOffset.x);
   };
   useEffect(() => {
     const subscription = Dimensions.addEventListener("change", ({ window }) => {
@@ -45,93 +81,44 @@ const HeroBannerCarousel = ({
     return () => subscription.remove();
   }, []);
   useEffect(() => {
-    if (slides.length === 0) return;
-
     const interval = setInterval(() => {
-      if (activeSlide === slides.length - 1) {
-        carouselRef.current?.scrollTo({
-          x: slides.length * dimensions.width,
-          animated: true,
-        });
-        setTimeout(() => {
+      const next = indexRef.current + 1;
+      indexRef.current = next;
+      carouselRef.current?.scrollTo({ x: next * widthRef.current, animated: true });
+      if (next >= slides.length) {
+        // Fallback in case no momentum-end event fires after a programmatic scroll.
+        jumpTimer.current = setTimeout(() => {
           carouselRef.current?.scrollTo({ x: 0, animated: false });
-        }, 500);
-      } else {
-        carouselRef.current?.scrollTo({
-          x: (activeSlide + 1) * dimensions.width,
-          animated: true,
-        });
+          indexRef.current = 0;
+        }, 700);
       }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [slides.length, dimensions.width, activeSlide]);
+    }, 4000);
+    return () => {
+      clearInterval(interval);
+      if (jumpTimer.current) clearTimeout(jumpTimer.current);
+    };
+  }, [slides.length]);
   return (
     <>
+      {/* One fixed background; only the text and icon change between slides. */}
+      {bannerSlides.length === 0 && <Image source={HERO_IMAGE} style={styles.heroBackgroundImage} />}
       <ScrollView
         ref={carouselRef}
         horizontal
-        onScroll={onScroll}
         pagingEnabled
         onMomentumScrollEnd={onMomentumScrollEnd}
         showsHorizontalScrollIndicator={false}
         scrollEventThrottle={16}
       >
-        {slides.map((slide) => {
-          const fullUrl = `${BASE_URL}${slide.image}`;
-          return (
-            <View
-              key={slide.id}
-              style={[styles.heroSlideWrapper, { width: dimensions.width }]}
-            >
-              <SafeImage
-                defaultImage={require("@assets/images/carousel1.png")}
-                imageUrl={fullUrl}
-                style={styles.heroBackgroundImage}
-              ></SafeImage>
-              <View style={styles.heroContent}>
-                <Image
-                  source={require("@assets/images/gfi.png")}
-                  style={styles.gfiLogoImage}
-                  resizeMode="contain"
-                />
-                <Text style={styles.heroTitle}>{slide.title}</Text>
-                <Text style={styles.heroSubtitle}>{slide.subtitle}</Text>
-              </View>
-            </View>
-          );
-        })}
-        {slides.length > 0 && (
-          <View style={[styles.heroSlideWrapper, { width: dimensions.width }]}>
-            <SafeImage
-              defaultImage={require("@assets/images/carousel1.png")}
-              style={styles.heroBackgroundImage}
-            ></SafeImage>
-            <View style={styles.heroContent}>
-              <Image
-                source={require("@assets/images/gfi.png")}
-                style={styles.gfiLogoImage}
-                resizeMode="contain"
-              />
-              <Text style={styles.heroTitle}>{slides[0].title}</Text>
-              <Text style={styles.heroSubtitle}>{slides[0].subtitle}</Text>
-            </View>
+        {slides.map((slide) => (
+          <View key={`${slide.kind}-${slide.id}`} style={[styles.heroSlideWrapper, { width: dimensions.width }]}>
+            {renderSlideContent(slide)}
           </View>
+        ))}
+        {slides.length > 0 && (
+          <View style={[styles.heroSlideWrapper, { width: dimensions.width }]}>{renderSlideContent(slides[0])}</View>
         )}
       </ScrollView>
-      <View style={styles.carouselDots}>
-        {slides.map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.heroDot,
-              index === activeSlide
-                ? styles.heroDotActive
-                : styles.heroDotInactive,
-            ]}
-          />
-        ))}
-      </View>
     </>
   );
 };

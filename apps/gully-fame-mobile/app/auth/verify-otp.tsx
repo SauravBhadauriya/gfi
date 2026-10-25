@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Dimensions,
   ScrollView,
@@ -13,7 +13,10 @@ import { router, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path } from "react-native-svg";
 import PhoneMessageIcon from "@components/ui/PhoneMessageIcon";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
+import { getErrorMessage } from "@api/client";
+import { registerPushTokenWithBackend } from "@utils/pushToken";
+import { useUserRole } from "@/contexts/UserRoleContext";
 import { saveUserSession } from "@utils/userSession";
 
 const { width, height } = Dimensions.get("window");
@@ -21,12 +24,13 @@ const { width, height } = Dimensions.get("window");
 export default function VerifyOtp() {
   const params = useLocalSearchParams();
   const txnId = params.txnId ? String(params.txnId) : "";
-  const email = params.email ? decodeURIComponent(String(params.email)) : "";
-  const fromForgotPassword = params.fromForgotPassword === "true";
-  const fromRoleChange = params.fromRoleChange === "true";
-  const fromEmailChange = params.fromEmailChange === "true";
-  const fromMobileChange = params.fromMobileChange === "true";
-  const newRole = params.newRole ? String(params.newRole) : "";
+  // "login" (default): OTP sign-in. "reset": step 2 of forgot password.
+  const mode = params.mode === "reset" ? "reset" : "login";
+  const mobile = params.mobile ? decodeURIComponent(String(params.mobile)) : "";
+  // For reset mode the backend returns an already-masked email.
+  const maskedTarget = params.target ? decodeURIComponent(String(params.target)) : "";
+  const resetUserId = params.userId ? decodeURIComponent(String(params.userId)) : "";
+  const { setRole } = useUserRole();
 
   const [otp, setOtp] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -34,307 +38,83 @@ export default function VerifyOtp() {
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
   const [currentTxnId, setCurrentTxnId] = useState(txnId);
-
-  const getMaskedEmailOrMobile = () => {
-    if (!email || email.length < 4) {
-      return "******123";
-    }
-    if (email.includes("@")) {
-      const [localPart, domain] = email.split("@");
-      const maskedLocal = localPart.length > 2 
-        ? localPart.slice(0, 2) + "*".repeat(localPart.length - 2)
-        : "**";
-      return `${maskedLocal}@${domain}`;
-    } else {
-      const lastDigits = email.slice(-4);
-      const maskedLength = email.length - 4;
-      const masked = "*".repeat(maskedLength);
-      return `${masked}${lastDigits}`;
-    }
-  };
+  const [cooldown, setCooldown] = useState(AUTH_RULES.resendCooldownSeconds);
 
   useEffect(() => {
-    
-    setSuccessMessage("OTP has been sent to your number");
-    const timer = setTimeout(() => {
-      setSuccessMessage("");
-    }, 1000);
-    
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
-  }, []);
+  }, [cooldown]);
+
+  const getMaskedEmailOrMobile = () => {
+    if (mode === "reset") return maskedTarget || "your email";
+    if (mobile.length < 4) return "your mobile number";
+    return `${"*".repeat(mobile.length - 4)}${mobile.slice(-4)}`;
+  };
 
   const handleResendOtp = async () => {
+    if (isResending || cooldown > 0) return;
     setErrorMessage("");
     setSuccessMessage("");
     setIsResending(true);
-
     try {
-      if (__DEV__) {
-        console.log('\n📱 ========== RESEND OTP REQUEST ==========');
-        console.log('UserId (email or mobile):', email);
-        console.log('==========================================\n');
+      const result =
+        mode === "reset" ? await authService.forgotPassword(resetUserId) : await authService.resendOtp(mobile);
+      if (!result.success || !result.data?.txnId) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      const result = await authService.resendOtp(email);
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log('✅ OTP resent successfully');
-          console.log('New TxnId:', result.data?.txnId);
-        }
-
-        if (result.data?.txnId) {
-          setCurrentTxnId(result.data.txnId);
-        }
-
-        setOtp("");
-        setSuccessMessage("A new verification code has been sent.");
-        setTimeout(() => {
-          setSuccessMessage("");
-        }, 2000);
-      } else {
-        const errorMsg = result.error || "Failed to resend OTP. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error('❌ Resend OTP failed:', errorMsg);
-        }
-      }
-    } catch (error: any) {
-      const errorMsg = error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error('❌ Resend OTP exception:', error);
-      }
+      setCurrentTxnId(result.data.txnId);
+      setOtp("");
+      setCooldown(AUTH_RULES.resendCooldownSeconds);
+      setSuccessMessage("A new verification code has been sent.");
     } finally {
       setIsResending(false);
     }
   };
 
   const handleValidate = async () => {
+    if (isLoading) return;
     setErrorMessage("");
     setSuccessMessage("");
-    
-    if (!otp || otp.length !== 6) {
-      setErrorMessage("Please enter the 6-digit code sent to your phone.");
+    if (!/^\d{6}$/.test(otp)) {
+      setErrorMessage("Please enter the 6-digit code.");
       return;
     }
-
-    const activeTxnId = currentTxnId || txnId;
-    
-    if (!activeTxnId) {
-      setErrorMessage("Transaction ID is missing. Please try logging in again.");
+    if (!currentTxnId) {
+      setErrorMessage("This code request has expired. Please go back and request a new one.");
       return;
     }
-    
     setIsLoading(true);
-
     try {
-      const isEmail = email.includes("@");
-      const identifier = email.trim().toLowerCase();
-
-      if (__DEV__) {
-        console.log('\n🚀 ========== STARTING OTP VERIFICATION ==========');
-        console.log('Login Method:', isEmail ? 'Email + OTP' : 'Mobile + OTP');
-        console.log('Identifier:', identifier);
-        console.log('TxnId:', activeTxnId);
-        console.log('OTP:', otp);
-        console.log('Note: This maps to the same user account as password login');
-        console.log('=============================================\n');
+      if (mode === "reset") {
+        const result = await authService.verifyResetOtp(currentTxnId, otp);
+        if (!result.success || !result.data?.resetToken) {
+          setErrorMessage(result.message);
+          return;
+        }
+        router.replace(`/auth/resetpassword?resetToken=${encodeURIComponent(result.data.resetToken)}` as any);
+        return;
       }
 
-      const verifyOtpData = {
-        txnId: activeTxnId,
-        otp: otp,
-      };
-
-      if (__DEV__) {
-        console.log('\n📋 ========== VERIFY OTP DATA PREPARATION ==========');
-        console.log('TxnId from params:', txnId);
-        console.log('Email from params:', email);
-        console.log('Data being sent to verifyOtp:', JSON.stringify(verifyOtpData, null, 2));
-        console.log('Keys in verifyOtpData:', Object.keys(verifyOtpData));
-        console.log('Has txnId key:', 'txnId' in verifyOtpData);
-        console.log('==================================================\n');
+      const result = await authService.verifyOtp({ txnId: currentTxnId, otp });
+      if (!result.success || !result.data?.token) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      const result = await authService.verifyOtp(verifyOtpData);
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log('\n✅ ========== OTP VERIFICATION SUCCESS ==========');
-          console.log('Full Result:', JSON.stringify(result, null, 2));
-          console.log('Result Data:', JSON.stringify(result.data, null, 2));
-          console.log('From Forgot Password:', fromForgotPassword);
-          console.log('===========================================\n');
-        }
-
-        if (fromForgotPassword) {
-          setSuccessMessage("OTP verified successfully! You can now reset your password.");
-          if (__DEV__) {
-            console.log('⚠️ Forgot password flow: NOT saving session, but keeping token for reset password API');
-            console.log('Token will be used for reset password endpoint');
-          }
-          
-          router.replace(`/auth/resetpassword?email=${encodeURIComponent(identifier)}` as any);
-          return;
-        }
-
-        
-        if (fromRoleChange && newRole) {
-          if (__DEV__) {
-            console.log('✅ OTP verified for role change');
-            console.log('New Role:', newRole);
-          }
-
-          setSuccessMessage("OTP verified successfully! Updating your role...");
-          
-          
-          setTimeout(() => {
-            router.replace({
-              pathname: "/(main)/account-center",
-              params: {
-                roleChangeVerified: "true",
-                newRole: newRole,
-              },
-            } as any);
-          }, 1000);
-          return;
-        }
-
-        
-        if (fromEmailChange) {
-          if (__DEV__) {
-            console.log('✅ OTP verified for email change');
-            console.log('New Email:', email);
-          }
-
-          setSuccessMessage("OTP verified successfully! Your email has been updated.");
-          
-          setTimeout(() => {
-            router.replace({
-              pathname: "/(main)/account-center",
-              params: {
-                emailChangeVerified: "true",
-                newEmail: encodeURIComponent(email), 
-              },
-            } as any);
-          }, 1000);
-          return;
-        }
-
-        
-        if (fromMobileChange) {
-          if (__DEV__) {
-            console.log('✅ OTP verified for mobile change');
-            console.log('New Mobile:', email); 
-          }
-
-          setSuccessMessage("OTP verified successfully! Your mobile number has been updated.");
-          
-          setTimeout(() => {
-            router.replace({
-              pathname: "/(main)/account-center",
-              params: {
-                mobileChangeVerified: "true",
-                newMobile: encodeURIComponent(email), 
-              },
-            } as any);
-          }, 1000);
-          return;
-        }
-
-        setSuccessMessage("OTP verified successfully!");
-        
-        if (!result.data?.token) {
-          setErrorMessage("OTP verification failed: No token received from server.");
-          return;
-        }
-
-        let userData = result.data?.user;
-        
-        if (__DEV__) {
-          console.log('\n🔍 ========== EXTRACTING USER DATA ==========');
-          console.log('Step 1 - Check result.data.user:', JSON.stringify(result.data?.user, null, 2));
-          console.log('Step 2 - Check result.data directly:', JSON.stringify(result.data, null, 2));
-          console.log('Step 3 - Check all possible locations...');
-        }
-        
-        if (!userData && result.data && typeof result.data === 'object') {
-          if (__DEV__) {
-            console.log('⚠️ User data not in result.data.user, checking alternative locations...');
-            console.log('Checking if user fields are directly in result.data...');
-            console.log('Has email:', !!(result.data as any).email);
-            console.log('Has firstName:', !!(result.data as any).firstName);
-            console.log('Has lastName:', !!(result.data as any).lastName);
-            console.log('Has mobile:', !!(result.data as any).mobile);
-          }
-          
-          if ((result.data as any).email || (result.data as any).firstName || (result.data as any).mobile) {
-            userData = {
-              id: (result.data as any).id || (result.data as any).userId || "",
-              email: (result.data as any).email || "",
-              firstName: (result.data as any).firstName || "",
-              lastName: (result.data as any).lastName || "",
-              mobile: (result.data as any).mobile || "",
-              role: (result.data as any).role || "participant",
-            };
-            if (__DEV__) {
-              console.log('✅ Found user data directly in result.data');
-              console.log('Extracted User Data:', JSON.stringify(userData, null, 2));
-            }
-          }
-        }
-
-        if (__DEV__) {
-          console.log('\n📤 ========== FINAL USER DATA TO SAVE ==========');
-          console.log('User Data:', JSON.stringify(userData, null, 2));
-          console.log('Has User Data:', !!userData);
-          console.log('Fallback Email:', isEmail ? identifier : undefined);
-          console.log('Fallback Mobile:', !isEmail ? identifier : undefined);
-          console.log('==========================================\n');
-        }
-
-        await saveUserSession(
-          result.data.token,
-          userData || undefined,
-          isEmail ? identifier : undefined,
-          !isEmail ? identifier : undefined
-        );
-
-        await AsyncStorage.setItem("accountCreatedVia", "normal");
-
+      const profile = await saveUserSession(result.data.token, result.data.user);
+      await AsyncStorage.setItem("accountCreatedVia", "normal");
+      setRole(profile.role);
+      registerPushTokenWithBackend();
+      setSuccessMessage("OTP verified successfully!");
+      // First OTP login creates a bare account (mobile only), so collect the profile.
+      if (result.data.isNewUser || !profile.firstName) {
+        router.replace("/onboarding/personal-details" as any);
+      } else {
         router.replace("/auth/location");
-    } else {
-        const errorMsg = result.data?.message || result.error || "OTP verification failed. Please try again.";
-        
-        let displayError = errorMsg;
-        if (errorMsg.toLowerCase().includes("invalid")) {
-          displayError = "Invalid OTP. Please check and try again.";
-        } else if (errorMsg.toLowerCase().includes("expired")) {
-          displayError = "OTP has expired. Please request a new one.";
-        } else if (errorMsg.toLowerCase().includes("mismatch")) {
-          displayError = "OTP mismatch. Please enter the correct code.";
-        }
-        
-        setErrorMessage(displayError);
-
-        if (__DEV__) {
-          console.error('\n❌ ========== OTP VERIFICATION FAILED ==========');
-          console.error('Error:', errorMsg);
-          console.error('==========================================\n');
-        }
       }
-    } catch (error: any) {
-      const errorMsg = error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error('\n❌ ========== OTP VERIFICATION EXCEPTION ==========');
-        console.error('Exception:', error);
-        console.error('==============================================\n');
-      }
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
@@ -355,10 +135,12 @@ export default function VerifyOtp() {
 
         {}
         <Text style={[styles.title, { fontFamily: "PlayfairDisplay_600SemiBold" }]}>
-          Verify Mobile Number
+          {mode === "reset" ? "Verify Your Email" : "Verify Mobile Number"}
         </Text>
         <Text style={styles.subtitle}>
-          We have sent verification code to your mobile number
+          {mode === "reset"
+            ? "We have sent a password reset code to your email"
+            : "We have sent verification code to your mobile number"}
         </Text>
 
         {}
@@ -402,15 +184,15 @@ export default function VerifyOtp() {
         </View>
         {}
         <TouchableOpacity 
-          style={[styles.resendButton, isResending && styles.resendButtonDisabled]} 
+          style={[styles.resendButton, (isResending || cooldown > 0) && styles.resendButtonDisabled]} 
           activeOpacity={0.7} 
           onPress={handleResendOtp}
-          disabled={isResending}
+          disabled={isResending || cooldown > 0}
         >
           {isResending ? (
             <ActivityIndicator color="#F59E0B" />
           ) : (
-            <Text style={styles.resendText}>Resend OTP</Text>
+            <Text style={styles.resendText}>{cooldown > 0 ? `Resend OTP in ${cooldown}s` : "Resend OTP"}</Text>
           )}
         </TouchableOpacity>
 

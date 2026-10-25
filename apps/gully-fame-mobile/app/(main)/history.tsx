@@ -1,6 +1,6 @@
 
 
-import React, { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,115 +10,71 @@ import {
   StatusBar,
   Platform,
   ActivityIndicator,
+  Alert,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { Ionicons, FontAwesome5, MaterialIcons } from "@expo/vector-icons";
+import { getWallet, toDisplayTransaction, DisplayTransaction } from "@/api/services/walletService";
+import { getErrorMessage } from "@/api/client";
+import { toastError } from "@/components/ui/Toast";
 
-interface Transaction {
-  id: string;
-  title: string;
-  description: string;
-  amount: number;
-  type: "credit" | "debit";
-  date: string;
-  time: string;
-  icon: string;
-  status?: string;
-}
+type Transaction = DisplayTransaction;
+
+const PAGE_SIZE = 20;
+
+const showWithdrawUnavailable = () =>
+  Alert.alert("Withdrawals not available yet", "Cashing out coins isn't supported by the server yet.");
 
 export default function HistoryScreen() {
-  const [filter, setFilter] = useState<"all" | "credit" | "debit">("all");
+  const [filter, setFilter] = useState<"all" | "earned" | "spent">("all");
   const [transactionData, setTransactionData] = useState<Transaction[]>([]);
   const [totalBalance, setTotalBalance] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // Fetch real wallet data and transaction history from backend
   const fetchWalletData = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
     try {
-      setLoading(true);
-      const { userService } = await import("@/api/services/userService");
-      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
-
-      // Fetch wallet balance
-      const walletResult = await userService.getWalletBalance();
-      if (walletResult.success && walletResult.data) {
-        setTotalBalance(walletResult.data.balance || 0);
-      }
-
-      // Fetch payment/transaction history
-      const historyResult = await paymentIntegrationService.getPaymentHistory(10, 0);
-      
-      if (historyResult.success && Array.isArray(historyResult.data)) {
-        const mappedTransactions = historyResult.data.map((tx: any, index: number) => {
-          const txDate = new Date(tx.timestamp || new Date());
-          return {
-            id: tx.transactionId || tx.id || `tx_${index}`,
-            title: tx.description || getTransactionTitle(tx.type),
-            description: tx.notes || tx.remark || getTransactionDescription(tx),
-            amount: Math.abs(tx.amount || 0),
-            type: (tx.type === "debit" || tx.amount < 0 ? "debit" : "credit") as Transaction["type"],
-            date: txDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-            time: txDate.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-            icon: getTransactionIcon(tx.type, tx.description),
-            status: tx.status,
-          };
-        });
-        setTransactionData(mappedTransactions);
-      } else {
-        // If no transaction history, show empty state
-        setTransactionData([]);
-      }
+      const wallet = await getWallet(1, PAGE_SIZE);
+      setTotalBalance(wallet.balance);
+      setTransactionData(wallet.transactions.map(toDisplayTransaction));
+      setPage(1);
+      setHasMore(wallet.hasMore);
     } catch (error) {
-      console.error("[history] Error fetching wallet data:", error);
-      setTransactionData([]);
-      setTotalBalance(0);
+      setLoadError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Refetch when screen comes into focus
+  const loadMore = async () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const wallet = await getWallet(page + 1, PAGE_SIZE);
+      setTransactionData((prev) => [...prev, ...wallet.transactions.map(toDisplayTransaction)]);
+      setPage(page + 1);
+      setHasMore(wallet.hasMore);
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       fetchWalletData();
     }, [fetchWalletData])
   );
 
-  // Helper function to get transaction title
-  const getTransactionTitle = (type: string): string => {
-    switch (type) {
-      case "credit":
-        return "Coins Earned";
-      case "debit":
-        return "Coins Spent";
-      case "withdrawal":
-        return "Withdrawal";
-      default:
-        return "Transaction";
-    }
-  };
-
-  // Helper function to get transaction description
-  const getTransactionDescription = (tx: any): string => {
-    if (tx.competitionName) return `Won in ${tx.competitionName}`;
-    if (tx.reelId) return `Support on reel`;
-    if (tx.referralCode) return `Referral bonus`;
-    if (tx.withdrawalMethod) return `Withdrawn to ${tx.withdrawalMethod}`;
-    return "Transaction";
-  };
-
-  // Helper function to get transaction icon
-  const getTransactionIcon = (type: string, description: string): string => {
-    if (description?.includes("competition") || description?.includes("prize")) return "trophy-outline";
-    if (description?.includes("reel") || description?.includes("support")) return "heart-outline";
-    if (description?.includes("referral") || description?.includes("invite")) return "gift-outline";
-    if (type === "debit") return "wallet-outline";
-    return "checkmark-circle-outline";
-  };
-
   const filteredTransactions = transactionData.filter((item) => {
     if (filter === "all") return true;
-    return item.type === filter;
+    return item.kind === filter;
   });
 
   return (
@@ -138,6 +94,14 @@ export default function HistoryScreen() {
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator size="large" color="#EC9A15" />
           <Text style={{ color: "#999", marginTop: 12 }}>Loading wallet data...</Text>
+        </View>
+      ) : loadError ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <Ionicons name="cloud-offline-outline" size={48} color="#666" />
+          <Text style={{ color: "#ccc", marginTop: 12, textAlign: "center" }}>{loadError}</Text>
+          <TouchableOpacity onPress={fetchWalletData} style={{ marginTop: 16 }}>
+            <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -163,7 +127,7 @@ export default function HistoryScreen() {
             <TouchableOpacity 
               style={styles.withdrawButton} 
               activeOpacity={0.8}
-              onPress={() => router.push("/(main)/coins" as any)}
+              onPress={showWithdrawUnavailable}
             >
               <MaterialIcons name="account-balance" size={20} color="#fff" />
               <Text style={styles.withdrawButtonText}>Withdraw</Text>
@@ -190,17 +154,17 @@ export default function HistoryScreen() {
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.filterTab, filter === "credit" && styles.activeFilterTab]} 
-            onPress={() => setFilter("credit")}
+            style={[styles.filterTab, filter === "earned" && styles.activeFilterTab]} 
+            onPress={() => setFilter("earned")}
           >
-            <Text style={[styles.filterText, filter === "credit" && styles.activeFilterText]}>Earned</Text>
+            <Text style={[styles.filterText, filter === "earned" && styles.activeFilterText]}>Earned</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
-            style={[styles.filterTab, filter === "debit" && styles.activeFilterTab]} 
-            onPress={() => setFilter("debit")}
+            style={[styles.filterTab, filter === "spent" && styles.activeFilterTab]} 
+            onPress={() => setFilter("spent")}
           >
-            <Text style={[styles.filterText, filter === "debit" && styles.activeFilterText]}>Withdrawn</Text>
+            <Text style={[styles.filterText, filter === "spent" && styles.activeFilterText]}>Spent</Text>
           </TouchableOpacity>
         </View>
 
@@ -234,9 +198,18 @@ export default function HistoryScreen() {
               <Text style={styles.emptyStateText}>
                 {filter === "all" 
                   ? "No transactions yet" 
-                  : `No ${filter === "credit" ? "earned" : "withdrawn"} transactions`}
+                  : `No ${filter === "earned" ? "earned" : "spent"} transactions`}
               </Text>
             </View>
+          )}
+          {hasMore && (
+            <TouchableOpacity onPress={loadMore} disabled={loadingMore} style={{ alignItems: "center", paddingVertical: 16 }}>
+              {loadingMore ? (
+                <ActivityIndicator color="#EC9A15" />
+              ) : (
+                <Text style={{ color: "#EC9A15", fontSize: 15 }}>Load more</Text>
+              )}
+            </TouchableOpacity>
           )}
         </View>
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
-import { uploadVoiceover } from "@/api/services/voiceoverService";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 interface VoiceToolPanelProps {
   onClose: () => void;
@@ -77,7 +77,11 @@ export default function VoiceToolPanel({
       }
       
       // Request permissions
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status, canAskAgain } = await Audio.requestPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Microphone access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission Required",
@@ -107,7 +111,6 @@ export default function VoiceToolPanel({
         setRecordingDuration((prev) => prev + 0.1);
       }, 100);
     } catch (error) {
-      console.error("[VoiceToolPanel] Failed to start recording:", error);
       Alert.alert("Error", "Failed to start recording");
     }
   };
@@ -134,7 +137,6 @@ export default function VoiceToolPanel({
 
       setRecording(null);
     } catch (error) {
-      console.error("[VoiceToolPanel] Failed to stop recording:", error);
       Alert.alert("Error", "Failed to stop recording");
     }
   };
@@ -179,7 +181,6 @@ export default function VoiceToolPanel({
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error("[VoiceToolPanel] Failed to play recording:", error);
       Alert.alert("Error", "Failed to play recording");
     }
   };
@@ -218,22 +219,14 @@ export default function VoiceToolPanel({
     try {
       setIsUploading(true);
 
-      // Optional: Upload to backend if session ID is available
-      // Uncomment if you have a session ID
-      // const result = await uploadVoiceover("session-id", recordedUri, recordingDuration, currentTime);
-      // if (!result.success) {
-      //   Alert.alert("Error", result.message || "Failed to upload voice");
-      //   return;
-      // }
-
-      // For now, use local recording directly
+      // Voice-overs stay on the device while editing; publishing uploads them
+      // (POST /reels/upload-url with assetType "voiceovers").
       onAddVoice({
         uri: recordedUri,
         duration: recordingDuration,
         title: `Voice Recording ${new Date().toLocaleTimeString()}`,
       });
     } catch (error) {
-      console.error("[VoiceToolPanel] Error adding voice:", error);
       Alert.alert("Error", "Failed to add voice recording");
     } finally {
       setIsUploading(false);

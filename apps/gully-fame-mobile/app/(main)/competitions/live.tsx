@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import {
   View,
   Text,
@@ -12,32 +12,13 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import Svg, { Path, Circle } from "react-native-svg";
-import { competitionService } from "@/api/services/competitionService";
-import { BASE_URL } from "@/api/axios";
+import { useCompetitionList } from "@/hooks/useCompetitionList";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
 
 const { width } = Dimensions.get("window");
 
 export default function LiveCompetitionsScreen() {
-  const [competitions, setCompetitions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const fetchLiveCompetitions = async () => {
-      try {
-        setLoading(true);
-        const response = await competitionService.getCompetitionsByStatus('live');
-        if (response.success && response.data) {
-          setCompetitions(response.data.items);
-        }
-      } catch (error) {
-        console.error("Failed to fetch live competitions:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchLiveCompetitions();
-  }, []);
+  const { items: competitions, loading, error, reload } = useCompetitionList("LIVE");
 
   return (
     <View style={styles.container}>
@@ -71,6 +52,11 @@ export default function LiveCompetitionsScreen() {
             <View style={{ padding: 40, alignItems: "center" }}>
               <ActivityIndicator size="large" color="#EC9A15" />
             </View>
+          ) : error ? (
+            <TouchableOpacity onPress={reload} style={{ padding: 40, alignItems: "center" }}>
+              <Text style={{ color: "#ccc", textAlign: "center" }}>{error}</Text>
+              <Text style={{ color: "#EC9A15", marginTop: 8 }}>Tap to retry</Text>
+            </TouchableOpacity>
           ) : competitions.length === 0 ? (
             <View style={{ padding: 40, alignItems: "center" }}>
               <Text style={{ color: "#ccc" }}>No live competitions right now.</Text>
@@ -83,14 +69,14 @@ export default function LiveCompetitionsScreen() {
             >
               {competitions.map((comp) => (
                 <TouchableOpacity
-                  key={comp._id || comp.id}
+                  key={comp.id}
                   style={styles.compCardNew}
                   activeOpacity={0.9}
-                  onPress={() => router.push(`/(main)/competition/live/${comp._id || comp.id}` as any)}
+                  onPress={() => router.push(`/(main)/competition/live/${comp.id}` as any)}
                 >
                   <View style={styles.compCardImageWrapper}>
                     <Image
-                      source={comp.image ? { uri: `${BASE_URL}${comp.image}` } : require("@assets/images/trending1.png")}
+                      source={resolveMediaUrl(comp.image) ? { uri: resolveMediaUrl(comp.image)! } : require("@assets/images/trending1.png")}
                       style={styles.compCardImageNew}
                       resizeMode="cover"
                     />
@@ -110,7 +96,7 @@ export default function LiveCompetitionsScreen() {
                       {comp.title}
                     </Text>
                     <Text style={styles.compCardSubtitle}>
-                      {comp.category || "General"} • {comp.location || "Global"}
+                      Prize pool ₹{Number(comp.prize || 0).toLocaleString("en-IN")}
                     </Text>
                     <View style={styles.compCardDetailsNew}>
                       <View style={styles.compDetailItemNew}>
@@ -125,21 +111,21 @@ export default function LiveCompetitionsScreen() {
                           <Circle cx="12" cy="12" r="3" stroke="#EC9A15" strokeWidth={2} />
                         </Svg>
                         <Text style={styles.compDetailTextNew}>
-                          {comp.views || 0} watching now
+                          {comp.entries} entries
                         </Text>
                       </View>
                     </View>
                     <View style={styles.compCardFooterNew}>
                       <View style={styles.prizeRowNew}>
                         <Text style={styles.compPrizeTextNew}>
-                          {comp.participants?.length || 0} joined
+                          {comp.participants} joined
                         </Text>
                       </View>
                       <TouchableOpacity
                         style={styles.actionBtnNew}
                         onPress={(e) => {
                           e.stopPropagation();
-                          router.push(`/(main)/competition/live/${comp._id || comp.id}` as any);
+                          router.push(`/(main)/competition/live/${comp.id}` as any);
                         }}
                       >
                         <Text style={styles.actionBtnTextNew}>Vote Now</Text>

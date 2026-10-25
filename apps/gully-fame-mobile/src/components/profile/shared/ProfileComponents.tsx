@@ -1,13 +1,6 @@
 // Shared profile components - used across all profile screens
 import React from "react";
-import {
-    View,
-    Text,
-    StyleSheet,
-    Image,
-    TouchableOpacity,
-    Dimensions,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path } from "react-native-svg";
 import { ProfileData } from "./profileHooks";
@@ -78,15 +71,16 @@ export const StatsSection = ({
     onFollowersPress,
     onFollowingPress,
 }: {
-    photos?: number;
-    followers?: number;
-    following?: number;
+    /** null means the backend did not send the number; shown as "–" instead of a made-up 0. */
+    photos?: number | null;
+    followers?: number | null;
+    following?: number | null;
     onFollowersPress?: () => void;
     onFollowingPress?: () => void;
 }) => (
     <View style={styles.statsContainer}>
         <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{photos}</Text>
+            <Text style={styles.statNumber}>{photos ?? "–"}</Text>
             <Text style={styles.statLabel}>Posts</Text>
         </View>
         <TouchableOpacity 
@@ -94,7 +88,7 @@ export const StatsSection = ({
             onPress={onFollowersPress}
             activeOpacity={0.7}
         >
-            <Text style={styles.statNumber}>{followers}</Text>
+            <Text style={styles.statNumber}>{followers ?? "–"}</Text>
             <Text style={styles.statLabel}>Followers</Text>
         </TouchableOpacity>
         <TouchableOpacity 
@@ -102,7 +96,7 @@ export const StatsSection = ({
             onPress={onFollowingPress}
             activeOpacity={0.7}
         >
-            <Text style={styles.statNumber}>{following}</Text>
+            <Text style={styles.statNumber}>{following ?? "–"}</Text>
             <Text style={styles.statLabel}>Following</Text>
         </TouchableOpacity>
     </View>
@@ -126,24 +120,13 @@ export const UserInfoSection = ({
     role?: "participant" | "fan" | "other";
     handleUpgradeClick?: () => void;
 }) => {
-    // Default three words for user's own profile
-    const defaultThreeWords = "🎵 MusicLover | 💃 DanceFreak | ✨ FunSoul";
-
-    // Parse three words if provided, otherwise use default for own profile
-    let displayWords: string[] = [];
-    if (threeWords && threeWords.trim()) {
-        // If user has set their own words, parse them
-        displayWords = threeWords
-            .split("|")
-            .map((w) => w.trim())
-            .filter((w) => w);
-    } else if (showEditButton) {
-        // For user's own profile, show default if not set
-        displayWords = defaultThreeWords
-            .split("|")
-            .map((w) => w.trim())
-            .filter((w) => w);
-    }
+    // Only the words the user actually saved are shown (no placeholder words).
+    const displayWords: string[] = threeWords && threeWords.trim()
+        ? threeWords
+              .split("|")
+              .map((w) => w.trim())
+              .filter((w) => w)
+        : [];
 
     return (
         <View style={styles.userInfo}>
@@ -157,7 +140,12 @@ export const UserInfoSection = ({
             >
                 <View style={styles.userNameRowSpacerLeft} />
                 <View style={styles.userNameWithBadge}>
-                    <Text style={styles.userName}>
+                    <Text
+                        style={styles.userName}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.6}
+                    >
                         {profileData.firstName && profileData.lastName
                             ? `${profileData.firstName} ${profileData.lastName}`
                             : profileData.firstName ||
@@ -172,12 +160,11 @@ export const UserInfoSection = ({
                 </View>
                 <View style={styles.userNameRowSpacerRight} />
             </View>
-            <View style={styles.bioContainer}>
-                <Text style={styles.userBio}>
-                    {profileData.bio ||
-                        "Passionate dancer creating magic through movement and rhythm every day"}
-                </Text>
-            </View>
+            {profileData.bio ? (
+                <View style={styles.bioContainer}>
+                    <Text style={styles.userBio}>{profileData.bio}</Text>
+                </View>
+            ) : null}
             {displayWords.length > 0 && (
                 <View style={styles.threeWordsContainer}>
                     <Text style={styles.threeWordsText} numberOfLines={1}>
@@ -198,7 +185,7 @@ export const UserInfoSection = ({
             <View
                 style={[
                     styles.editContainer,
-                    role === "fan" ? styles.contentAway : styles.contentEnd,
+                    role === "fan" && showEditButton && onEditBio ? styles.contentAway : role === "fan" ? styles.contentCenter : styles.contentEnd,
                 ]}
             >
                 {role === "fan" && (
@@ -268,6 +255,9 @@ const styles = StyleSheet.create({
     contentEnd: {
         justifyContent: "flex-end",
     },
+    contentCenter: {
+        justifyContent: "center",
+    },
     levelUpGradientWrapper: {
         borderRadius: 30,
         height: 50,
@@ -327,6 +317,7 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         justifyContent: "center",
         alignItems: "center",
+        alignSelf: "center",
         paddingVertical: 12,
         paddingHorizontal: 24,
         marginHorizontal: 8,
@@ -337,6 +328,10 @@ const styles = StyleSheet.create({
         alignItems: "center",
     },
     statNumber: {
+        // Stretch + center: content-sized text clipped its last digit on some devices ("31" -> "3").
+        alignSelf: "stretch",
+        textAlign: "center",
+        minWidth: width * 0.18,
         fontSize: width * 0.05,
         color: "white",
         marginBottom: height * 0.005,
@@ -387,7 +382,8 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
-        flexShrink: 0,
+        flexShrink: 1,
+        maxWidth: "88%",
     },
     verifiedBadgeContainer: {
         marginLeft: 3,
@@ -398,7 +394,7 @@ const styles = StyleSheet.create({
         fontSize: width * 0.07,
         color: "white",
         textAlign: "center",
-        flexShrink: 0,
+        flexShrink: 1,
     },
     bioContainer: {
         alignItems: "center",

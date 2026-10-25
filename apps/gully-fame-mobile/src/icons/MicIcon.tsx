@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Path } from "react-native-svg";
 
 export const MicIcon = () => (
   <Svg width="18" height="22" viewBox="0 0 18 22" fill="none">

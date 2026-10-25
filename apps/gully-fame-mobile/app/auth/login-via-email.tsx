@@ -12,127 +12,28 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { showGuestModeUnavailable } from "@utils/guestMode";
 import { GoogleIcon, InstagramIcon, AppleIcon } from "@/icons";
-import { authService } from "@api/services/authService";
+import { AUTH_RULES } from "@api/services/authService";
 
 const { width, height } = Dimensions.get("window");
 
 export default function LoginViaEmail() {
   const [email, setEmail] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const isLoading = false;
 
-  const handleSendOTP = async () => {
+  // The backend delivers OTPs by SMS only (email OTP returns
+  // "otp_email_not_supported"), so email users continue with their password.
+  const handleSendOTP = () => {
     setErrorMessage("");
-
-    if (!email) {
-      setErrorMessage("Please enter your email");
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
+    const value = email.trim().toLowerCase();
+    if (!AUTH_RULES.email.test(value)) {
       setErrorMessage("Please enter a valid email address");
       return;
     }
-
-    try {
-      const accountCreatedVia = await AsyncStorage.getItem("accountCreatedVia");
-      const storedEmail = await AsyncStorage.getItem("userEmail");
-
-      if (
-        accountCreatedVia === "google" &&
-        storedEmail &&
-        storedEmail.toLowerCase() === email.trim().toLowerCase()
-      ) {
-        setErrorMessage(
-          "This account was created using Google. Please use Google Sign-In to log in.",
-        );
-        return;
-      }
-    } catch (error) {
-      if (__DEV__) {
-        console.log("Error checking account creation method:", error);
-      }
-    }
-
-    setIsLoading(true);
-
-    try {
-      if (__DEV__) {
-        console.log("\n🚀 ========== LOGIN VIA EMAIL OTP ==========");
-        console.log("Login Method: Email + OTP");
-        console.log("Email:", email.trim().toLowerCase());
-        console.log(
-          "Note: This will map to the same user account as password login",
-        );
-        console.log("Calling login API with viaPassword: false");
-        console.log("==========================================\n");
-      }
-
-      const result = await authService.login({
-        userId: email.trim(),
-        viaPassword: false,
-      });
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log("\n✅ ========== LOGIN API SUCCESS ==========");
-          console.log("Response Data:", result.data);
-          console.log("TxnId:", result.data?.txnId);
-          console.log("==========================================\n");
-        }
-
-        const txnId =
-          result.data?.txnId ||
-          (result.fullResponse as any)?.txnId ||
-          (result.data as any)?.txnId;
-
-        if (!txnId) {
-          setErrorMessage("OTP request failed. Please try again.");
-          return;
-        }
-
-        if (__DEV__) {
-          console.log(
-            "\n📋 ========== NAVIGATING TO OTP VERIFICATION ==========",
-          );
-          console.log("Login Method: Email + OTP");
-          console.log("Email:", email.trim().toLowerCase());
-          console.log("TxnId:", txnId);
-          console.log("Note: User data will be stored after OTP verification");
-          console.log("==================================================\n");
-        }
-
-        const query = `txnId=${encodeURIComponent(txnId)}&email=${encodeURIComponent(email.trim().toLowerCase())}`;
-        router.replace(`/auth/verify-otp?${query}` as any);
-      } else {
-        const errorMsg =
-          result.data?.message ||
-          result.error ||
-          "Failed to send OTP. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("\n❌ ========== LOGIN API FAILED ==========");
-          console.error("Error:", errorMsg);
-          console.error("==========================================\n");
-        }
-      }
-    } catch (error: any) {
-      const errorMsg =
-        error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("\n❌ ========== LOGIN EXCEPTION ==========");
-        console.error("Exception:", error);
-        console.error("========================================\n");
-      }
-    } finally {
-      setIsLoading(false);
-    }
+    setErrorMessage("OTP login works with a mobile number. Continue with your password instead.");
+    router.push(`/auth/signin?email=${encodeURIComponent(value)}` as any);
   };
 
   const handlePasswordLogin = () => {
@@ -292,7 +193,7 @@ export default function LoginViaEmail() {
         {}
         <View style={styles.skipContainer}>
           <TouchableOpacity
-            onPress={() => router.replace("/auth/location?skip=true")}
+            onPress={showGuestModeUnavailable}
           >
             <Text style={styles.skipText}>
               Let me have a look!{" "}

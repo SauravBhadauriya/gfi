@@ -1,23 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  AppState,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  Platform,
-  Animated,
-  Modal,
-  ScrollView,
-  Alert,
-  Linking,
-  Image,
-  PanResponder,
-  Dimensions,
-  InteractionManager,
-  type AppStateStatus,
-} from "react-native";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { AppState, View, Text, TouchableOpacity, StyleSheet, StatusBar, Platform, Animated, Modal, ScrollView, Alert, Linking, PanResponder, Dimensions, InteractionManager } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { setAudioModeAsync } from "expo-audio";
 import { 
@@ -29,7 +11,19 @@ import {
 import { useCameraPermission, useMicrophonePermission } from "react-native-vision-camera/lib/hooks/usePermission";
 import { router, useLocalSearchParams, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import Svg, { Circle } from "react-native-svg";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import TopBar from "@modules/video-editor/camera-module/components/capture/TopBar";
+import ToolRail from "@modules/video-editor/camera-module/components/capture/ToolRail";
+import CaptureControls from "@modules/video-editor/camera-module/components/capture/CaptureControls";
+import BottomTabs, { type CaptureTab } from "@modules/video-editor/camera-module/components/capture/BottomTabs";
+import LensCarousel, { LENS_REMOVE_ROW } from "@modules/video-editor/camera-module/components/capture/LensCarousel";
+import LensOverlay from "@modules/video-editor/camera-module/components/capture/LensOverlay";
+import LensBar from "@modules/video-editor/camera-module/components/capture/LensBar";
+import PhotoPreview from "@modules/video-editor/camera-module/components/capture/PhotoPreview";
+import { useLenses, type Lens } from "@modules/video-editor/camera-module/components/capture/lenses";
+import { capturePhotoWithLens } from "@modules/video-editor/camera-module/components/capture/photoCapture";
+import * as Haptics from "expo-haptics";
+import { importGalleryAsset } from "@modules/video-editor/camera-module/utils/clipImport";
 
 // ============================================================================
 // CAMERA IMPLEMENTATION CHOICE: Set CAMERA_USE_EXPO_CAMERA to true to use expo-camera,
@@ -38,19 +32,10 @@ import Svg, { Circle } from "react-native-svg";
 const CAMERA_USE_EXPO_CAMERA = false;
 const BUILD_MARKER_TIMESTAMP_VISION = new Date().toISOString();
 
-let VideoEditorModule: any = null;
 import MusicLibraryModal from "@/components/MusicLibraryModal";
-import { listAudio } from "@api/services/musicLibraryService";
 import { listFilters } from "@api/services/filterLibraryService";
-import {
-  FlashIcon,
-  TimerIcon,
-  MusicIcon,
-  FilterIcon,
-  CloseIcon,
-  GalleryIcon,
-  CameraFlipIcon,
-} from "@/icons";
+import { matchPresetByName } from "@modules/video-editor/camera-module/components/preview/filterPresets";
+import { CloseIcon } from "@/icons";
 
 type RecordingMode = "video" | "photo";
 type CameraFacing = "front" | "back";
@@ -62,6 +47,8 @@ interface VideoClip {
   id: string;
   uri: string;
   duration: number;
+  /** Gallery photos are "photo"; recordings default to video. */
+  type?: "video" | "photo";
   thumbnail?: string;
   speed?: SpeedOption;
   musicTrack?: {
@@ -73,6 +60,8 @@ interface VideoClip {
     startTime?: number; // in milliseconds
   } | null;
   filter?: any;
+  /** Lens applied while recording; not burned into video yet, the editor/export must apply it. */
+  lens?: Pick<Lens, "id" | "name" | "overlayUrl" | "overlayRect"> | null;
   resolution?: string;
   frameRate?: number;
 }
@@ -103,6 +92,9 @@ function _mapResolutionToQuality(resolution: string): string {
 
 export default function TikTokCameraScreen() {
   const { width, height } = Dimensions.get('screen');
+  const insets = useSafeAreaInsets();
+  const [activeTab, setActiveTab] = useState<CaptureTab>("camera");
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [isFocused, setIsFocused] = useState(false);
   const [appState, setAppState] = useState(AppState.currentState);
   const [transitionComplete, setTransitionComplete] = useState(false);
@@ -154,9 +146,12 @@ export default function TikTokCameraScreen() {
 
   const params = useLocalSearchParams();
   const competitionId = params.competitionId ? String(params.competitionId) : null;
-  const [showVideoEditor, setShowVideoEditor] = useState(false);
-  const [isVideoEditorLoaded, setIsVideoEditorLoaded] = useState(false);
   const competitionName = params.competitionName ? String(params.competitionName) : null;
+
+  // The preview screen's "Discard" navigates back here with a fresh `reset` param.
+  useEffect(() => {
+    if (params.reset) setRecordedClips([]);
+  }, [params.reset]);
   const entryFee = params.entryFee ? String(params.entryFee) : null;
 
   const supportedResolutions = ["HD", "FHD", "2K", "4K"];
@@ -184,15 +179,26 @@ export default function TikTokCameraScreen() {
   });
 
   const [recordingMode, setRecordingMode] = useState<RecordingMode>("video");
+  // Read by the shutter handler so it never acts on a stale mode.
+  const modeRef = useRef<RecordingMode>("video");
+  useEffect(() => {
+    modeRef.current = recordingMode;
+  }, [recordingMode]);
+  const isCapturingRef = useRef(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [photoPreviewUri, setPhotoPreviewUri] = useState<string | null>(null);
+  const shutterFlash = useRef(new Animated.Value(0)).current;
+  const { lenses, loading: lensesLoading, toggleSaved: toggleLensSaved } = useLenses();
+  const [lensCarouselOpen, setLensCarouselOpen] = useState(false);
+  const [selectedLensId, setSelectedLensId] = useState<string | null>(null);
+  const selectedLens = lenses.find((lens) => lens.id === selectedLensId) ?? null;
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState("00:00");
   const [cameraReady, setCameraReady] = useState(false);
   const [recordedClips, setRecordedClips] = useState<VideoClip[]>([]);
   const [currentRecordingSegments, setCurrentRecordingSegments] = useState<string[]>([]); // Track segments during camera flip
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
-  const [musicTracks, setMusicTracks] = useState<any[]>([]);
   const [selectedMusicTrack, setSelectedMusicTrack] = useState<any | null>(null);
-  const [loadingMusic, setLoadingMusic] = useState(false);
   const [filterList, setFilterList] = useState<any[]>([]);
   const [selectedFilter, setSelectedFilter] = useState<any | null>(null);
   const [loadingFilters, setLoadingFilters] = useState(false);
@@ -242,17 +248,14 @@ export default function TikTokCameraScreen() {
   const filterLabelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCameraReady = () => {
-    console.log("[CAMERA] onCameraReady FIRED on", Platform.OS, "- isRecording:", isRecording, "isCameraFlipping:", isCameraFlipping.current);
     setCameraReady(true);
     
     // If we were recording before camera flip, automatically resume recording
     // This creates a seamless experience where recording continues after flip
     if (isRecording && !recordingRef.current && isCameraFlipping.current) {
-      console.log("[CAMERA] Resuming recording after camera flip in 200ms");
       // Small delay to ensure camera is fully ready
       setTimeout(() => {
         if (isRecording && !recordingRef.current) {
-          console.log("[CAMERA] Starting new recording segment to continue after flip");
           isCameraFlipping.current = false; // Clear flag before starting new segment
           startRecording();
         }
@@ -282,10 +285,8 @@ export default function TikTokCameraScreen() {
   };
 
   const startRecording = async () => {
-    console.log("[RECORDING] START REQUESTED - Camera Implementation:", CAMERA_USE_EXPO_CAMERA ? "expo-camera" : "vision-camera v5");
 
     if (isRecording && recordingRef.current) {
-      console.log("[RECORDING] Already recording with active recorder, ignoring");
       return;
     }
 
@@ -307,19 +308,16 @@ export default function TikTokCameraScreen() {
           return;
         }
       } catch (error: any) {
-        console.error("[PERMISSION] error:", error);
         return;
       }
     }
 
     if (!cameraRef.current) {
-      console.log("[CAMERA] ref NOT ready");
       Alert.alert("Error", "Camera not ready. Please wait a moment and try again.");
       return;
     }
 
     if (!cameraReady) {
-      console.log("[CAMERA] Camera not ready yet (onInitialized not fired)");
       Alert.alert("Error", "Camera is warming up. Please try again.");
       return;
     }
@@ -330,8 +328,7 @@ export default function TikTokCameraScreen() {
       // Fresh start - set initial state
       setIsRecording(true);
       recordingStartTime.current = Date.now();
-    } else {
-      console.log("[RECORDING] Resuming recording after camera flip");
+    } else { /* intentionally ignored */
     }
 
     // Only animate UI on fresh start, not when resuming
@@ -366,7 +363,6 @@ export default function TikTokCameraScreen() {
     }
 
     try {
-      console.log("[RECORDING] Starting video recording via vision-camera v5");
       
       // Start music playback if track selected (only on fresh start, not resume)
       if (!isResuming && selectedMusicTrack?.uri) {
@@ -378,7 +374,6 @@ export default function TikTokCameraScreen() {
             setIsPlayingPreview(false);
           }
 
-          if (__DEV__) console.log("[AUDIO] Starting recording music playback from", selectedMusicTrack.startTime || 0);
 
           const musicStartTime = selectedMusicTrack.startTime || 0;
           
@@ -391,9 +386,7 @@ export default function TikTokCameraScreen() {
           };
           
           // Note: Actual playback would be handled by native module or Video component
-          if (__DEV__) console.log("[AUDIO] Recording music playback configured for URI:", selectedMusicTrack.uri);
         } catch (error) {
-          console.error("[AUDIO] Failed to start recording music:", error);
           // Continue recording without music if playback fails
         }
       }
@@ -407,13 +400,11 @@ export default function TikTokCameraScreen() {
       
       await recorder.startRecording(
         (filePath: string, reason: string) => {
-          console.log("[RECORDING] Finished:", filePath, reason, "isCameraFlipping:", isCameraFlipping.current);
           const elapsed = (Date.now() - recordingStartTime.current) / 1000;
           
           // Check if this is a segment from a camera flip
           if (isCameraFlipping.current) {
             // This is a mid-recording segment from camera flip
-            console.log("[RECORDING] Saving segment from camera flip:", filePath);
             setCurrentRecordingSegments((prev) => [...prev, `file://${filePath}`]);
             recordingRef.current = null;
             // isRecording stays true, camera will auto-resume
@@ -426,7 +417,6 @@ export default function TikTokCameraScreen() {
               ? [...prevSegments, `file://${filePath}`]
               : [`file://${filePath}`];
             
-            console.log("[RECORDING] Final stop, total segments:", allSegments.length);
             
             const newClip: VideoClip = {
               id: Date.now().toString(),
@@ -442,6 +432,14 @@ export default function TikTokCameraScreen() {
                 startTime: selectedMusicTrack.startTime || 0,
               } : null,
               filter: selectedFilter,
+              lens: selectedLens
+                ? {
+                    id: selectedLens.id,
+                    name: selectedLens.name,
+                    overlayUrl: selectedLens.overlayUrl,
+                    overlayRect: selectedLens.overlayRect,
+                  }
+                : null,
               resolution: selectedCameraFormat.resolution,
               frameRate: selectedCameraFormat.frameRate,
             };
@@ -450,7 +448,6 @@ export default function TikTokCameraScreen() {
             
             // TODO: If allSegments.length > 1, merge video files using FFmpeg or similar
             if (allSegments.length > 1) {
-              console.log("[RECORDING] Multiple segments detected, would merge:", allSegments);
               setTimeout(() => {
                 Alert.alert(
                   "Camera Flip Recording",
@@ -468,7 +465,6 @@ export default function TikTokCameraScreen() {
           resetRecordingUI();
         },
         (error: Error) => {
-          console.error("[RECORDING] Error during recording:", error);
           Alert.alert("Recording Error", error?.message || "Failed during recording");
           setIsRecording(false);
           setCurrentRecordingSegments([]); // Clear segments on error
@@ -490,14 +486,12 @@ export default function TikTokCameraScreen() {
         }
         
         autoStopTimeoutRef.current = setTimeout(() => {
-          console.log("[RECORDING] Auto-stop timer expired, stopping recording");
           if (recordingRef.current) {
             isCameraFlipping.current = false; // Ensure final stop
             recordingRef.current.stopRecording();
           }
         }, maxDuration * 1000);
         
-        console.log("[RECORDING] Auto-stop timer set for", maxDuration, "seconds");
       } else {
         // When resuming, calculate remaining time and set new timer
         const elapsed = (Date.now() - recordingStartTime.current) / 1000;
@@ -505,7 +499,6 @@ export default function TikTokCameraScreen() {
         const remaining = maxDuration - elapsed;
         
         if (remaining > 0) {
-          console.log("[RECORDING] Setting resume timer for remaining", remaining, "seconds");
           
           // Clear any existing auto-stop timer
           if (autoStopTimeoutRef.current) {
@@ -513,7 +506,6 @@ export default function TikTokCameraScreen() {
           }
           
           autoStopTimeoutRef.current = setTimeout(() => {
-            console.log("[RECORDING] Auto-stop timer expired (resumed), stopping recording");
             if (recordingRef.current) {
               isCameraFlipping.current = false; // Ensure final stop
               recordingRef.current.stopRecording();
@@ -521,7 +513,6 @@ export default function TikTokCameraScreen() {
           }, remaining * 1000);
         } else {
           // Time already expired, stop immediately
-          console.log("[RECORDING] Time already expired, stopping immediately");
           if (recordingRef.current) {
             isCameraFlipping.current = false;
             recordingRef.current.stopRecording();
@@ -529,7 +520,6 @@ export default function TikTokCameraScreen() {
         }
       }
     } catch (error: any) {
-      console.error("[RECORDING] START ERROR:", error?.message);
       setIsRecording(false);
       setCurrentRecordingSegments([]);
       recordingRef.current = null;
@@ -542,7 +532,6 @@ export default function TikTokCameraScreen() {
   const stopRecording = async () => {
     if (!isRecording) return;
 
-    console.log("[STOP] User requested stop recording");
 
     // CRITICAL: Ensure this is treated as a FINAL stop, not a camera flip
     isCameraFlipping.current = false;
@@ -551,7 +540,6 @@ export default function TikTokCameraScreen() {
     if (autoStopTimeoutRef.current) {
       clearTimeout(autoStopTimeoutRef.current);
       autoStopTimeoutRef.current = null;
-      console.log("[STOP] Cleared auto-stop timer");
     }
 
     try {
@@ -560,8 +548,7 @@ export default function TikTokCameraScreen() {
         try {
           await recordingAudioPlayerRef.current.pauseAsync();
           await recordingAudioPlayerRef.current.unloadAsync();
-        } catch (error) {
-          console.error("[AUDIO] Error stopping recording music:", error);
+        } catch (error) { /* intentionally ignored */
         }
         recordingAudioPlayerRef.current = null;
       }
@@ -572,16 +559,13 @@ export default function TikTokCameraScreen() {
       }
 
       if (recordingRef.current) {
-        console.log("[STOP] Calling stopRecording on recorder");
         await recordingRef.current.stopRecording();
       } else {
-        console.log("[STOP] No active recorder, resetting state");
         setIsRecording(false);
         setCurrentRecordingSegments([]);
         resetRecordingUI();
       }
     } catch (error: any) {
-      console.error("[STOP] ERROR:", error);
       setIsRecording(false);
       setCurrentRecordingSegments([]);
       recordingRef.current = null;
@@ -589,13 +573,74 @@ export default function TikTokCameraScreen() {
     }
   };
 
+  const takePicture = async () => {
+    if (isCapturingRef.current) return;
+    if (!cameraRef.current || !cameraReady) {
+      Alert.alert("Camera not ready", "Please wait a moment and try again.");
+      return;
+    }
+    isCapturingRef.current = true;
+    setIsCapturing(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    shutterFlash.setValue(1);
+    Animated.timing(shutterFlash, { toValue: 0, duration: 220, useNativeDriver: true }).start();
+    try {
+      const uri = await capturePhotoWithLens(cameraRef.current, selectedLens);
+      setPhotoPreviewUri(uri);
+    } catch (error: any) {
+      Alert.alert("Couldn't take photo", error?.message ?? "Please try again.");
+    } finally {
+      isCapturingRef.current = false;
+      setIsCapturing(false);
+    }
+  };
+
+  /** Single entry point for the shutter (normal button and lens carousel centre icon). */
+  const handleShutterPress = () => {
+    const mode = modeRef.current;
+    if (mode === "photo") {
+      takePicture();
+      return;
+    }
+    handleRecordPress();
+  };
+
+  const handlePhotoNext = () => {
+    if (!photoPreviewUri) return;
+    const photoClip = {
+      id: `photo-${Date.now()}`,
+      uri: photoPreviewUri,
+      duration: 0,
+      type: "photo",
+      lens: selectedLens ? { id: selectedLens.id, name: selectedLens.name } : null,
+    };
+    setPhotoPreviewUri(null);
+    router.push({
+      pathname: "/(main)/upload/preview",
+      params: {
+        clips: JSON.stringify([photoClip]),
+        mediaType: "photo",
+        ...(competitionId && { competitionId }),
+        ...(competitionName && { competitionName }),
+        ...(entryFee && { entryFee }),
+      },
+    });
+  };
+
+  const openLenses = () => {
+    setLensCarouselOpen(true);
+    if (!selectedLensId && lenses[0]) setSelectedLensId(lenses[0].id);
+  };
+
+  const closeLenses = () => {
+    setLensCarouselOpen(false);
+    setSelectedLensId(null);
+  };
+
   const handleRecordPress = () => {
-    if (__DEV__) console.log("[RECORD] Button pressed - isRecording:", isRecording);
     if (isRecording) {
-      if (__DEV__) console.log("[RECORD] Stopping recording");
       stopRecording();
     } else {
-      if (__DEV__) console.log("[RECORD] Starting recording");
       startRecording();
     }
   };
@@ -622,7 +667,6 @@ export default function TikTokCameraScreen() {
     // CRITICAL: Turn off flash before flipping camera
     // Front camera doesn't have flash, so this prevents crash
     if (flashEnabled !== "off") {
-      console.log("[CAMERA FLIP] Disabling flash before flip");
       setFlashEnabled("off");
       // Wait a moment for flash to turn off
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -630,22 +674,41 @@ export default function TikTokCameraScreen() {
     
     // If currently recording, stop the current segment (but keep isRecording true)
     if (wasRecording && recordingRef.current) {
-      console.log("[CAMERA FLIP] Stopping current segment for camera flip");
       isCameraFlipping.current = true; // Mark that we're flipping during recording
       try {
         // Stop current recording segment
         await recordingRef.current.stopRecording();
         // isRecording stays true, will auto-resume after camera switch
       } catch (error) {
-        console.error("[CAMERA FLIP] Error stopping segment:", error);
         isCameraFlipping.current = false;
       }
     }
     
     // Flip the camera - recording will auto-resume in handleCameraReady
-    console.log("[CAMERA FLIP] Flipping camera, will resume recording:", wasRecording);
     setCameraReady(false);
     setFacing((prev) => (prev === "back" ? "front" : "back"));
+  };
+
+  const handleClose = () => {
+    if (recordedClips.length > 0) {
+      Alert.alert(
+        "Discard Recording?",
+        "You have recorded clips. Are you sure you want to go back?",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Discard",
+            style: "destructive",
+            onPress: () => {
+              setRecordedClips([]);
+              router.back();
+            },
+          },
+        ]
+      );
+    } else {
+      router.replace("/(main)");
+    }
   };
 
   const toggleFlash = () => {
@@ -707,11 +770,14 @@ export default function TikTokCameraScreen() {
       const asset = result.assets?.[0];
       if (!asset) return;
 
+      // True duration in seconds (the picker reports ms) and rotation baked into the pixels.
+      const media = await importGalleryAsset(asset);
       const clip: VideoClip = {
         id: `gallery-${Date.now()}`,
-        uri: asset.uri,
-        duration: asset.duration || 3,
-        thumbnail: asset.type === "video" ? asset.uri : undefined,
+        uri: media.uri,
+        duration: media.duration,
+        type: media.type,
+        thumbnail: media.type === "video" ? media.uri : undefined,
         speed: selectedSpeed,
         musicTrack: selectedMusicTrack,
         filter: selectedFilter,
@@ -720,30 +786,11 @@ export default function TikTokCameraScreen() {
       };
 
       setRecordedClips((prev) => [...prev, clip]);
-    } catch (err) {
-      console.error("[GALLERY] CAUGHT ERROR:", err);
+    } catch (err) { /* intentionally ignored */
     }
   };
 
-  const handleVideoEditorExport = (clips: any[]) => {
-    setShowVideoEditor(false);
-
-    const convertedClips: VideoClip[] = clips.map((clip, index) => ({
-      id: clip.id || `video-editor-${Date.now()}-${index}`,
-      uri: clip.uri || clip.path || "",
-      duration: clip.duration || 0,
-      thumbnail: clip.thumbnailUri || clip.thumbnail,
-    }));
-
-    setRecordedClips(convertedClips);
-  };
-
-  const handleVideoEditorCancel = () => {
-    setShowVideoEditor(false);
-  };
-
   const handleNext = () => {
-    if (__DEV__) console.log("[NEXT] Next button pressed with clips:", recordedClips.length);
     if (recordedClips.length === 0) {
       Alert.alert("No Clips", "Please record at least one clip before proceeding.");
       return;
@@ -758,11 +805,11 @@ export default function TikTokCameraScreen() {
       frameRate: selectedCameraFormat.frameRate,
     }));
 
-    if (__DEV__) console.log("[NEXT] Navigating to /upload/edit with", clipsWithMetadata.length, "clips");
     router.push({
-      pathname: "/(main)/upload/edit",
+      pathname: "/(main)/upload/preview",
       params: {
         clips: JSON.stringify(clipsWithMetadata),
+        mediaType: "video",
         ...(competitionId && { competitionId }),
         ...(competitionName && { competitionName }),
         ...(entryFee && { entryFee }),
@@ -812,13 +859,17 @@ export default function TikTokCameraScreen() {
     showFilterLabelBriefly();
   };
 
+  // The responder below is created once, so it reads live state through this ref.
+  const filterSwipeBlockedRef = useRef(false);
+  filterSwipeBlockedRef.current = isRecording || lensCarouselOpen || !!photoPreviewUri;
+
   const cameraSwipeResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => !isRecording,
+      onStartShouldSetPanResponder: () => !filterSwipeBlockedRef.current,
       onMoveShouldSetPanResponder: (evt, gestureState) =>
-        !isRecording && Math.abs(gestureState.dx) > 10,
+        !filterSwipeBlockedRef.current && Math.abs(gestureState.dx) > 10,
       onPanResponderRelease: (evt, gestureState) => {
-        if (isRecording || filterList.length === 0) return;
+        if (filterSwipeBlockedRef.current || filterList.length === 0) return;
 
         const SWIPE_THRESHOLD = 50;
         if (gestureState.dx > SWIPE_THRESHOLD) {
@@ -834,32 +885,19 @@ export default function TikTokCameraScreen() {
   useEffect(() => {
     if (!isRecording) {
       setRecordingTime("00:00");
+      setRecordingSeconds(0);
       return;
     }
     const id = setInterval(() => {
-      const total = Math.floor((Date.now() - recordingStartTime.current) / 1000);
+      const elapsed = (Date.now() - recordingStartTime.current) / 1000;
+      setRecordingSeconds(elapsed);
+      const total = Math.floor(elapsed);
       const mm = String(Math.floor(total / 60)).padStart(2, "0");
       const ss = String(total % 60).padStart(2, "0");
       setRecordingTime(`${mm}:${ss}`);
     }, 500);
     return () => clearInterval(id);
   }, [isRecording]);
-
-  useEffect(() => {
-    if (showVideoEditor && !isVideoEditorLoaded) {
-      (async () => {
-        try {
-          const module = await import("@modules/video-editor");
-          VideoEditorModule = module.default;
-          setIsVideoEditorLoaded(true);
-        } catch (error) {
-          console.error("[CameraScreen] Failed to load VideoEditorModule:", error);
-          Alert.alert("Error", "Failed to load video editor");
-          setShowVideoEditor(false);
-        }
-      })();
-    }
-  }, [showVideoEditor, isVideoEditorLoaded]);
 
   useEffect(() => {
     const verifyRole = async () => {
@@ -875,20 +913,6 @@ export default function TikTokCameraScreen() {
       }
     };
     verifyRole();
-  }, []);
-
-  useEffect(() => {
-    const loadMusicLibrary = async () => {
-      setLoadingMusic(true);
-      const response = await listAudio("trending", 1, 50);
-      if (response.success && response.data?.tracks) {
-        setMusicTracks(response.data.tracks);
-      } else {
-        setMusicTracks([]);
-      }
-      setLoadingMusic(false);
-    };
-    loadMusicLibrary();
   }, []);
 
   useEffect(() => {
@@ -913,15 +937,13 @@ export default function TikTokCameraScreen() {
         try {
           // We'll implement this with a hidden Video component or just track state
           audioPlayerRef.current = null;
-        } catch (error) {
-          console.error("[AUDIO] Error stopping preview:", error);
+        } catch (error) { /* intentionally ignored */
         }
         setIsPlayingPreview(false);
       }
 
       if (selectedMusicTrack?.uri) {
         try {
-          if (__DEV__) console.log("[AUDIO] Playing preview for:", selectedMusicTrack.title);
           
           // Store track reference for preview
           audioPlayerRef.current = {
@@ -934,9 +956,7 @@ export default function TikTokCameraScreen() {
           // Note: For actual playback, this would need a native audio player
           // or the hidden Video component. For now, we're tracking state.
           // The system will handle audio mode auto-ducking during preview.
-          if (__DEV__) console.log("[AUDIO] Music preview state set, ready for playback");
         } catch (error) {
-          console.error("[AUDIO] Failed to play preview:", error);
           audioPlayerRef.current = null;
           setIsPlayingPreview(false);
         }
@@ -967,9 +987,7 @@ export default function TikTokCameraScreen() {
           allowsRecording: true,
           playsInSilentMode: true,
         });
-        if (__DEV__) console.log("[AUDIO] Audio mode configured");
-      } catch (error) {
-        console.error("[AUDIO] Failed to set audio mode:", error);
+      } catch (error) { /* intentionally ignored */
       }
     })();
 
@@ -983,7 +1001,6 @@ export default function TikTokCameraScreen() {
   // Auto-disable flash when switching to front camera (front camera has no flash unit)
   useEffect(() => {
     if (facing === "front" && flashEnabled !== "off") {
-      console.log("[CAMERA] Auto-disabling flash for front camera");
       setFlashEnabled("off");
     }
   }, [facing]);
@@ -1038,7 +1055,6 @@ export default function TikTokCameraScreen() {
             implementationMode="compatible"
             onStarted={handleCameraReady}
             onError={(error: Error) => {
-              console.error("[Camera] Error:", error);
               setMountError(error.message);
             }}
           />
@@ -1047,270 +1063,103 @@ export default function TikTokCameraScreen() {
 
       {/* Build markers removed for production */}
 
-      {isRecording && (
-        <View style={styles.recordingIndicatorsContainer}>
-          <View style={styles.recordingTimerContainer}>
-            <View style={styles.recordingIndicatorDot} />
-            <Text style={styles.recordingTimerText}>{recordingTime}</Text>
-          </View>
-        </View>
-      )}
+      {selectedLens && <LensOverlay lens={selectedLens} isRecording={isRecording} />}
 
-      {/* Mode Selector */}
-      <View style={styles.modeSelector}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.modeScrollContent}
-        >
-          <TouchableOpacity
-            style={[styles.modeButton, recordingMode === "video" && styles.modeButtonActive]}
-            onPress={() => setRecordingMode("video")}
-          >
-            <Text style={[styles.modeText, recordingMode === "video" && styles.modeTextActive]}>
-              Video
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeButton, recordingMode === "photo" && styles.modeButtonActive]}
-            onPress={() => setRecordingMode("photo")}
-          >
-            <Text style={[styles.modeText, recordingMode === "photo" && styles.modeTextActive]}>
-              Photo
-            </Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </View>
+      <Animated.View pointerEvents="none" style={[styles.shutterFlash, { opacity: shutterFlash }]} />
 
-      {/* Close Button */}
-      <TouchableOpacity
-        style={styles.closeButton}
-        onPress={() => {
-          if (recordedClips.length > 0) {
-            Alert.alert(
-              "Discard Recording?",
-              "You have recorded clips. Are you sure you want to go back?",
-              [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Discard",
-                  style: "destructive",
-                  onPress: () => {
-                    setRecordedClips([]);
-                    router.back();
-                  },
-                },
-              ]
-            );
-          } else {
-            router.replace("/(main)");
+      <TopBar
+        topInset={insets.top}
+        showProgress={recordingMode === "video"}
+        segments={recordedClips.map((clip) => clip.duration)}
+        liveSeconds={isRecording ? recordingSeconds : 0}
+        maxDuration={maxRecordingDuration}
+        onClose={handleClose}
+        onFlip={toggleCamera}
+      />
+
+      {activeTab === "camera" && (
+        <ToolRail
+          top={insets.top + 140}
+          maxDuration={maxRecordingDuration}
+          countdown={0}
+          speed={selectedSpeed}
+          flash={flashEnabled}
+          hasSound={!!selectedMusicTrack}
+          hasEffect={!!selectedFilter}
+          showFlash={facing === "back"}
+          disabled={isRecording}
+          onSound={() => setShowMusicPickerModal(true)}
+          onDuration={() => setMaxRecordingDuration((prev) => (prev === 15 ? 30 : prev === 30 ? 60 : 15))}
+          onTimer={() => {}}
+          onEffects={() => setShowFilterGrid(true)}
+          onSpeed={() =>
+            setSelectedSpeed((prev) => {
+              const speeds: SpeedOption[] = [0.5, 1, 1.5, 2];
+              return speeds[(speeds.indexOf(prev) + 1) % speeds.length];
+            })
           }
-        }}
-      >
-        <CloseIcon size={24} color="#fff" />
-      </TouchableOpacity>
-
-      {/* Floating Left Sidebar */}
-      <Animated.View style={[styles.leftToolbar, { opacity: toolbarOpacity }]}>
-        <View ref={musicButtonRef}>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={() => setShowMusicPickerModal(true)}
-          >
-            <MusicIcon size={28} color="#fff" />
-            {selectedMusicTrack && (
-              <Text style={styles.toolbarLabel} numberOfLines={1}>
-                ♪
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View ref={filterButtonRef}>
-          <TouchableOpacity style={styles.toolbarButton} onPress={() => setShowFilterGrid(true)}>
-            <FilterIcon size={28} color="#fff" />
-            {selectedFilter && (
-              <Text style={styles.toolbarLabel} numberOfLines={1}>
-                {selectedFilter.name.substring(0, 6)}
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <View ref={timerButtonRef}>
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleTimerPress}>
-            <TimerIcon size={28} color="#fff" />
-            <Text style={styles.toolbarLabel}>{maxRecordingDuration}s</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View ref={speedButtonRef}>
-          <TouchableOpacity style={styles.toolbarButton} onPress={handleSpeedPress}>
-            <Text style={styles.toolbarText}>{selectedSpeed}x</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View ref={hdButtonRef}>
-          <TouchableOpacity
-            style={styles.toolbarButton}
-            onPress={() => {
-              if (hdButtonRef.current) {
-                hdButtonRef.current.measureInWindow((x, y, w, h) => {
-                  setHDPopupPos({
-                    x: x + w + 8,
-                    y: y,
-                  });
-                  setShowHDPopup(true);
-                });
-              }
-            }}
-          >
-            <Text style={styles.toolbarText}>
-              {selectedCameraFormat.resolution}
-              {"\n"}
-              {selectedCameraFormat.frameRate}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </Animated.View>
-
-      {/* Clip Timeline & Next Button - Above the bottom controls */}
-      {recordedClips.length > 0 && (
-        <Animated.View
-          style={[
-            styles.clipTimeline,
-            {
-              transform: [{ translateY: clipBarTranslateY }],
-            },
-          ]}
-        >
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.clipTimelineContent}
-          >
-            {recordedClips.map((clip, index) => (
-              <TouchableOpacity
-                key={clip.id}
-                style={[
-                  styles.clipSegment,
-                  selectedClipIndex === index && styles.clipSegmentSelected,
-                ]}
-                onPress={() => setSelectedClipIndex(index)}
-              >
-                {clip.uri ? (
-                  <Image
-                    source={{ uri: clip.uri }}
-                    style={styles.clipSegmentImage}
-                    resizeMode="cover"
-                  />
-                ) : (
-                  <View style={styles.clipSegmentInner} />
-                )}
-                <TouchableOpacity
-                  style={styles.deleteClipButton}
-                  onPress={() => deleteClip(clip.id)}
-                >
-                  <CloseIcon size={10} color="#fff" />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-              <Text style={styles.nextButtonText}>Next {">"}</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </Animated.View>
+          onFlash={toggleFlash}
+        />
       )}
 
-      {/* Bottom Controls Area */}
-      <View style={styles.bottomControlsContainer}>
-        {/* Left Side: Flash & Gallery */}
-        <View style={styles.bottomSideGroup}>
-          {facing === "back" ? (
-            <TouchableOpacity style={styles.bottomActionBtn} onPress={toggleFlash}>
-              <FlashIcon filled={flashEnabled !== "off"} size={26} color="#fff" />
-            </TouchableOpacity>
+      {activeTab === "live" && (
+        <View style={styles.liveComingSoon} pointerEvents="none">
+          <Text style={styles.liveComingSoonTitle}>Live</Text>
+          <Text style={styles.liveComingSoonText}>Coming soon</Text>
+        </View>
+      )}
+
+      <View style={styles.captureBottom} pointerEvents="box-none">
+        {activeTab === "camera" && (
+          <CaptureControls
+            mode={recordingMode}
+            isRecording={isRecording}
+            progress={recordingSeconds / (maxRecordingDuration > 0 ? maxRecordingDuration : 60)}
+            clipCount={recordedClips.length}
+            disabled={isCapturing}
+            onModeChange={(mode) => !isCapturing && setRecordingMode(mode)}
+            onRecordPress={handleShutterPress}
+            onLenses={openLenses}
+            onDeleteLast={() => {
+              const last = recordedClips[recordedClips.length - 1];
+              if (last) deleteClip(last.id);
+            }}
+            onNext={handleNext}
+            lensCarousel={
+              lensCarouselOpen && !isRecording ? (
+                <LensCarousel
+                  lenses={lenses}
+                  loading={lensesLoading}
+                  selectedId={selectedLensId}
+                  mode={recordingMode}
+                  disabled={isCapturing}
+                  onSelect={(lens) => setSelectedLensId(lens.id)}
+                  onShutter={handleShutterPress}
+                  onRemove={closeLenses}
+                />
+              ) : undefined
+            }
+          />
+        )}
+        {/* Same height as the tab row, so the shutter stays put while recording. */}
+        {isRecording && <View style={{ height: insets.bottom + 82 + (lensCarouselOpen ? LENS_REMOVE_ROW : 0) }} />}
+        {!isRecording &&
+          (lensCarouselOpen && activeTab === "camera" ? (
+            <LensBar
+              bottomInset={insets.bottom}
+              lenses={lenses}
+              selected={selectedLens}
+              onSelect={(lens) => setSelectedLensId(lens.id)}
+              onToggleSaved={toggleLensSaved}
+            />
           ) : (
-            <View style={styles.bottomActionBtn} />
-          )}
-          <TouchableOpacity style={styles.bottomActionBtn} onPress={pickFromGallery}>
-            <GalleryIcon size={26} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Center: Zoom Dial & Record Button */}
-        <View style={styles.captureCenterGroup}>
-          {!isRecording && recordedClips.length === 0 && (
-            <View style={styles.curvedZoomDial}>
-              {supportedZoomLevels.map((zoom) => (
-                <TouchableOpacity
-                  key={zoom}
-                  style={[styles.zoomPill, currentZoom === zoom && styles.zoomPillActive]}
-                  onPress={() => handleZoomChange(zoom)}
-                >
-                  <Text
-                    style={[styles.zoomPillText, currentZoom === zoom && styles.zoomPillTextActive]}
-                  >
-                    {zoom}x
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.recordButtonContainer}
-            onPress={handleRecordPress}
-            activeOpacity={0.8}
-          >
-            {isRecording && (
-              <View style={styles.progressRing}>
-                <Svg width={100} height={100} style={styles.progressSvg}>
-                  <Circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    stroke="rgba(255, 255, 255, 0.3)"
-                    strokeWidth="4"
-                    fill="none"
-                  />
-                </Svg>
-                <Animated.View
-                  style={[
-                    styles.progressRingIndicator,
-                    {
-                      transform: [
-                        {
-                          rotate: progressAnim.interpolate({
-                            inputRange: [0, 1],
-                            outputRange: ["0deg", "360deg"],
-                          }),
-                        },
-                      ],
-                    },
-                  ]}
-                >
-                  <View style={styles.progressRingDot} />
-                </Animated.View>
-              </View>
-            )}
-
-            <View style={[styles.recordButton, isRecording && styles.recordButtonRecording]}>
-              {isRecording ? (
-                <View style={styles.recordButtonSquare} />
-              ) : (
-                <View style={styles.recordButtonCircle} />
-              )}
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Right Side: Flip Camera */}
-        <View style={styles.bottomSideGroupRight}>
-          <TouchableOpacity style={styles.bottomActionBtn} onPress={toggleCamera}>
-            <CameraFlipIcon size={28} color="#fff" />
-          </TouchableOpacity>
-        </View>
+            <BottomTabs
+              bottomInset={insets.bottom}
+              activeTab={activeTab}
+              onTabChange={setActiveTab}
+              onGallery={pickFromGallery}
+            />
+          ))}
       </View>
 
       {/* MODALS */}
@@ -1587,7 +1436,13 @@ export default function TikTokCameraScreen() {
                             selectedFilter?.id === filter.id && styles.filterGridTileSelected,
                           ]}
                           onPress={() => {
-                            setSelectedFilter(filter);
+                            // Filters render on-device; a backend filter needs a matching preset.
+                            const presetId = matchPresetByName(filter.name);
+                            if (!presetId) {
+                              Alert.alert("Not supported yet", `The "${filter.name}" filter can't be applied on this device yet.`);
+                              return;
+                            }
+                            setSelectedFilter({ ...filter, presetId });
                             setShowFilterGrid(false);
                             showFilterLabelBriefly();
                           }}
@@ -1683,18 +1538,6 @@ export default function TikTokCameraScreen() {
         )}
       </View>
 
-      {showVideoEditor && isVideoEditorLoaded && VideoEditorModule && (
-        <View style={StyleSheet.absoluteFill} pointerEvents="auto">
-          <VideoEditorModule
-            onExport={handleVideoEditorExport}
-            onCancel={handleVideoEditorCancel}
-            initialMode="gallery"
-            competitionId={competitionId}
-            competitionName={competitionName}
-            entryFee={entryFee}
-          />
-        </View>
-      )}
 
       {showFilterLabel && selectedFilter && (
         <Animated.View
@@ -1726,11 +1569,41 @@ export default function TikTokCameraScreen() {
           </View>
         </Animated.View>
       )}
+      {photoPreviewUri && (
+        <PhotoPreview
+          uri={photoPreviewUri}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+          onRetake={() => setPhotoPreviewUri(null)}
+          onNext={handlePhotoNext}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shutterFlash: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "#fff",
+    zIndex: 60,
+  },
+  captureBottom: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 40,
+  },
+  liveComingSoon: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 30,
+  },
+  liveComingSoonTitle: { color: "#fff", fontSize: 28, fontWeight: "800" },
+  liveComingSoonText: { color: "rgba(255,255,255,0.7)", fontSize: 16, marginTop: 8 },
   container: {
     flex: 1,
     backgroundColor: "transparent",

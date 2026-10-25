@@ -1,71 +1,54 @@
-import React, { useState, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  StatusBar,
-  Platform,
-  Modal,
-  Alert,
-  ActivityIndicator,
-  SafeAreaView,
-} from "react-native";
+import { useState, useCallback } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Platform, Alert, ActivityIndicator, TextInput } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { BackIcon } from "@/icons";
+import { getWallet, rechargeWallet, RECHARGE_LIMITS } from "@/api/services/walletService";
+import { getProfile, displayName } from "@/api/services/userService";
+import { getErrorMessage } from "@/api/client";
+import { toastError, toastSuccess } from "@/components/ui/Toast";
 
 interface CoinPackage {
   id: string;
   coins: number;
-  price: number;
-  discount?: number;
   finalPrice: number;
-  bonus?: number;
   popular?: boolean;
 }
 
+// The backend accepts any whole amount within RECHARGE_LIMITS at 1 coin per rupee;
+// these are quick picks, the custom field covers any other amount.
+const QUICK_AMOUNTS = [50, 100, 250, 500, 1000, 2000];
+const COIN_PACKAGES: CoinPackage[] = QUICK_AMOUNTS.map((amount) => ({
+  id: String(amount),
+  coins: amount,
+  finalPrice: amount,
+  popular: amount === 250,
+}));
+
 export default function AddMoneyScreen() {
-  const [coinPackages, setCoinPackages] = useState<CoinPackage[]>([]);
-  const [selectedPackage, setSelectedPackage] = useState<CoinPackage | null>(null);
+  const coinPackages = COIN_PACKAGES;
+  const [selectedPackage, setSelectedPackage] = useState<CoinPackage | null>(
+    COIN_PACKAGES.find((p) => p.popular) || null
+  );
+  const [customAmount, setCustomAmount] = useState("");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
   const [userInfo, setUserInfo] = useState({ email: "", phone: "", name: "" });
 
-  // Fetch coin packages from backend
-  const fetchCoinPackages = useCallback(async () => {
+  const loadDetails = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
-      const { authService } = await import("@/api/services/authService");
-
-      // Fetch packages
-      const packagesResult = await paymentIntegrationService.getCoinPackages();
-      if (packagesResult.success && Array.isArray(packagesResult.data)) {
-        setCoinPackages(packagesResult.data);
-        // Select popular package by default
-        const popularPackage = packagesResult.data.find((p: any) => p.popular);
-        if (popularPackage) {
-          setSelectedPackage(popularPackage);
-        }
-      } else {
-        Alert.alert("Error", "Failed to load coin packages");
-      }
-
-      // Fetch user profile for payment details
-      const profileResult = await authService.getUserProfile();
-      if (profileResult.success && profileResult.data) {
-        setUserInfo({
-          email: profileResult.data.email || "",
-          phone: profileResult.data.mobile || "",
-          name: `${profileResult.data.firstName || ""} ${profileResult.data.lastName || ""}`.trim(),
-        });
-      }
+      const [wallet, profile] = await Promise.all([getWallet(1, 1), getProfile()]);
+      setBalance(wallet.balance);
+      setUserInfo({
+        email: profile.email || "",
+        phone: profile.mobile || "",
+        name: displayName(profile),
+      });
     } catch (error) {
-      console.error("[add-money] Error fetching packages:", error);
-      Alert.alert("Error", "Failed to load payment options");
+      toastError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -73,83 +56,39 @@ export default function AddMoneyScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      fetchCoinPackages();
-    }, [fetchCoinPackages])
+      loadDetails();
+    }, [loadDetails])
   );
 
-  // Handle payment initiation
-  const handlePayment = async (packageData: CoinPackage) => {
-    if (!userInfo.email || !userInfo.phone || !userInfo.name) {
-      Alert.alert("Error", "Please complete your profile before making a payment");
-      return;
+  const handleCustomAmount = (text: string) => {
+    const digits = text.replace(/[^0-9]/g, "").slice(0, 6);
+    setCustomAmount(digits);
+    if (digits) {
+      const amount = parseInt(digits, 10);
+      setSelectedPackage({ id: "custom", coins: amount, finalPrice: amount });
+    } else {
+      setSelectedPackage(null);
     }
+  };
 
+  const handlePayment = async (packageData: CoinPackage) => {
+    if (processing) return;
+    setProcessing(true);
     try {
-      setProcessing(true);
-      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
-
-      // Step 1: Initiate payment on backend
-      const initiateResult = await paymentIntegrationService.initiatePayment({
-        packageId: packageData.id,
-        coins: packageData.coins,
-        amount: packageData.finalPrice,
-        userEmail: userInfo.email,
-        userPhone: userInfo.phone,
-        userName: userInfo.name,
+      const outcome = await rechargeWallet(packageData.finalPrice, {
+        name: userInfo.name || undefined,
+        email: userInfo.email || undefined,
+        contact: userInfo.phone || undefined,
       });
-
-      if (!initiateResult.success) {
-        Alert.alert("Error", initiateResult.message || "Failed to initiate payment");
-        setProcessing(false);
-        return;
+      if (outcome.status === "paid") {
+        if (typeof outcome.balance === "number") setBalance(outcome.balance);
+        toastSuccess(`${packageData.coins} GFI coins added to your wallet.`);
+        router.back();
+      } else if (outcome.status === "pending") {
+        Alert.alert("Payment processing", outcome.message);
+      } else if (outcome.status === "failed") {
+        Alert.alert("Payment failed", outcome.message);
       }
-
-      const { orderId, key } = initiateResult.data || {};
-
-      if (!orderId || !key) {
-        Alert.alert("Error", "Failed to get payment details");
-        setProcessing(false);
-        return;
-      }
-
-      // Step 2: Process Razorpay payment
-      const paymentVerifyRequest = await paymentIntegrationService.processRazorpayPayment(
-        orderId,
-        packageData.finalPrice,
-        userInfo.email,
-        userInfo.phone,
-        userInfo.name,
-        key
-      );
-
-      if (!paymentVerifyRequest) {
-        // User cancelled payment
-        setProcessing(false);
-        return;
-      }
-
-      // Step 3: Verify payment on backend
-      const verifyResult = await paymentIntegrationService.verifyPayment(paymentVerifyRequest);
-
-      if (verifyResult.success) {
-        Alert.alert(
-          "Success",
-          `Payment successful! You received ${packageData.coins} GFI coins.`,
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                router.back();
-              },
-            },
-          ]
-        );
-      } else {
-        Alert.alert("Error", verifyResult.message || "Payment verification failed");
-      }
-    } catch (error: any) {
-      console.error("[add-money] Payment error:", error);
-      Alert.alert("Error", error.message || "Payment failed. Please try again.");
     } finally {
       setProcessing(false);
     }
@@ -174,13 +113,17 @@ export default function AddMoneyScreen() {
       {loading ? (
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator size="large" color="#EC9A15" />
-          <Text style={{ color: "#999", marginTop: 12 }}>Loading packages...</Text>
+          <Text style={{ color: "#999", marginTop: 12 }}>Loading wallet...</Text>
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          {balance !== null && (
+            <Text style={styles.sectionTitle}>Current balance: {balance.toLocaleString()} GFI Coins</Text>
+          )}
+
           {/* Info Card */}
           <View style={styles.infoCard}>
             <Ionicons name="information-circle" size={20} color="#EC9A15" />
@@ -199,7 +142,10 @@ export default function AddMoneyScreen() {
                   styles.packageCard,
                   selectedPackage?.id === pkg.id && styles.packageCardSelected,
                 ]}
-                onPress={() => setSelectedPackage(pkg)}
+                onPress={() => {
+                  setCustomAmount("");
+                  setSelectedPackage(pkg);
+                }}
                 disabled={processing}
               >
                 {pkg.popular && (
@@ -214,23 +160,22 @@ export default function AddMoneyScreen() {
                 <Text style={styles.coinAmount}>{pkg.coins}</Text>
                 <Text style={styles.coinLabel}>GFI Coins</Text>
 
-                {pkg.discount ? (
-                  <>
-                    <Text style={styles.originalPrice}>₹{pkg.price}</Text>
-                    <Text style={styles.discountBadge}>{pkg.discount}% OFF</Text>
-                  </>
-                ) : null}
-
                 <Text style={styles.finalPrice}>₹{pkg.finalPrice}</Text>
 
-                {pkg.bonus ? (
-                  <View style={styles.bonusBox}>
-                    <Text style={styles.bonusText}>+ {pkg.bonus} bonus</Text>
-                  </View>
-                ) : null}
               </TouchableOpacity>
             ))}
           </View>
+
+          <Text style={styles.sectionTitle}>Or enter an amount</Text>
+          <TextInput
+            style={styles.customAmountInput}
+            value={customAmount}
+            onChangeText={handleCustomAmount}
+            keyboardType="number-pad"
+            placeholder={`₹${RECHARGE_LIMITS.min} – ₹${RECHARGE_LIMITS.max.toLocaleString("en-IN")}`}
+            placeholderTextColor="#999"
+            editable={!processing}
+          />
 
           {/* Selected Package Details */}
           {selectedPackage && (
@@ -240,17 +185,6 @@ export default function AddMoneyScreen() {
                 <Text style={styles.detailValue}>{selectedPackage.coins}</Text>
               </View>
               <View style={styles.detailDivider} />
-              {selectedPackage.bonus ? (
-                <>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Bonus Coins</Text>
-                    <Text style={[styles.detailValue, { color: "#22C55E" }]}>
-                      +{selectedPackage.bonus}
-                    </Text>
-                  </View>
-                  <View style={styles.detailDivider} />
-                </>
-              ) : null}
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Price</Text>
                 <Text style={[styles.detailValue, { fontSize: 20 }]}>
@@ -308,6 +242,17 @@ export default function AddMoneyScreen() {
 }
 
 const styles = StyleSheet.create({
+  customAmountInput: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "rgba(236,154,21,0.4)",
+    color: "#FFFFFF",
+    fontSize: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
   container: {
     flex: 1,
     backgroundColor: "#3C2610",

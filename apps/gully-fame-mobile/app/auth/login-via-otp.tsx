@@ -12,9 +12,10 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { showGuestModeUnavailable } from "@utils/guestMode";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { GoogleIcon, InstagramIcon, AppleIcon } from "@/icons";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
 
 const { width, height } = Dimensions.get("window");
 
@@ -31,94 +32,23 @@ export default function LoginViaOTP() {
   }, [params.email]);
 
   const handleSendOTP = async () => {
+    if (isLoading) return;
     setErrorMessage("");
-
-    if (!emailOrMobile) {
-      setErrorMessage("Please enter your email or mobile number");
+    const mobile = emailOrMobile.trim();
+    // The backend only delivers OTPs by SMS, so OTP login needs a mobile number.
+    if (!AUTH_RULES.mobile.test(mobile)) {
+      setErrorMessage("Enter your 10-digit mobile number.");
       return;
     }
-
     setIsLoading(true);
-
     try {
-      const isEmail = emailOrMobile.includes("@");
-      const identifier = emailOrMobile.trim().toLowerCase();
-
-      if (__DEV__) {
-        console.log("\n🚀 ========== LOGIN VIA OTP ==========");
-        console.log("Login Method: Mobile + OTP");
-        console.log("Mobile/Email:", identifier);
-        console.log("Is Email:", isEmail);
-        console.log(
-          "Note: This will map to the same user account as password login",
-        );
-        console.log("Calling login API with viaPassword: false");
-        console.log("==========================================\n");
+      const result = await authService.login({ userId: mobile, viaPassword: false });
+      if (!result.success || !result.data?.txnId) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      const result = await authService.login({
-        userId: identifier,
-        viaPassword: false,
-      });
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log("\n✅ ========== LOGIN API SUCCESS ==========");
-          console.log("Response Data:", result.data);
-          console.log("TxnId:", result.data?.txnId);
-          console.log("==========================================\n");
-        }
-
-        const txnId =
-          result.data?.txnId ||
-          (result.fullResponse as any)?.txnId ||
-          (result.data as any)?.txnId;
-
-        if (!txnId) {
-          setErrorMessage("OTP request failed. Please try again.");
-          return;
-        }
-
-        const isEmail = emailOrMobile.includes("@");
-        const identifier = emailOrMobile.trim().toLowerCase();
-
-        if (__DEV__) {
-          console.log(
-            "\n📋 ========== NAVIGATING TO OTP VERIFICATION ==========",
-          );
-          console.log("Login Method: Mobile + OTP");
-          console.log("Mobile/Email:", identifier);
-          console.log("Is Email:", isEmail);
-          console.log("TxnId:", txnId);
-          console.log("Note: User data will be stored after OTP verification");
-          console.log("==================================================\n");
-        }
-
-        const query = `txnId=${encodeURIComponent(txnId)}&email=${encodeURIComponent(identifier)}`;
-        router.replace(`/auth/verify-otp?${query}` as any);
-      } else {
-        const errorMsg =
-          result.data?.message ||
-          result.error ||
-          "Failed to send OTP. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("\n❌ ========== LOGIN API FAILED ==========");
-          console.error("Error:", errorMsg);
-          console.error("==========================================\n");
-        }
-      }
-    } catch (error: any) {
-      const errorMsg =
-        error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("\n❌ ========== LOGIN EXCEPTION ==========");
-        console.error("Exception:", error);
-        console.error("========================================\n");
-      }
+      const query = `txnId=${encodeURIComponent(result.data.txnId)}&mobile=${encodeURIComponent(mobile)}`;
+      router.replace(`/auth/verify-otp?${query}` as any);
     } finally {
       setIsLoading(false);
     }
@@ -154,11 +84,11 @@ export default function LoginViaOTP() {
           {}
           <View style={styles.inputGroup}>
             <Text style={styles.label}>
-              Email/Mobile <Text style={styles.required}>*</Text>
+              Mobile Number <Text style={styles.required}>*</Text>
             </Text>
             <TextInput
               style={styles.input}
-              placeholder="Enter your email or mobile number"
+              placeholder="Enter your 10-digit mobile number"
               placeholderTextColor="#B0B0B0"
               value={emailOrMobile}
               onChangeText={setEmailOrMobile}
@@ -254,7 +184,7 @@ export default function LoginViaOTP() {
         {}
         <View style={styles.skipContainer}>
           <TouchableOpacity
-            onPress={() => router.replace("/auth/location?skip=true")}
+            onPress={showGuestModeUnavailable}
           >
             <Text style={styles.skipText}>
               Let me have a look!{" "}

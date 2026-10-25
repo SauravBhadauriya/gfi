@@ -4,7 +4,7 @@ import type { ApiResponse } from './apiTypes';
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  'https://gullyfame.com/v1/api/';
+  'https://backend.gullyfame.com/v1/api/';
 
 const TOKEN_KEY = 'gf_admin_token';
 const ADMIN_DATA_KEY = 'gf_admin_data';
@@ -235,8 +235,8 @@ export async function loginAdmin(
     }
 
     
-    const userRole = (admin?.role || payload?.role || role)?.toLowerCase() as 'admin' | 'sponsor' | undefined;
-    setToken(token, userRole || 'admin');
+    // The backend only issues admin tokens; there is no sponsor login.
+    setToken(token, 'admin');
     if (admin) {
       setAdminData(admin);
     }
@@ -245,7 +245,7 @@ export async function loginAdmin(
       console.log(`${logPrefix} - ✅ Login successful:`, {
         hasToken: !!token,
         hasAdmin: !!admin,
-        role: userRole,
+        role: 'admin',
         email: admin?.email || email,
       });
     }
@@ -266,45 +266,6 @@ export async function loginAdmin(
       name: error.name,
     });
 
-    if (email === 'admin@gullyfame.com' || role === 'ADMIN') {
-      const mockAdmin: AdminUser = {
-        id: '1',
-        name: 'Admin User',
-        email: email || 'admin@gullyfame.com',
-        role: 'admin',
-      };
-      const token = 'demo-admin-token-' + Date.now();
-      setToken(token, 'admin');
-      setAdminData(mockAdmin);
-      return {
-        success: true,
-        message: 'Login successful (offline preview mode)',
-        data: {
-          token,
-          admin: mockAdmin,
-        },
-      };
-    } else if (email === 'sponsor@gullyfame.com' || role === 'SPONSOR') {
-      const mockSponsor: AdminUser = {
-        id: '2',
-        name: 'Sponsor User',
-        email: email || 'sponsor@gullyfame.com',
-        role: 'sponsor',
-        sponsorCode: 'SP-1001',
-      };
-      const token = 'demo-sponsor-token-' + Date.now();
-      setToken(token, 'sponsor');
-      setAdminData(mockSponsor);
-      return {
-        success: true,
-        message: 'Login successful (offline preview mode)',
-        data: {
-          token,
-          admin: mockSponsor,
-        },
-      };
-    }
-
     return {
       success: false,
       message: error?.message || 'Network error occurred during login',
@@ -324,18 +285,6 @@ export async function getCurrentAdmin(): Promise<ApiResponse<AdminUser>> {
       message: 'Not authenticated',
       error: 'NO_TOKEN',
     };
-  }
-
-  // Support offline session for demo token
-  if (token.startsWith('demo-')) {
-    const storedAdmin = getStoredAdmin();
-    if (storedAdmin) {
-      return {
-        success: true,
-        message: 'Demo session active',
-        data: storedAdmin,
-      };
-    }
   }
 
   const endpoint = `${BASE_URL}admin/getDetails`;

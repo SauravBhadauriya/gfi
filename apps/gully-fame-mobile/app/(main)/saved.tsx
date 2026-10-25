@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,47 +11,31 @@ import {
   Platform,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useInteractionReels } from "@/hooks/useInteractionReels";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = (width - 60) / 2; 
 
 
-const savedContent = [
-  {
-    id: "1",
-    type: "reel",
-    title: "Street Dance Battle",
-    author: "@rahul_dancer",
-    thumbnail: "https://picsum.photos/seed/dance1/200/300",
-  },
-  {
-    id: "2",
-    type: "post",
-    title: "New Rap Lyrics",
-    author: "@mc_stan_fan",
-    thumbnail: "https://picsum.photos/seed/rap2/200/300",
-  },
-  {
-    id: "3",
-    type: "reel",
-    title: "Beatbox freestyle",
-    author: "@beat_king",
-    thumbnail: "https://picsum.photos/seed/beat3/200/300",
-  },
-  {
-    id: "4",
-    type: "reel",
-    title: "Gully Cricket Moments",
-    author: "@sports_gully",
-    thumbnail: "https://picsum.photos/seed/cricket4/200/300",
-  },
-];
-
 export default function SavedScreen() {
   const [activeTab, setActiveTab] = useState<"all" | "reel" | "post">("all");
+  // Saved reels come from the feed's is_saved flag (there is no saved-reels endpoint).
+  const saved = useInteractionReels("saved", true);
+  const savedContent = useMemo(
+    () =>
+      saved.items.map((reel: any) => ({
+        id: String(reel._id || reel.id),
+        type: "reel" as const,
+        title: reel.caption || "Reel",
+        author: reel.author?.username || "",
+        thumbnail: reel.thumbnail_url || reel.thumbnail || "",
+      })),
+    [saved.items]
+  );
 
   const filteredContent = savedContent.filter((item) => {
     if (activeTab === "all") return true;
@@ -100,10 +84,22 @@ export default function SavedScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
-        {filteredContent.length > 0 ? (
+        {saved.loading ? (
+          <ActivityIndicator size="large" color="#EC9A15" style={{ marginTop: 48 }} />
+        ) : saved.error && filteredContent.length === 0 ? (
+          <TouchableOpacity onPress={saved.retry} style={styles.emptyState}>
+            <Text style={styles.emptyStateDesc}>{saved.error}</Text>
+            <Text style={[styles.emptyStateDesc, { color: "#EC9A15" }]}>Tap to retry</Text>
+          </TouchableOpacity>
+        ) : filteredContent.length > 0 ? (
           <View style={styles.gridContainer}>
             {filteredContent.map((item) => (
-              <TouchableOpacity key={item.id} style={styles.card} activeOpacity={0.8}>
+              <TouchableOpacity
+                key={item.id}
+                style={styles.card}
+                activeOpacity={0.8}
+                onPress={() => router.push({ pathname: "/(main)/reel", params: { startReelId: item.id } } as any)}
+              >
                 <Image source={{ uri: item.thumbnail }} style={styles.thumbnail} />
                 
                 {}

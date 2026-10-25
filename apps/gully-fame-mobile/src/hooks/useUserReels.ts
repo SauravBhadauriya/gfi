@@ -1,10 +1,10 @@
 // Created by Kiro - Hook for fetching user reels with Local Storage Caching
 // Fetches user's reels/posts dynamically from API + falls back to local cache
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import apiClient from "../api/axios";
+import apiClient from "../api/client";
 
 export interface Reel {
   _id?: string;
@@ -37,115 +37,186 @@ export const saveReelToLocalCache = async (newReel: Reel) => {
     reelsList = [cleanedReel, ...reelsList.filter((r) => (r.id || r._id) !== newId)];
 
     await AsyncStorage.setItem(LOCAL_REELS_KEY, JSON.stringify(reelsList));
-    console.log("✅ [useUserReels] Successfully saved new reel to local cache!");
-  } catch (error) {
-    console.error("❌ [useUserReels] Error saving reel to local cache:", error);
+  } catch (error) { /* intentionally ignored */
   }
+};
+
+const PAGE_SIZE = 30;
+const apiCacheKey = (userId: string) => `@gullyfame_profile_reels_${userId}`;
+
+const reelKey = (item: Reel) => item.id || item._id || item.videoUrl || item.video_url || "";
+
+const dedupe = (items: Reel[]) => {
+  const map = new Map<string, Reel>();
+  items.forEach((item) => {
+    const key = reelKey(item);
+    if (key) map.set(key, item);
+  });
+  return Array.from(map.values());
 };
 
 export const useUserReels = (userId: string) => {
   const [reels, setReels] = useState<Reel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cursorRef = useRef<string | null>(null);
+  const resolvedUserIdRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const params = useLocalSearchParams();
 
-  // Fetch user reels
-  const fetchUserReels = useCallback(async () => {
-    setLoading(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      controllerRef.current?.abort();
+    };
+  }, []);
+
+  // One page of the global reels list, filtered to this author on the device.
+  // BACKEND_PENDING: GET users/:id/posts?cursor=&limit= so the server filters by author.
+  const fetchPage = useCallback(async (cursor: string | null) => {
+    const ownerId = resolvedUserIdRef.current;
+    controllerRef.current?.abort();
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    const response = await apiClient.get<any>("reels", {
+      params: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) },
+      signal: controller.signal,
+    });
+    const data = (response.data as any)?.data;
+    const list: any[] = Array.isArray(data?.reels) ? data.reels : Array.isArray(data) ? data : [];
+    const mine = list.filter((reel: any) => {
+      const authorId = reel.author?._id || reel.author?.id || reel.userId || reel.user?._id;
+      return !!ownerId && authorId === ownerId;
+    });
+    const nextCursor: string | null = data?.nextCursor || null;
+    const more = Boolean(data?.hasMore) && !!nextCursor && nextCursor !== cursor;
+    return { mine, nextCursor, more };
+  }, []);
+
+  const fetchUserReels = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "refresh") setRefreshing(true);
+    else setLoading(true);
     setError(null);
 
-    // 1. Fetch Local Cached Reels first
+    const myUserId = await AsyncStorage.getItem("userId");
+    resolvedUserIdRef.current = userId === "me" ? myUserId : userId || null;
+    // Reels cached on this device belong to the signed-in user only.
+    const isOwnProfile = !!resolvedUserIdRef.current && resolvedUserIdRef.current === myUserId;
+    const cacheKey = resolvedUserIdRef.current ? apiCacheKey(resolvedUserIdRef.current) : null;
+
+    // 1. Reels this device published (shown even before the server lists them)
     let cachedReels: Reel[] = [];
     try {
       const stored = await AsyncStorage.getItem(LOCAL_REELS_KEY);
-      if (stored) {
-        cachedReels = JSON.parse(stored);
-        console.log(`[useUserReels] Loaded ${cachedReels.length} cached reels from storage`);
-      }
-    } catch (e) {
-      console.warn("[useUserReels] Failed to load local reels cache:", e);
+      if (stored && isOwnProfile) cachedReels = JSON.parse(stored);
+    } catch (e) { /* intentionally ignored */
     }
 
-    // 2. Fetch from Backend Endpoints
-    let apiReels: Reel[] = [];
-    if (userId) {
-      try {
-        const currentUserId = userId === "me"
-          ? await AsyncStorage.getItem("userId")
-          : userId;
-        const response = await apiClient.get<any>("reels", {
-          params: { limit: 50 },
-        });
-        const responseData = response.data as any;
-        const responseReels = Array.isArray(responseData.data?.reels)
-          ? responseData.data.reels
-          : Array.isArray(responseData.data)
-            ? responseData.data
-            : [];
-        apiReels = responseReels.filter((reel: any) => {
-          const authorId = reel.author?._id || reel.author?.id || reel.userId || reel.user?._id;
-          return currentUserId && authorId === currentUserId;
-        });
-      } catch {
-        apiReels = [];
-      }
-    }
-
-    // 3. Check route params for newly posted reel
-    if (params?.newReel) {
+    // 2. Newly posted reel passed through route params
+    if (params?.newReel && isOwnProfile) {
       try {
         const newlyPostedReel = JSON.parse(params.newReel as string);
         if (newlyPostedReel) {
           await saveReelToLocalCache(newlyPostedReel);
-          cachedReels = [
-            newlyPostedReel,
-            ...cachedReels.filter(
-              (r) => (r.id || r._id) !== (newlyPostedReel.id || newlyPostedReel._id)
-            ),
-          ];
+          cachedReels = [newlyPostedReel, ...cachedReels];
         }
-      } catch (e) {}
+      } catch {
+        // A malformed newlyPostedReel param is ignored; the API list is still shown.
+      }
     }
 
-    // 4. Merge API + Local Cached Reels (Deduplicated)
-    const reelMap = new Map<string, Reel>();
+    // 3. First page from the API, falling back to the last successful result when offline
+    let apiReels: Reel[] = [];
+    if (resolvedUserIdRef.current) {
+      try {
+        const page = await fetchPage(null);
+        apiReels = page.mine;
+        cursorRef.current = page.nextCursor;
+        if (mountedRef.current) {
+          setHasMore(page.more);
+          setIsOffline(false);
+        }
+        if (cacheKey) AsyncStorage.setItem(cacheKey, JSON.stringify(apiReels)).catch(() => {});
+      } catch (e: any) {
+        if (e?.isCancelled) return;
+        if (mountedRef.current) {
+          setIsOffline(!!e?.isNetworkError);
+          setHasMore(false);
+          setError(e?.message || "Could not load posts");
+        }
+        if (cacheKey) {
+          try {
+            const cached = await AsyncStorage.getItem(cacheKey);
+            if (cached) apiReels = JSON.parse(cached);
+          } catch {
+            // No cached copy; the screen shows its error state.
+          }
+        }
+      }
+    }
 
-    // Put cached local reels
-    cachedReels.forEach((item) => {
-      const key = item.id || item._id || item.videoUrl || item.video_url;
-      if (key) reelMap.set(key, item);
-    });
-
-    // Put API reels
-    apiReels.forEach((item) => {
-      const key = item.id || item._id || item.videoUrl || item.video_url;
-      if (key) reelMap.set(key, item);
-    });
-
-    const finalReels = Array.from(reelMap.values());
-    console.log(`[useUserReels] Final display reels count: ${finalReels.length}`);
-
-    setReels(finalReels);
+    if (!mountedRef.current) return;
+    setReels(dedupe([...cachedReels, ...apiReels]));
     setLoading(false);
-  }, [userId, params?.newReel]);
+    setRefreshing(false);
+  }, [userId, params?.newReel, fetchPage]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || !hasMore || !cursorRef.current) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchPage(cursorRef.current);
+      cursorRef.current = page.nextCursor;
+      if (!mountedRef.current) return;
+      setReels((prev) => {
+        const merged = dedupe([...prev, ...page.mine]);
+        // Stop paging if the server ignored the cursor and returned the same items.
+        setHasMore(page.more && merged.length > prev.length);
+        return merged;
+      });
+    } catch {
+      if (mountedRef.current) setHasMore(false);
+    } finally {
+      if (mountedRef.current) setLoadingMore(false);
+    }
+  }, [loadingMore, hasMore, fetchPage]);
 
   // Normalize reels for grid display
-  const normalizedReels = reels.map((reel) => ({
-    ...reel,
-    uri: reel.uri || reel.videoUrl || reel.video_url,
-    thumbnail: reel.thumbnail || reel.thumbnail_url,
-    id: reel.id || reel._id,
-  }));
+  const normalizedReels = useMemo(
+    () =>
+      reels.map((reel) => ({
+        ...reel,
+        uri: reel.uri || reel.videoUrl || reel.video_url,
+        thumbnail: reel.thumbnail || reel.thumbnail_url,
+        id: reel.id || reel._id,
+      })),
+    [reels]
+  );
 
   useEffect(() => {
-    fetchUserReels();
+    fetchUserReels("initial");
   }, [fetchUserReels]);
+
+  const refetch = useCallback(() => fetchUserReels("initial"), [fetchUserReels]);
+  const refresh = useCallback(() => fetchUserReels("refresh"), [fetchUserReels]);
 
   return {
     reels: normalizedReels,
     loading,
     error,
-    refetch: fetchUserReels,
+    refetch,
+    refresh,
+    refreshing,
+    loadMore,
+    loadingMore,
+    hasMore,
+    isOffline,
   };
 };

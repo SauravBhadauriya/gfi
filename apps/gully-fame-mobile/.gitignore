@@ -103,3 +103,6 @@ yarn-error.*
 android/sentry.properties
 ios/sentry.properties
 
+
+# Local device audit captures (never commit)
+audit-output/

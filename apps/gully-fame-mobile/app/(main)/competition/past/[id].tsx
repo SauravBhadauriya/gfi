@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
     View,
     Text,
@@ -29,8 +30,10 @@ import { pastCompetitionStyles as styles } from "@/styles/pastCompetitionStyles"
 import TopPerformer from "@/components/home/TopDancers/TopPerformer";
 import TopTenLeaderboard from "@/components/TopTenLeaderboard/TopTenLeaderboard";
 import SafeImage from "@/components/SafeImage";
-import { competitionService } from "@/api/services/competitionService";
-import { BASE_URL } from "@/api/axios";
+import { getCompetitionDetails } from "@/api/services/competitionService";
+import { getErrorMessage } from "@/api/client";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
+import { openCompetition } from "@/utils/openCompetition";
 
 const { height } = Dimensions.get("window");
 
@@ -68,53 +71,45 @@ export default function PastCompetitionScreen() {
         setIsRulesExpanded(!isRulesExpanded);
     };
 
-    useEffect(() => {
-        const fetchData = async () => {
-            try {
-                setLoading(true);
-                if (!competitionIdFromParams) return;
+    const [loadError, setLoadError] = useState("");
 
-                // Fetch details, leaderboard, and other past competitions simultaneously
-                const [compRes, leadRes, moreRes] = await Promise.all([
-                    competitionService.getCompetitionById(competitionIdFromParams),
-                    competitionService.getCompetitionLeaderboard(competitionIdFromParams, { page: 1, limit: 10 }),
-                    competitionService.getCompetitionsByStatus('COMPLETED', { page: 1, limit: 5 })
-                ]);
-
-                let compData = compRes.success ? compRes.data : null;
-                let leadData: Array<Record<string, unknown>> = [];
-
-                if (leadRes.success && leadRes.data?.leaderboard) {
-                    leadData = leadRes.data.leaderboard.map((entry: any) => ({
-                        rank: entry.rank,
-                        name: `${entry.user?.firstName || ''} ${entry.user?.lastName || ''}`.trim() || entry.user?.username || 'Unknown User',
-                        id: entry.user?._id || `user_${entry.rank}`,
-                        userId: entry.user?._id,
-                        votes: entry.reel?.stats?.votes || entry.votes || 0,
-                        defaultProfilePicture: entry.user?.profileImage ? { uri: `${BASE_URL}${entry.user.profileImage}` } : require("@assets/images/user1.png"),
-                        isCurrentUser: false,
-                        role: "participants",
-                        badge: entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : "⭐",
-                    }));
-                }
-
-                if (compData) {
-                    setCompetitionData({ ...compData, leaderboard: leadData });
-                }
-
-                if (moreRes.success && moreRes.data) {
-                    // Filter out the current competition from the "More" section
-                    setMorePastComps(moreRes.data.items.filter((c: any) => c._id !== competitionIdFromParams && c.id !== competitionIdFromParams));
-                }
-            } catch (err) {
-                console.error("Failed to fetch past competition details", err);
-            } finally {
-                setLoading(false);
+    // GET /competitions/:id returns the ENDED shape: top-10 results and recommended past events.
+    const fetchData = useCallback(async () => {
+        if (!competitionIdFromParams) return;
+        setLoading(true);
+        setLoadError("");
+        try {
+            const details = await getCompetitionDetails(competitionIdFromParams);
+            if (details.status !== "ENDED") {
+                openCompetition(competitionIdFromParams, details.status);
+                return;
             }
-        };
-
-        fetchData();
+            const leaderboard = details.results.map((entry) => ({
+                rank: entry.rank,
+                name: entry.name || "Participant",
+                id: entry.id,
+                userId: entry.id,
+                votes: entry.votes || 0,
+                prizeMoneyWon: entry.prizeMoneyWon || 0,
+                defaultProfilePicture: entry.profilePictureUrl
+                    ? { uri: entry.profilePictureUrl }
+                    : require("@assets/images/user1.png"),
+                isCurrentUser: false,
+                role: "participants",
+                badge: entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : "⭐",
+            }));
+            setCompetitionData({ ...details, leaderboard });
+            setMorePastComps(details.recommendedPastCompetitions);
+        } catch (err) {
+            setLoadError(getErrorMessage(err));
+        } finally {
+            setLoading(false);
+        }
     }, [competitionIdFromParams]);
+
+    useEffect(() => {
+        fetchData();
+    }, [fetchData]);
 
     const handleShare = async (platform: string) => {
         const competitionLink = `https://gullyfame.com/competition/${competitionData?._id || competitionIdFromParams}`;
@@ -131,7 +126,7 @@ export default function PastCompetitionScreen() {
                     }
                     break;
                 case "whatsapp":
-                case "whatsapp-status":
+                case "whatsapp-status": {
                     const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(competitionText)}`;
                     if (await Linking.canOpenURL(whatsappUrl)) {
                         await Linking.openURL(whatsappUrl);
@@ -139,7 +134,8 @@ export default function PastCompetitionScreen() {
                         Alert.alert("Error", "Please install WhatsApp to share");
                     }
                     break;
-                case "twitter":
+                  }
+                case "twitter": {
                     const twitterUrl = `twitter://post?message=${encodeURIComponent(competitionText)}`;
                     if (await Linking.canOpenURL(twitterUrl)) {
                         await Linking.openURL(twitterUrl);
@@ -148,6 +144,7 @@ export default function PastCompetitionScreen() {
                         await Linking.openURL(twitterWebUrl);
                     }
                     break;
+                  }
             }
             Animated.timing(shareSlideAnim, {
                 toValue: height,
@@ -155,15 +152,23 @@ export default function PastCompetitionScreen() {
                 useNativeDriver: true,
             }).start(() => setShareModalVisible(false));
         } catch (error) {
-            console.error("Error sharing:", error);
             Alert.alert("Error", "Unable to share. Please try again.");
         }
     };
 
     if (loading || !competitionData) {
         return (
-            <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-                <ActivityIndicator size="large" color="#EC9A15" />
+            <View style={[styles.container, { justifyContent: "center", alignItems: "center", padding: 24 }]}>
+                {loading ? (
+                    <ActivityIndicator size="large" color="#EC9A15" />
+                ) : (
+                    <>
+                        <Text style={{ color: "#ccc", textAlign: "center" }}>{loadError || "Competition not found."}</Text>
+                        <TouchableOpacity onPress={fetchData} style={{ marginTop: 16 }}>
+                            <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+                        </TouchableOpacity>
+                    </>
+                )}
             </View>
         );
     }
@@ -204,7 +209,7 @@ export default function PastCompetitionScreen() {
                     <View style={styles.titleCard}>
                         <View style={styles.compCardImageWrapper}>
                             <Image
-                                source={competitionData.image ? { uri: `${BASE_URL}${competitionData.image}` } : require("@assets/images/trending1.png")}
+                                source={resolveMediaUrl(competitionData.image) ? { uri: resolveMediaUrl(competitionData.image)! } : require("@assets/images/trending1.png")}
                                 style={styles.titleCardImage}
                                 resizeMode="cover"
                             />
@@ -216,7 +221,7 @@ export default function PastCompetitionScreen() {
                                 <View style={styles.statItemOverlay}>
                                     <EyeIcon color="#fff" size={18} />
                                     <Text style={styles.statTextOverlay}>
-                                        {formatNumber(competitionData.views || 0)}
+                                        {formatNumber(competitionData.totalViews || 0)}
                                     </Text>
                                 </View>
                             </View>
@@ -225,7 +230,7 @@ export default function PastCompetitionScreen() {
                         <View style={styles.titleCardContent}>
                             <View style={styles.titleCardHeader}>
                                 <Text style={styles.compCardTitleNew}>{competitionData.title}</Text>
-                                <Text style={styles.compCardSubtitle}>{competitionData.category || "Competition"}</Text>
+                                <Text style={styles.compCardSubtitle}>{competitionData.subtitle || "Competition"}</Text>
                             </View>
 
                             <View style={styles.heroPrizeContainer}>
@@ -240,7 +245,7 @@ export default function PastCompetitionScreen() {
                                         <Text style={styles.specLabel}>Participants</Text>
                                     </View>
                                     <Text style={styles.specValueLarge}>
-                                        {competitionData.participants?.length || 0}
+                                        {competitionData.totalParticipants || 0}
                                     </Text>
                                 </View>
                                 <View style={styles.specVerticalDivider} />
@@ -323,14 +328,14 @@ export default function PastCompetitionScreen() {
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pastCompScroll}>
                             {morePastComps.map((comp: any) => (
                                 <TouchableOpacity
-                                    key={comp._id || comp.id}
+                                    key={comp._id}
                                     style={styles.compCardNew}
                                     activeOpacity={0.9}
-                                    onPress={() => router.push(`/(main)/competition/past/${comp._id || comp.id}` as any)}
+                                    onPress={() => router.push(`/(main)/competition/past/${comp._id}` as any)}
                                 >
                                     <SafeImage
                                         defaultImage={require("@assets/images/trending1.png")}
-                                        imageUrl={comp.image ? `${BASE_URL}${comp.image}` : undefined}
+                                        imageUrl={resolveMediaUrl(comp.image) || undefined}
                                         style={styles.compCardImageNew}
                                         resizeMode="cover"
                                     />
@@ -342,7 +347,7 @@ export default function PastCompetitionScreen() {
                                                     <Path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" fill="#FFD700" />
                                                 </Svg>
                                                 <Text style={styles.compDetailTextNew}>
-                                                    Winner: {comp.winners && comp.winners.length > 0 ? comp.winners[0].username : "TBD"}
+                                                    Winner: {comp.winnerName || "Not announced"}
                                                 </Text>
                                             </View>
                                         </View>
@@ -355,7 +360,7 @@ export default function PastCompetitionScreen() {
                                                 style={styles.resultsBtnNew}
                                                 onPress={(e) => {
                                                     e.stopPropagation();
-                                                    router.push(`/(main)/competition/past/${comp._id || comp.id}` as any);
+                                                    router.push(`/(main)/competition/past/${comp._id}` as any);
                                                 }}
                                             >
                                                 <Text style={styles.resultsBtnTextNew}>View Results</Text>
@@ -443,11 +448,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#fff" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/copy.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="link-variant" size={26} color="#fff" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}
@@ -466,11 +467,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#25D36620" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/whatsapp.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="whatsapp" size={26} color="#25D366" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}
@@ -491,11 +488,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#25D36620" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/status.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="progress-clock" size={26} color="#25D366" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}
@@ -514,11 +507,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#E4405F20" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/instagram.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="instagram" size={26} color="#E4405F" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}
@@ -556,11 +545,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#1DA1F220" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/twitter.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="twitter" size={26} color="#1DA1F2" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}
@@ -579,11 +564,7 @@ export default function PastCompetitionScreen() {
                                             { backgroundColor: "#FFEC0620" },
                                         ]}
                                     >
-                                        <Image
-                                            source={require("@assets/ShareIcon/snapchat.png")}
-                                            style={styles.shareIconImage}
-                                            resizeMode="contain"
-                                        />
+                                        <MaterialCommunityIcons name="snapchat" size={26} color="#FFFC00" />
                                     </View>
                                     <Text
                                         style={styles.shareOptionName}

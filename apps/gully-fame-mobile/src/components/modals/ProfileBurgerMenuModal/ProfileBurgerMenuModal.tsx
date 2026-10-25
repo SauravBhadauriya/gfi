@@ -12,9 +12,11 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { Svg, Path, Circle, Polyline, Line, Text as SvgText } from "react-native-svg";
-import { ProfileData } from "@/hooks/profileHooks";
+import { ProfileData } from "@/components/profile/shared/profileHooks";
 import { useEffect, useState } from "react";
-import { userService } from "@/api/services/userService";
+import { getMyKyc } from "@/api/services/kycService";
+import { getWalletSummary } from "@/api/services/walletService";
+import { apiGet } from "@/api/client";
 
 interface ProfileBurgerMenuModalProps {
   isVisible: boolean;
@@ -25,7 +27,7 @@ interface ProfileBurgerMenuModalProps {
 interface UserStats {
   competitionCount: number;
   coinsEarned: number;
-  kycStatus: "pending" | "approved" | "rejected" | "completed";
+  kycStatus: "not submitted" | "pending" | "approved" | "rejected";
   walletBalance: number;
   totalEarnings: number;
   totalTips: number;
@@ -39,7 +41,7 @@ function ProfileBurgerMenuModal({
   const [userStats, setUserStats] = useState<UserStats>({
     competitionCount: 0,
     coinsEarned: 0,
-    kycStatus: "pending",
+    kycStatus: "not submitted",
     walletBalance: 0,
     totalEarnings: 0,
     totalTips: 0,
@@ -48,42 +50,24 @@ function ProfileBurgerMenuModal({
 
   // ✅ Fetch real-time user statistics from backend
   const fetchUserStats = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-
-      // Fetch KYC status
-      const kycResponse = await userService.getUserKycStatus();
-      const kycStatus = kycResponse.data?.status || "pending";
-
-      // Fetch wallet/earnings data
-      const walletResponse = await userService.getWalletBalance();
-      const wallet = walletResponse.data || {
-        balance: 0,
-        totalEarnings: 0,
-        totalTips: 0,
-      };
-
-      // Fetch earnings to get total coins
-      const earningsResponse = await userService.getUserEarnings();
-      const totalCoins = earningsResponse.data?.reduce(
-        (sum, earning) => sum + (earning.amount || 0),
-        0
-      ) || 0;
-
-      // Get competitions count from profile or API
-      const competitionCount = profileData.competitionCount || 0;
-
+      const [kyc, wallet, competitions] = await Promise.all([
+        getMyKyc().catch(() => null),
+        getWalletSummary(),
+        apiGet<{ total: number }>("user/competitions", { params: { page: 1, limit: 1 } }).catch(() => ({ total: 0 })),
+      ]);
+      const tipsReceived = wallet.transactions.filter((tx) => tx.type === "TIP_RECEIVED").length;
       setUserStats({
-        competitionCount,
-        coinsEarned: totalCoins,
-        kycStatus,
-        walletBalance: wallet.balance || 0,
-        totalEarnings: wallet.totalEarnings || 0,
-        totalTips: wallet.totalTips || 0,
+        competitionCount: competitions.total || 0,
+        coinsEarned: wallet.earned,
+        kycStatus: kyc ? (kyc.status.toLowerCase() as UserStats["kycStatus"]) : "not submitted",
+        walletBalance: wallet.balance,
+        totalEarnings: wallet.earned,
+        totalTips: tipsReceived,
       });
-    } catch (error) {
-      console.error("Error fetching user stats:", error);
-      // Fallback to default values on error
+    } catch {
+      // Keep the previous values; the menu still works without stats.
     } finally {
       setLoading(false);
     }
@@ -196,7 +180,7 @@ function ProfileBurgerMenuModal({
                   <ActivityIndicator size="small" color="#EC9A15" />
                 ) : (
                   <Text style={styles.rankBadgeText}>
-                    {userStats.coinsEarned > 0 ? `₹${userStats.coinsEarned.toFixed(2)}` : "₹0"}
+                    {`${userStats.coinsEarned.toLocaleString()} coins`}
                   </Text>
                 )}
               </View>

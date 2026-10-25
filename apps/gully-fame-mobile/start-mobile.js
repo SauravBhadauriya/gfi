@@ -7,6 +7,7 @@ const args = process.argv.slice(2);
 
 const expo = spawn('npx', ['expo', 'start', '--dev-client', '--clear', ...args], {
   stdio: 'inherit',
+// eslint-disable-next-line no-undef
   cwd: __dirname
 });
 

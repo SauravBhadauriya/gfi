@@ -1,7 +1,6 @@
 export function convertToFormattedPrize(prize: string | number | undefined) {
     // To prevent conflicts from what type of data the API sends. The intended data type should be number.
     if (typeof prize !== "number") {
-        console.warn("[convertToFormattedPrize] Type of prize is not a number");
         return prize;
     }
     if (prize < 100000)

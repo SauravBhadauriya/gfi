@@ -13,29 +13,48 @@ import {
   Animated,
   Switch,
   StatusBar,
-  Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router, useLocalSearchParams } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
-import * as FileSystem from "expo-file-system/legacy";
+import { Image as ExpoImage } from "expo-image";
 import Svg, { Path } from "react-native-svg";
 import { BackIcon, MusicIcon, InstagramIcon, TagIcon, ThreeDotsIcon, LocationIcon } from "@/icons";
-import { saveReelToLocalCache } from "@/hooks/useUserReels";
+import { useAudioPlayer } from "expo-audio";
+import { useAppDispatch, useAppSelector } from "@/store/hooks";
+import { isMusicTrack, resetEditor, setMusic } from "@/store/slices/editorSlice";
+import { showToast } from "@/store/slices/postingSlice";
+import { startPosting } from "@/services/postingService";
+import { PHOTO_POST_SECONDS } from "@modules/video-editor/camera-module/utils/photoToVideo";
+import { MusicLibraryModal } from "@/components/MusicLibraryModal";
 
 const { width, height } = Dimensions.get("window");
 
 interface PostVideoPreviewProps {
   videoUri: string;
   playerRef: React.MutableRefObject<ReturnType<typeof useVideoPlayer> | null>;
+  /** Chosen background music; plays with the (muted) video and restarts when the video loops. */
+  musicUrl?: string;
 }
 
-function PostVideoPreview({ videoUri, playerRef }: PostVideoPreviewProps) {
+function PostVideoPreview({ videoUri, playerRef, musicUrl }: PostVideoPreviewProps) {
   const player = useVideoPlayer(videoUri, (player) => {
     player.loop = true;
     player.muted = true;
+    player.timeUpdateEventInterval = 0.25;
     player.play();
   });
+  const musicPlayer = useMusicPreview(musicUrl);
+
+  // Keep the music in step with the looping video: when the video wraps to the start, so does the music.
+  React.useEffect(() => {
+    let last = 0;
+    const sub = player.addListener("timeUpdate", ({ currentTime }) => {
+      if (currentTime < last - 0.5) musicPlayer?.seekTo(0);
+      last = currentTime;
+    });
+    return () => sub.remove();
+  }, [player, musicPlayer]);
 
   React.useEffect(() => {
     playerRef.current = player;
@@ -50,8 +69,30 @@ function PostVideoPreview({ videoUri, playerRef }: PostVideoPreviewProps) {
   );
 }
 
+/** Plays the chosen track on loop; returns the player (null when no track is chosen). */
+function useMusicPreview(url?: string) {
+  const audio = useAudioPlayer(url ? { uri: url } : null);
+  React.useEffect(() => {
+    if (!url) return;
+    audio.loop = true;
+    audio.volume = 0.8;
+    audio.play();
+    return () => {
+      try {
+        audio.pause();
+      } catch {
+        // The player is already released (screen closing).
+      }
+    };
+  }, [audio, url]);
+  return url ? audio : null;
+}
+
 export default function PostReelScreen() {
   const params = useLocalSearchParams();
+  const dispatch = useAppDispatch();
+  // Same state as the editor's Audio tool: the first "audio-" track in editorSlice.
+  const musicTrack = useAppSelector((state) => state.editor.audioTracks.find(isMusicTrack));
 
   const clipsFromParams = params.clips
     ? (() => {
@@ -85,9 +126,39 @@ export default function PostReelScreen() {
     return [];
   });
   const [hashtagInput, setHashtagInput] = useState("");
-  const [selectedMusic, setSelectedMusic] = useState<string | null>(
-    musicDataFromParams?.title ? `${musicDataFromParams.title} - ${musicDataFromParams.artist}` : null
-  );
+  const selectedMusic = musicTrack ? `${musicTrack.title}${musicTrack.artist ? ` - ${musicTrack.artist}` : ""}` : null;
+  const musicForUpload = musicTrack
+    ? {
+        trackId: musicTrack.trackId ?? "",
+        title: musicTrack.title,
+        artist: musicTrack.artist,
+        startOffset: musicTrack.trimStart ?? 0,
+        duration: musicTrack.duration || 0,
+      }
+    : null;
+
+  const chooseMusic = (track: any) => {
+    dispatch(
+      setMusic({
+        id: `audio-${Date.now()}`,
+        trackId: track._id ?? track.id,
+        title: track.title,
+        artist: track.artist ?? "",
+        url: track.url ?? track.audioUrl,
+        startTime: 0,
+        duration: track.duration ?? 0,
+        volume: 0.8,
+        trimStart: 0,
+        trimEnd: 0,
+        originalDuration: track.duration ?? 0,
+      })
+    );
+    setShowMusicModal(false);
+  };
+  const removeMusic = () => {
+    dispatch(setMusic(null));
+    setShowMusicModal(false);
+  };
   const [taggedPeople, setTaggedPeople] = useState<any[]>([]);
   const [location, setLocation] = useState<string | null>(null);
   const [privacy, setPrivacy] = useState("Everyone");
@@ -100,6 +171,7 @@ export default function PostReelScreen() {
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
 
   const competitionId = params.competitionId ? String(params.competitionId) : null;
+  const isPhoto = params.mediaType === "photo" || clipsFromParams[0]?.type === "photo";
   const competitionName = params.competitionName
     ? decodeURIComponent(String(params.competitionName))
     : null;
@@ -113,7 +185,8 @@ export default function PostReelScreen() {
   const [hideShareCount, setHideShareCount] = useState(false);
   const [hideSaveCount, setHideSaveCount] = useState(false);
   const [allowRemix, setAllowRemix] = useState(true);
-  const [isUploading, setIsUploading] = useState(false);
+  // True while any post is uploading, so a second tap can't post twice.
+  const isUploading = useAppSelector((state) => state.posting.phase === "running");
 
   const slideAnim = useRef(new Animated.Value(height)).current;
   const videoPlayer = useRef<ReturnType<typeof useVideoPlayer> | null>(null);
@@ -171,129 +244,57 @@ export default function PostReelScreen() {
     }).start(() => setShowMoreOptions(false));
   };
 
-  const handlePost = async () => {
-    if (__DEV__) console.log(`[FLOW] handlePost called: clips=${clipsFromParams.length}, caption=${caption.length} chars`);
-    if (competitionId && competitionName && entryFee) {
-      if (__DEV__) console.log('[FLOW] handlePost: competition entry detected, routing to payment');
-      router.push({
-        pathname: "/(main)/competition/payment",
-        params: {
-          competitionId,
-          competitionName: encodeURIComponent(competitionName),
-          entryFee: encodeURIComponent(entryFee),
-          ...(musicDataFromParams && { musicData: JSON.stringify(musicDataFromParams) }),
-        },
-      });
-    } else {
-      try {
-        if (!clipsFromParams.length || !clipsFromParams[0]?.uri) {
-          if (__DEV__) console.error('[FLOW] handlePost: No video uri found, aborting');
-          Alert.alert("Error", "Please select a video before posting");
-          return;
-        }
+  const buildJob = (mode: "publish" | "draft", fileUri: string) => ({
+    mode,
+    mediaType: (isPhoto ? "photo" : "video") as "photo" | "video",
+    fileUri,
+    music:
+      isPhoto && musicTrack?.url
+        ? { url: musicTrack.url, volume: musicTrack.volume, startOffset: musicTrack.trimStart ?? 0 }
+        : null,
+    request: {
+      title: caption || "Untitled Reel",
+      description: caption,
+      duration: isPhoto
+        ? PHOTO_POST_SECONDS
+        : clipsFromParams.reduce((duration: number, clip: { duration?: number }) => duration + (clip.duration || 0), 0),
+      resolution: "1080p" as const,
+      fps: 30,
+      tags: hashtags,
+      music: musicForUpload ?? undefined,
+      competitionId: competitionId || undefined,
+    },
+  });
 
-        const videoUri = clipsFromParams[0].uri;
-        
-        // Validate file exists before uploading
-        if (__DEV__) console.log(`[FLOW] handlePost: Validating video file exists at ${videoUri.substring(0, 50)}...`);
-        const fileInfo = await FileSystem.getInfoAsync(videoUri);
-        if (!fileInfo.exists) {
-          if (__DEV__) console.error(`[FLOW] handlePost: Video file does not exist at ${videoUri}`);
-          Alert.alert("Error", "The video file was not found. Please re-record and try again.");
-          return;
-        }
-        
-        const fileSize = (fileInfo.exists && !fileInfo.isDirectory && fileInfo.size) ? fileInfo.size : 0;
-        if (__DEV__) console.log(`[FLOW] handlePost: File validated, size=${fileSize} bytes`);
-        
-        if (fileSize === 0) {
-          if (__DEV__) console.error(`[FLOW] handlePost: File size is 0, file may be invalid`);
-          Alert.alert("Error", "The video file appears to be empty. Please re-record and try again.");
-          return;
-        }
-        
-        setIsUploading(true);
-        if (__DEV__) console.log('[FLOW] handlePost: Upload started, button disabled');
-        Alert.alert("Uploading", "Please wait while we upload your reel...", undefined, { cancelable: false });
+  const handlePost = () => {
+    if (isUploading) return;
+    const fileUri = clipsFromParams[0]?.uri;
+    if (!fileUri) {
+      dispatch(showToast({ message: "Nothing to post. Go back and record again.", kind: "error" }));
+      return;
+    }
 
-        const { uploadVideoComplete } = await import("@/api/services/videoUploadService");
-        const result = await uploadVideoComplete(
-          videoUri,
-          {
-            title: caption || "Untitled Reel",
-            description: caption,
-            duration: clipsFromParams.reduce(
-              (duration: number, clip: { duration?: number }) => duration + (clip.duration || 0),
-              0
-            ),
-            resolution: "1080p",
-            fps: 30,
-            tags: hashtags,
-            music: musicDataFromParams ? {
-              trackId: musicDataFromParams.trackId,
-              title: musicDataFromParams.title,
-              artist: musicDataFromParams.artist,
-              startOffset: musicDataFromParams.startOffset || 0,
-              duration: musicDataFromParams.duration || 0,
-            } : undefined,
-            competitionId: competitionId || undefined,
-          }
-        );
-
-        if (__DEV__) console.log(`[FLOW] handlePost: Upload result success=${result.success}, message=${result.message}`);
-        if (result.success) {
-          // 🛠️ Save to local storage cache before navigating to profile
-          try {
-            if (result.data?.reel) {
-              await saveReelToLocalCache(result.data.reel);
-            } else if (clipsFromParams[0]?.uri) {
-              await saveReelToLocalCache({
-                id: `reel-${Date.now()}`,
-                title: caption || "Untitled Reel",
-                description: caption,
-                videoUrl: clipsFromParams[0].uri,
-                video_url: clipsFromParams[0].uri,
-                createdAt: new Date().toISOString(),
-              });
-            }
-            if (__DEV__) console.log('[FLOW] handlePost: Reel cached successfully');
-          } catch (cacheErr) {
-            console.warn("[post.tsx] Cache write error:", cacheErr);
-          }
-
-          if (__DEV__) console.log('[FLOW] handlePost: Upload complete, showing success alert and navigating to home');
-          Alert.alert("Success", "Your reel has been posted!", [
-            {
-              text: "OK",
-              onPress: () => {
-                setIsUploading(false);
-                router.replace("/(main)/home" as any);
-              },
-            },
-          ]);
-        } else {
-          if (__DEV__) console.error(`[FLOW] handlePost: Upload failed: ${result.message}`);
-          setIsUploading(false);
-          Alert.alert("Upload Failed", result.message || "Failed to post reel. Please try again.", [
-            { text: "Try Again", onPress: () => handlePost() },
-            { text: "Cancel", onPress: () => {}, style: "cancel" },
-          ]);
-        }
-      } catch (error: any) {
-        if (__DEV__) console.error("[FLOW] handlePost error:", error.message || error);
-        setIsUploading(false);
-        Alert.alert("Error", error.message || "An error occurred while posting your reel", [
-          { text: "Try Again", onPress: () => handlePost() },
-          { text: "Cancel", onPress: () => {}, style: "cancel" },
-        ]);
-      }
+    // The upload runs in the background (postingService); progress shows in the banner on every screen.
+    // Competition entries are published with competitionId (the job joins the competition first).
+    const started = startPosting(buildJob("publish", fileUri));
+    if (started) {
+      dispatch(resetEditor());
+      router.dismissTo("/(main)/home" as any);
     }
   };
 
+  // Drafts upload the video too (POST /reels/draft takes a video_url) and run in the background.
   const handleSaveDraft = () => {
-    Alert.alert("Save Draft", "Draft saved successfully!", [
-      { text: "OK", onPress: () => router.back() },
-    ]);
+    if (isUploading) return;
+    const fileUri = clipsFromParams[0]?.uri;
+    if (!fileUri) {
+      dispatch(showToast({ message: "Nothing to save. Go back and record again.", kind: "error" }));
+      return;
+    }
+    if (startPosting(buildJob("draft", fileUri))) {
+      dispatch(resetEditor());
+      router.dismissTo("/(main)/home" as any);
+    }
   };
 
   return (
@@ -316,9 +317,11 @@ export default function PostReelScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.videoPreview}>
-          {clipsFromParams.length > 0 && clipsFromParams[0]?.uri ? (
+          {isPhoto && clipsFromParams[0]?.uri ? (
+            <ExpoImage source={{ uri: clipsFromParams[0].uri }} style={styles.video} contentFit="cover" />
+          ) : clipsFromParams.length > 0 && clipsFromParams[0]?.uri ? (
             <View style={styles.video}>
-              <PostVideoPreview videoUri={clipsFromParams[0].uri} playerRef={videoPlayer} />
+              <PostVideoPreview videoUri={clipsFromParams[0].uri} playerRef={videoPlayer} musicUrl={musicTrack?.url} />
             </View>
           ) : (
             <View style={styles.video}>
@@ -411,10 +414,16 @@ export default function PostReelScreen() {
           )}
         </View>
 
-        <TouchableOpacity style={styles.optionRow} onPress={() => setShowMusicModal(true)}>
+        <TouchableOpacity style={styles.optionRow} onPress={() => setShowMusicModal(true)} accessibilityLabel="Add Music">
           <MusicIcon />
-          <Text style={styles.optionText}>{selectedMusic || "Add Music"}</Text>
-          <Text style={styles.chevron}>›</Text>
+          <Text style={styles.optionText} numberOfLines={1}>{selectedMusic || "Add Music"}</Text>
+          {selectedMusic ? (
+            <TouchableOpacity onPress={removeMusic} hitSlop={10} accessibilityLabel="Remove music">
+              <Text style={styles.removeHashtag}>×</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.chevron}>›</Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.optionRow} onPress={() => setShowTagModal(true)}>
@@ -485,7 +494,7 @@ export default function PostReelScreen() {
           onPress={handlePost}
           disabled={isUploading}
         >
-          <Text style={styles.postButtonText}>{isUploading ? 'Uploading...' : 'Post Now'}</Text>
+          <Text style={styles.postButtonText}>{isUploading ? 'Posting...' : 'Post Now'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -655,38 +664,13 @@ export default function PostReelScreen() {
         </TouchableOpacity>
       </Modal>
 
-      <Modal
+      <MusicLibraryModal
         visible={showMusicModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setShowMusicModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowMusicModal(false)}
-        >
-          <View style={styles.simpleModal}>
-            <Text style={styles.simpleModalTitle}>Select Music</Text>
-            {["Original Sound", "Trending Song 1", "Trending Song 2", "My Music"].map((music) => (
-              <TouchableOpacity
-                key={music}
-                style={styles.modalOption}
-                onPress={() => {
-                  setSelectedMusic(music);
-                  setShowMusicModal(false);
-                }}
-              >
-                <Text style={styles.modalOptionText}>{music}</Text>
-                {selectedMusic === music && <Text style={styles.checkmark}>✓</Text>}
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={styles.modalCancel} onPress={() => setShowMusicModal(false)}>
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
+        onCancel={() => setShowMusicModal(false)}
+        onSelect={chooseMusic}
+        onRemove={removeMusic}
+        selectedMusic={musicTrack ? { id: musicTrack.trackId, title: musicTrack.title } : undefined}
+      />
 
       <Modal
         visible={showTagModal}

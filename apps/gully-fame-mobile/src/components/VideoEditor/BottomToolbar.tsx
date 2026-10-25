@@ -5,10 +5,11 @@ import {
   ScrollView,
   TouchableOpacity,
   Text,
-  Dimensions,
 } from "react-native";
-import { MaterialCommunityIcons, Ionicons } from "@expo/vector-icons";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import { EDITOR_ACCENT, ICON_TOOLBAR, LABEL_TOOLBAR } from "./editorTheme";
 
 export type ToolId =
   | "audio"
@@ -22,7 +23,8 @@ export type ToolId =
   | "overlay"
   | "soundfx"
   | "cutout"
-  | "stickers";
+  | "stickers"
+  | "paste";
 
 interface Tool {
   id: ToolId;
@@ -48,18 +50,19 @@ const TOOLS: Tool[] = [
   { id: "soundfx", label: "Sound FX", icon: "volume-high" },
   { id: "cutout", label: "Cutout", icon: "content-cut" },
   { id: "stickers", label: "Stickers", icon: "sticker" },
+  { id: "paste", label: "Paste", icon: "content-paste" },
 ];
 
 const BottomToolbar: React.FC<BottomToolbarProps> = ({
   selectedTool,
   onSelectTool,
 }) => {
+  const insets = useSafeAreaInsets();
   return (
-    <SafeAreaView style={styles.container} edges={["bottom"]}>
+    <View style={[styles.container, { paddingBottom: insets.bottom + 8 }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
         style={styles.scrollView}
         contentContainerStyle={styles.content}
       >
@@ -74,8 +77,8 @@ const BottomToolbar: React.FC<BottomToolbarProps> = ({
             >
               <MaterialCommunityIcons
                 name={tool.icon as any}
-                size={24}
-                color={isSelected ? "#EC9A15" : "#fff"}
+                size={ICON_TOOLBAR}
+                color={isSelected ? EDITOR_ACCENT : "#fff"}
               />
               <Text
                 style={[
@@ -89,7 +92,7 @@ const BottomToolbar: React.FC<BottomToolbarProps> = ({
           );
         })}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -100,28 +103,27 @@ const styles = StyleSheet.create({
     borderTopColor: "#222",
     paddingTop: 8,
   },
+  // No flex here: a flexed horizontal ScrollView collapsed to zero height.
   scrollView: {
-    flex: 1,
+    flexGrow: 0,
   },
   content: {
-    paddingHorizontal: 16,
-    gap: 20,
-    paddingBottom: 8,
+    paddingHorizontal: 12,
+    gap: 8,
   },
   toolButton: {
     alignItems: "center",
-    minWidth: 60,
+    minWidth: 58,
   },
   toolLabel: {
     color: "#fff",
-    fontSize: 10,
+    fontSize: LABEL_TOOLBAR,
     marginTop: 4,
     fontWeight: "500",
   },
   toolLabelActive: {
-    color: "#EC9A15",
+    color: EDITOR_ACCENT,
   },
 });
 
 export default BottomToolbar;
-export type { ToolId };

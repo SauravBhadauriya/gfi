@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Path } from "react-native-svg";
 
 export const CaretRightIcon = ({ size = 20, strokeWidth = 2.5 }) => {
   return (

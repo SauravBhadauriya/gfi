@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -33,56 +33,6 @@ interface SoundFXToolPanelProps {
 }
 
 // Predefined sound effects (fallback if API returns empty)
-const PREDEFINED_SOUND_FX: SoundEffect[] = [
-  {
-    _id: "whoosh",
-    name: "Whoosh",
-    url: "https://example.com/whoosh.mp3",
-    category: "transitions",
-    duration: 1.2,
-    isActive: true,
-  },
-  {
-    _id: "ding",
-    name: "Ding",
-    url: "https://example.com/ding.mp3",
-    category: "notifications",
-    duration: 0.5,
-    isActive: true,
-  },
-  {
-    _id: "pop",
-    name: "Pop",
-    url: "https://example.com/pop.mp3",
-    category: "ui",
-    duration: 0.3,
-    isActive: true,
-  },
-  {
-    _id: "boom",
-    name: "Boom",
-    url: "https://example.com/boom.mp3",
-    category: "impact",
-    duration: 1.5,
-    isActive: true,
-  },
-  {
-    _id: "click",
-    name: "Click",
-    url: "https://example.com/click.mp3",
-    category: "ui",
-    duration: 0.2,
-    isActive: true,
-  },
-  {
-    _id: "swipe",
-    name: "Swipe",
-    url: "https://example.com/swipe.mp3",
-    category: "transitions",
-    duration: 0.8,
-    isActive: true,
-  },
-];
 
 const CATEGORIES = ["All", "Transitions", "UI", "Impact", "Notifications"];
 
@@ -136,8 +86,7 @@ export default function SoundFXToolPanel({
       }
 
       if (result.success && result.data) {
-        // Handle both array and paginated response
-        const sfxList = Array.isArray(result.data) ? result.data : result.data;
+        const sfxList = result.data;
 
         // Map service response to component interface
         const mappedFX: SoundEffect[] = sfxList.map((fx: any) => ({
@@ -152,12 +101,11 @@ export default function SoundFXToolPanel({
         setSoundEffects(mappedFX);
       } else {
         setError(result.message || "Failed to load sound effects");
-        setSoundEffects(PREDEFINED_SOUND_FX);
+        setSoundEffects([]);
       }
     } catch (err) {
-      console.error("[SoundFXToolPanel] Fetch error:", err);
       setError("Failed to load sound effects");
-      setSoundEffects(PREDEFINED_SOUND_FX);
+      setSoundEffects([]);
     } finally {
       setLoading(false);
     }
@@ -220,7 +168,6 @@ export default function SoundFXToolPanel({
         }
       }
     } catch (error) {
-      console.error("[SoundFXToolPanel] Preview error:", error);
       Alert.alert("Error", "Failed to preview sound effect");
     }
   };

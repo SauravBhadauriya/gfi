@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View, StyleSheet, Animated } from "react-native";
 import { router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { wp, hp } from "@/utils/responsive";
+import { getAuthToken } from "@/api/client";
 
 // Points directly to apps/gully-fame-mobile/assets/images/logo.png
 const DEFAULT_LOGO = require("../../assets/images/logo.png");
@@ -38,27 +39,22 @@ export default function SplashScreen() {
       try {
         if (!isMounted) return;
 
-        const isLoggedIn = await AsyncStorage.getItem("isLoggedIn");
+        // The SecureStore token is the only source of truth for "signed in".
+        const token = await getAuthToken();
         const hasSeenOnboarding = await AsyncStorage.getItem("hasSeenOnboarding");
 
         if (!isMounted) return;
 
-        console.log("[SplashScreen] Navigation check - isLoggedIn:", isLoggedIn, "hasSeenOnboarding:", hasSeenOnboarding);
 
-        if (isLoggedIn === "true") {
-          console.log("[SplashScreen] Navigating to home");
+        if (token) {
           router.replace("/(main)/home");
         } else if (hasSeenOnboarding === "true") {
-          console.log("[SplashScreen] Navigating to signin");
           router.replace("/auth/signin");
         } else {
-          console.log("[SplashScreen] Navigating to onboarding1");
           router.replace("/auth/onboarding1");
         }
       } catch (error) {
-        console.error("[SplashScreen] Navigation error:", error);
         if (isMounted) {
-          console.log("[SplashScreen] Error - defaulting to onboarding1");
           router.replace("/auth/onboarding1");
         }
       }

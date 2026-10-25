@@ -27,6 +27,21 @@ import {
     Inter_700Bold,
 } from "@expo-google-fonts/inter";
 import { UserRoleProvider } from "@/contexts/UserRoleContext";
+import { Provider as ReduxProvider } from "react-redux";
+import { store } from "@/store";
+import PostingBanner from "@/components/PostingBanner";
+import ToastHost, { toastError } from "@/components/ui/Toast";
+import { installGlobalErrorHandlers } from "@/utils/globalErrorHandler";
+import { setUnauthorizedHandler, friendlyMessage } from "@/api/client";
+import { performLogout } from "@/utils/logout";
+
+installGlobalErrorHandlers();
+
+// Any 401 / invalid token / deactivated account ends the session app-wide.
+setUnauthorizedHandler((reason) => {
+    toastError(friendlyMessage(reason));
+    performLogout();
+});
 
 export default function RootLayout() {
     const [fontsLoaded, fontError] = useFonts({
@@ -52,7 +67,6 @@ export default function RootLayout() {
     useEffect(() => {
         const prepareApp = async () => {
             if (fontsLoaded || fontError) {
-                console.log("✅ Fonts ready, hiding splash screen...");
                 await SplashScreen.hideAsync().catch(() => {});
             }
         };
@@ -61,12 +75,8 @@ export default function RootLayout() {
     }, [fontsLoaded, fontError]);
 
     return (
-        <ErrorBoundary
-            onError={(error, errorInfo) => {
-                console.error('[RootLayout] Uncaught error:', error);
-                console.error('[RootLayout] Error info:', errorInfo);
-            }}
-        >
+        <ErrorBoundary>
+            <ReduxProvider store={store}>
             <SafeAreaProvider style={{ flex: 1, backgroundColor: 'transparent' }}>
                 <BrandingProvider>
                     <UserRoleProvider>
@@ -82,14 +92,6 @@ export default function RootLayout() {
                                 }}
                             >
                                 <Stack.Screen name="index" options={{ headerShown: false }} />
-                                <Stack.Screen
-                                    name="camera-test"
-                                    options={{
-                                        headerShown: false,
-                                        contentStyle: { backgroundColor: 'transparent' },
-                                        animation: 'none',
-                                    }}
-                                />
                                 <Stack.Screen name="auth" options={{ headerShown: false }} />
                                 <Stack.Screen name="onboarding" options={{ headerShown: false }} />
                                 <Stack.Screen 
@@ -101,11 +103,14 @@ export default function RootLayout() {
                                     }} 
                                 />
                             </Stack>
+                            <PostingBanner />
+                            <ToastHost />
                             <StatusBar style="light" />
                         </GestureHandlerRootView>
                     </UserRoleProvider>
                 </BrandingProvider>
             </SafeAreaProvider>
+            </ReduxProvider>
         </ErrorBoundary>
     );
 }

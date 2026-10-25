@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -12,7 +12,7 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import Svg, { Path } from "react-native-svg";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
 
 const { width, height } = Dimensions.get("window");
 
@@ -23,78 +23,31 @@ export default function ForgotPassword() {
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSend = async () => {
+    if (isLoading) return;
     setErrorMessage("");
     setSuccessMessage("");
-    
-    if (!email.trim()) {
+    const identifier = email.trim().toLowerCase();
+    if (!identifier) {
       setErrorMessage("Please enter the email or mobile number associated with your account.");
       return;
     }
-
+    if (identifier.includes("@") ? !AUTH_RULES.email.test(identifier) : !AUTH_RULES.mobile.test(identifier)) {
+      setErrorMessage("Enter a valid email or 10-digit mobile number.");
+      return;
+    }
     setIsLoading(true);
-
     try {
-      if (__DEV__) {
-        console.log('\n📧 ========== FORGOT PASSWORD REQUEST ==========');
-        console.log('Email/Mobile:', email.trim());
-        console.log('==========================================\n');
+      // Step 1: the backend emails a 6-digit code to the account's email.
+      const result = await authService.forgotPassword(identifier);
+      if (!result.success || !result.data?.txnId) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      const result = await authService.forgotPassword(email.trim());
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log('✅ Forgot password request successful');
-          console.log('Now getting txnId for OTP verification...');
-        }
-
-        setSuccessMessage("OTP has been sent to your email or mobile number.");
-        
-        const identifier = email.trim();
-        
-        const loginResult = await authService.login({
-          userId: identifier,
-          viaPassword: false,
-        });
-
-        if (loginResult.success) {
-          const responseAny = loginResult.fullResponse as any;
-          const txnId = responseAny?.data?.txnId || loginResult.data?.txnId || (responseAny?.data?.data?.txnId);
-          
-          if (txnId) {
-            if (__DEV__) {
-              console.log('✅ Got txnId for OTP verification:', txnId);
-            }
-
-            router.push(`/auth/verify-otp?txnId=${encodeURIComponent(txnId)}&email=${encodeURIComponent(identifier)}&fromForgotPassword=true` as any);
-          } else {
-            setErrorMessage("Failed to get transaction ID. Please try again.");
-            if (__DEV__) {
-              console.error('❌ No txnId in login response');
-              console.error('Full response:', JSON.stringify(loginResult, null, 2));
-            }
-          }
-        } else {
-          setErrorMessage("Failed to initiate OTP. Please try again.");
-          if (__DEV__) {
-            console.error('❌ Login API failed:', loginResult.error);
-          }
-        }
-      } else {
-        const errorMsg = result.error || "Failed to send reset link. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error('❌ Forgot password failed:', errorMsg);
-        }
-      }
-    } catch (error: any) {
-      const errorMsg = error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error('❌ Forgot password exception:', error);
-      }
+      setSuccessMessage(`Code sent to ${result.data.email}`);
+      const query =
+        `mode=reset&txnId=${encodeURIComponent(result.data.txnId)}` +
+        `&target=${encodeURIComponent(result.data.email)}&userId=${encodeURIComponent(identifier)}`;
+      router.push(`/auth/verify-otp?${query}` as any);
     } finally {
       setIsLoading(false);
     }

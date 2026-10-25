@@ -1,146 +1,110 @@
-import React, { useMemo } from "react";
-import {
-  View,
-  StyleSheet,
-  TouchableOpacity,
-  Image,
-  ActivityIndicator,
-  Dimensions,
-} from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import type { Clip } from "@/types/editor.types";
 
-const PX_PER_SECOND = 40;
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
+import type { Clip } from "@/types/editor.types";
+import { videoThumbnails } from "@modules/video-editor/camera-module/utils/thumbnails";
+import { clipLength, clipStart } from "./useClipSequence";
+import { EDITOR_ACCENT } from "./editorTheme";
 
 interface ClipItemProps {
   clip: Clip;
+  width: number;
+  height: number;
+  /** Width of one thumbnail tile (one second of timeline). */
+  tileWidth: number;
   isSelected: boolean;
   onPress: (clipId: string) => void;
   onDelete: (clipId: string) => void;
 }
 
-const ClipItem: React.FC<ClipItemProps> = ({
-  clip,
-  isSelected,
-  onPress,
-  onDelete,
-}) => {
-  const clipDuration = (clip.trimEnd || clip.duration) - (clip.trimStart || 0);
-  const clipWidth = Math.max(clipDuration * PX_PER_SECOND, 40);
+type ThumbState = { status: "loading" } | { status: "ready"; frames: string[] } | { status: "error" };
 
-  // Generate placeholder frame thumbnails
-  const thumbnailCount = Math.max(1, Math.floor(clipDuration / 1));
-  const thumbnails = useMemo(() => {
-    const frames = [];
-    for (let i = 0; i < thumbnailCount; i++) {
-      frames.push(`frame-${i}`);
+/** One clip on the main track: real frames tiled across its width (photos tile the photo). */
+const ClipItem: React.FC<ClipItemProps> = ({ clip, width, height, tileWidth, isSelected, onPress, onDelete }) => {
+  const [thumbs, setThumbs] = useState<ThumbState>(
+    clip.type === "photo" ? { status: "ready", frames: [clip.uri] } : { status: "loading" }
+  );
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    if (clip.type === "photo") {
+      setThumbs({ status: "ready", frames: [clip.uri] });
+      return;
     }
-    return frames;
-  }, [thumbnailCount]);
+    let cancelled = false;
+    setThumbs({ status: "loading" });
+    videoThumbnails(clip.uri, clipStart(clip), clipLength(clip))
+      .then((frames) => !cancelled && setThumbs({ status: "ready", frames }))
+      .catch((error) => {
+        if (!cancelled) setThumbs({ status: "error" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clip.uri, clip.type, clip.trimStart, clip.trimEnd, clip.duration, attempt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const retry = useCallback(() => setAttempt((a) => a + 1), []);
+  const tiles = Math.max(1, Math.round(width / tileWidth));
 
   return (
-    <View style={[styles.container, { width: clipWidth }]}>
-      <TouchableOpacity
-        style={[
-          styles.clipBox,
-          isSelected && styles.clipBoxSelected,
-          { width: clipWidth },
-        ]}
-        onPress={() => onPress(clip.id)}
-        activeOpacity={0.7}
-      >
-        {/* Thumbnail strip */}
-        <View style={styles.thumbnailStrip}>
-          {thumbnails.map((_, index) => (
-            <View
-              key={index}
-              style={[
-                styles.thumbnail,
-                {
-                  width: clipWidth / thumbnailCount,
-                },
-              ]}
-            >
-              <View style={styles.placeholderThumbnail} />
-            </View>
-          ))}
+    <TouchableOpacity
+      style={[styles.clip, { width, height }, isSelected && styles.selected]}
+      onPress={() => onPress(clip.id)}
+      activeOpacity={0.8}
+    >
+      {thumbs.status === "ready" ? (
+        <View style={styles.strip}>
+          {Array.from({ length: tiles }, (_, i) => {
+            const frame = thumbs.frames[Math.min(thumbs.frames.length - 1, Math.floor((i * thumbs.frames.length) / tiles))];
+            return <Image key={i} source={{ uri: frame }} style={{ width: width / tiles, height }} contentFit="cover" />;
+          })}
         </View>
-
-        {/* Selected state badge */}
-        {isSelected && (
-          <View style={styles.editBadge}>
-            <Ionicons name="pencil" size={12} color="#000" />
-          </View>
-        )}
-      </TouchableOpacity>
-
-      {/* Delete button (visible on long press or selection) */}
-      {isSelected && (
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => onDelete(clip.id)}
-        >
-          <Ionicons name="close" size={16} color="#fff" />
+      ) : thumbs.status === "loading" ? (
+        <View style={styles.placeholder}>
+          <ActivityIndicator size="small" color="#888" />
+        </View>
+      ) : (
+        <TouchableOpacity style={styles.placeholder} onPress={retry} accessibilityLabel="Retry thumbnails">
+          <Ionicons name="refresh" size={16} color="#fff" />
+          <Text style={styles.retryText}>Retry</Text>
         </TouchableOpacity>
       )}
-    </View>
+
+      {isSelected && (
+        <TouchableOpacity style={styles.deleteButton} onPress={() => onDelete(clip.id)} hitSlop={8} accessibilityLabel="Delete clip">
+          <Ionicons name="close" size={14} color="#fff" />
+        </TouchableOpacity>
+      )}
+    </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    marginRight: 2,
-    position: "relative",
-  },
-  clipBox: {
-    flexDirection: "row",
+  clip: {
+    position: "absolute",
+    top: 0,
     borderRadius: 8,
     overflow: "hidden",
-    backgroundColor: "#2a2a2a",
-    height: 64,
+    backgroundColor: "#333",
     borderWidth: 2,
     borderColor: "transparent",
   },
-  clipBoxSelected: {
-    borderColor: "#EC9A15",
-  },
-  thumbnailStrip: {
-    flex: 1,
-    flexDirection: "row",
-  },
-  thumbnail: {
-    flex: 1,
-    backgroundColor: "#1a1a1a",
-    borderRightWidth: 0.5,
-    borderRightColor: "#111",
-  },
-  placeholderThumbnail: {
-    flex: 1,
-    backgroundColor: "#333",
-  },
-  editBadge: {
-    position: "absolute",
-    top: 4,
-    right: 4,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "#EC9A15",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  selected: { borderColor: EDITOR_ACCENT },
+  strip: { flexDirection: "row", flex: 1 },
+  placeholder: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#333" },
+  retryText: { color: "#fff", fontSize: 10, marginTop: 2 },
   deleteButton: {
     position: "absolute",
-    top: -8,
-    right: -8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: "#ff3333",
-    justifyContent: "center",
+    top: 2,
+    right: 2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#FF3B30",
     alignItems: "center",
-    zIndex: 101,
+    justifyContent: "center",
   },
 });
 

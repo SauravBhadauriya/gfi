@@ -1,383 +1,217 @@
-import apiClient from '../axios';
-import { ApiResponse } from '../types';
-import API_ENDPOINTS from '../endpoints';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiGet, apiPost, apiPut, toResult, ApiResult } from "../client";
+import { isLocalUri, uploadLocalFile } from "./uploadService";
 
-// ==================== Type Definitions ====================
-
-export interface User {
+/** The user document as GET /user/profile returns it (password stripped). */
+export interface BackendUser {
   _id: string;
-  id?: string;
   firstName: string;
   lastName: string;
+  username: string;
   email: string;
   mobile?: string;
-  role: string;
-  status?: string;
-  kycStatus?: 'pending' | 'approved' | 'rejected' | 'completed';
-  profileImage?: string;
-  bio?: string;
-  dob?: string;
-  gender?: string;
+  profileImage: string;
+  gender: "male" | "female" | "non-binary" | "prefer-not-to-say" | "";
+  role: "participants" | "fan";
+  categories?: string | null;
+  dob: string;
+  isActive: boolean;
+  isDeleted: boolean;
+  notificationAllowed: boolean;
+  xp: number;
+  level: number;
+  streakCount: number;
+  device_token?: string;
+  device_type?: "android" | "ios" | "web" | "";
   createdAt?: string;
   updatedAt?: string;
-  [key: string]: any;
 }
 
-export interface KycStatus {
-  status: 'pending' | 'approved' | 'rejected' | 'completed';
-  rejectionReason?: string;
-  documents?: any[];
-  submittedAt?: string;
-  reviewedAt?: string;
-  [key: string]: any;
+/**
+ * Fields the app is allowed to send to PUT /user/profile. The backend stores
+ * whatever it receives, so we only ever send this allowlist.
+ * `profileImage` may be a local file / data URI; it is uploaded first.
+ */
+export interface ProfileUpdate {
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  email?: string;
+  gender?: BackendUser["gender"];
+  dob?: string;
+  role?: BackendUser["role"];
+  profileImage?: string;
+  categories?: string;
+  device_token?: string;
+  device_type?: "android" | "ios" | "web" | "";
+  latitude?: number;
+  longitude?: number;
 }
 
-export interface UserEarning {
+const PROFILE_FIELDS: (keyof ProfileUpdate)[] = [
+  "firstName",
+  "lastName",
+  "username",
+  "email",
+  "gender",
+  "dob",
+  "role",
+  "profileImage",
+  "categories",
+  "device_token",
+  "device_type",
+  "latitude",
+  "longitude",
+];
+
+export interface Progress {
+  xp: number;
+  level: number;
+  levelTitle: string;
+  xpIntoLevel: number;
+  xpToNextLevel: number;
+  xpPerLevel: number;
+  streakCount: number;
+}
+
+export interface DailyMission {
+  target: number;
+  current: number;
+  completed: boolean;
+  rewardXp?: number;
+  rewardCoins?: number;
+}
+
+export interface Category {
   id: string;
-  type: string;
-  amount: number;
-  description?: string;
-  createdAt: string;
-  [key: string]: any;
+  label: string;
+  icon: string;
+  banner: string;
+  tagline: string;
+  description: string;
+  followersCount: number;
+  activeContestantsCount: number;
 }
 
-export interface WalletBalance {
-  balance: number;
-  totalEarnings?: number;
-  totalTips?: number;
-  [key: string]: any;
+export interface Champion {
+  id: string;
+  name: string;
+  username: string;
+  profilePictureUrl: string;
+  totalVotes: number;
+  totalReels: number;
+  rank: number;
 }
 
-// ==================== API Functions ====================
+/** UI labels ("Female", "Prefer not to say") -> the backend's gender enum. */
+export function toBackendGender(label?: string | null): BackendUser["gender"] {
+  const value = (label || "").trim().toLowerCase().replace(/\s+/g, "-");
+  if (value === "male" || value === "female" || value === "non-binary" || value === "prefer-not-to-say") {
+    return value;
+  }
+  return "";
+}
 
-export async function getCurrentUser(): Promise<ApiResponse<User>> {
-  try {
-    console.log('[userService] GET user/profile');
-    
-    const response = await apiClient.get<any>('user/profile');
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const userData = responseData.data;
-      const user: User = {
-        ...userData,
-        id: userData.id || userData._id,
-      };
-
-      console.log('[userService] GET user/profile - Success:', user);
-      return {
-        success: true,
-        data: user,
-        message: responseData.message || 'User profile fetched successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch user profile',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[userService] GET user/profile error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
+/** Backend gender enum -> display label. */
+export function genderLabel(value?: string | null): string {
+  switch (value) {
+    case "male":
+      return "Male";
+    case "female":
+      return "Female";
+    case "non-binary":
+      return "Non-binary";
+    case "prefer-not-to-say":
+      return "Prefer not to say";
+    default:
+      return "";
   }
 }
 
-export async function getPublicUserProfile(userId: string): Promise<ApiResponse<User>> {
-  try {
-    console.log('[userService] GET user profile for userId:', userId);
-    
-    // Try multiple endpoint variations for public profile
-    const endpointsToTry = [
-      `users/${userId}/profile`,
-      `user/${userId}/profile`,
-      `users/${userId}`,
-      `user/${userId}`,
-    ];
-
-    for (const endpoint of endpointsToTry) {
-      try {
-        const response = await apiClient.get<any>(endpoint);
-        const responseData = response.data as any;
-
-        if (responseData.code === 1 && responseData.data) {
-          const userData = responseData.data;
-          const user: User = {
-            ...userData,
-            id: userData.id || userData._id,
-          };
-
-          console.log('[userService] GET', endpoint, '- Success:', user);
-          return {
-            success: true,
-            data: user,
-            message: responseData.message || 'User profile fetched successfully',
-          };
-        }
-      } catch (endpointError: any) {
-        if (endpointError.response?.status === 404) {
-          // Try next endpoint
-          continue;
-        }
-        throw endpointError;
-      }
-    }
-
-    // All endpoints failed
-    return {
-      success: false,
-      message: 'User profile not found',
-      error: 'User not found',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[userService] GET public user profile error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-export async function updateUserProfile(data: any): Promise<ApiResponse<User>> {
-  try {
-    console.log('[userService] PUT user/profile');
-    
-    const response = await apiClient.put<any>('user/profile', data);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const userData = responseData.data;
-      const user: User = {
-        ...userData,
-        id: userData.id || userData._id,
-      };
-
-      console.log('[userService] PUT user/profile - Success:', user);
-      return {
-        success: true,
-        data: user,
-        message: responseData.message || 'User profile updated successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to update user profile',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[userService] PUT user/profile error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-export async function getUserKycStatus(): Promise<ApiResponse<KycStatus>> {
-  try {
-    console.log('[userService] GET User KYC Status');
-    
-    // Get current user ID from storage
-    const userId = await AsyncStorage.getItem('userId');
-    
-    if (!userId) {
-      return {
-        success: false,
-        message: 'User ID not found',
-        error: 'NO_USER_ID',
-        data: undefined,
-      };
-    }
-
-    const response = await apiClient.get<any>(API_ENDPOINTS.USER.GET_KYC);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const kyc: KycStatus = responseData.data.kyc || responseData.data;
-
-      console.log('[userService] GET User KYC Status - Success:', kyc);
-      return {
-        success: true,
-        data: kyc,
-        message: responseData.message || 'KYC status fetched successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch KYC status',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[userService] GET User KYC Status error:', error.message);
-    
-    // KYC might not exist yet, return pending status
-    if (error.response?.status === 404) {
-      return {
-        success: true,
-        data: {
-          status: 'pending',
-        } as KycStatus,
-        message: 'No KYC submission found',
-      };
-    }
-    
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-export async function getUserEarnings(): Promise<ApiResponse<UserEarning[]>> {
-  try {
-    console.log('[userService] GET User Earnings');
-    
-    const response = await apiClient.get<any>(API_ENDPOINTS.USER.GET_EARNINGS);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let earnings: UserEarning[] = [];
-      
-      if (Array.isArray(responseData.data)) {
-        earnings = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        earnings = responseData.data.items;
-      } else if (Array.isArray(responseData.data.earnings)) {
-        earnings = responseData.data.earnings;
-      }
-
-      console.log('[userService] GET User Earnings - Success:', earnings.length, 'items');
-      return {
-        success: true,
-        data: earnings,
-        message: responseData.message || 'Earnings fetched successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch earnings',
-      error: 'API returned unsuccessful response',
-      data: [],
-    };
-  } catch (error: any) {
-    console.error('[userService] GET User Earnings error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: [],
-    };
-  }
-}
-
-export async function getWalletBalance(): Promise<ApiResponse<WalletBalance>> {
-  try {
-    console.log('[userService] GET Wallet Balance');
-    
-    const response = await apiClient.get<any>(API_ENDPOINTS.USER.GET_WALLET);
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const wallet: WalletBalance = {
-        balance: responseData.data.balance || responseData.data.totalBalance || 0,
-        totalEarnings: responseData.data.totalEarnings || 0,
-        totalTips: responseData.data.totalTips || 0,
-        ...responseData.data,
-      };
-
-      console.log('[userService] GET Wallet Balance - Success:', wallet);
-      return {
-        success: true,
-        data: wallet,
-        message: responseData.message || 'Wallet balance fetched successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to fetch wallet balance',
-      error: 'API returned unsuccessful response',
-      data: {
-        balance: 0,
-        totalEarnings: 0,
-        totalTips: 0,
-      },
-    };
-  } catch (error: any) {
-    console.error('[userService] GET Wallet Balance error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: {
-        balance: 0,
-        totalEarnings: 0,
-        totalTips: 0,
-      },
-    };
-  }
-}
-
-export async function toggleFollowUser(userId: string): Promise<ApiResponse<any>> {
-  try {
-    console.log('[userService] POST user follow for userId:', userId);
-    
-    const response = await apiClient.post<any>(`user/${userId}/follow`, {});
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      console.log('[userService] POST user follow - Success:', responseData.data);
-      return {
-        success: true,
-        data: responseData.data,
-        message: responseData.message || 'Follow status updated successfully',
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || 'Failed to update follow status',
-      error: 'API returned unsuccessful response',
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error('[userService] POST user follow error:', error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || 'Network error occurred',
-      error: error.message || 'Network error',
-      data: undefined,
-    };
-  }
-}
-
-export const userService = {
-  getCurrentUser,
-  getPublicUserProfile,
-  updateUserProfile,
-  getUserKycStatus,
-  getUserEarnings,
-  getWalletBalance,
-  toggleFollowUser,
+export const displayName = (user?: Partial<BackendUser> | null): string => {
+  if (!user) return "";
+  const full = `${user.firstName || ""} ${user.lastName || ""}`.trim();
+  return full || user.username || user.email || user.mobile || "";
 };
 
+// ==================== PROFILE ====================
 
+/** GET /user/profile */
+export const getProfile = () => apiGet<BackendUser>("user/profile");
+
+/**
+ * PUT /user/profile with the allowlisted fields. A local `profileImage` is
+ * uploaded to S3 first (the backend's own multipart avatar upload stores the
+ * file under a field the schema drops, so it never shows up).
+ */
+export async function updateProfile(update: ProfileUpdate): Promise<BackendUser> {
+  const body: Record<string, any> = {};
+  for (const key of PROFILE_FIELDS) {
+    const value = update[key];
+    if (value !== undefined && value !== null) body[key] = value;
+  }
+  if (isLocalUri(body.profileImage)) {
+    body.profileImage = await uploadLocalFile(body.profileImage, { assetType: "reels" });
+  }
+  await apiPut("user/profile", body);
+  return getProfile();
+}
+
+export const getCurrentUser = (): Promise<ApiResult<BackendUser>> => toResult(getProfile);
+
+export const updateUserProfile = (update: ProfileUpdate) => toResult(() => updateProfile(update), "Profile updated");
+
+/** Registers this device's push token on the profile (no dedicated endpoint exists). */
+export const registerDeviceToken = (token: string, platform: "android" | "ios") =>
+  apiPut("user/profile", { device_token: token, device_type: platform });
+
+/**
+ * GET /user/notifications/switch. Note: the backend currently always turns
+ * notifications OFF for active accounts (it reads `isActive` instead of the
+ * current setting), so the caller must re-read the profile afterwards.
+ */
+export async function toggleNotifications(): Promise<boolean> {
+  await apiGet("user/notifications/switch");
+  const profile = await getProfile();
+  return !!profile.notificationAllowed;
+}
+
+// ==================== FOLLOW ====================
+
+/** POST /user/:userId/follow toggles and returns the new state. */
+export const toggleFollow = (userId: string) => apiPost<{ following: boolean }>(`user/${userId}/follow`, {});
+
+export const toggleFollowUser = (userId: string) => toResult(() => toggleFollow(userId));
+
+// ==================== GAMIFICATION ====================
+
+export const getProgress = () => apiGet<Progress>("user/progress");
+export const getDailyMission = () => apiGet<DailyMission>("user/daily-mission");
+
+// ==================== DISCOVERY ====================
+
+export const getCategories = (page = 1, limit = 50) =>
+  apiGet<{ page: number; limit: number; totalCategories: number; categories: Category[] }>("user/categories", {
+    params: { page, limit },
+  });
+
+export const getChampions = (page = 1, limit = 20) =>
+  apiGet<{ currentPage: number; hasMore: boolean; total: number; champions: Champion[] }>("user/champions", {
+    params: { page, limit },
+  });
+
+export const userService = {
+  getProfile,
+  updateProfile,
+  getCurrentUser,
+  updateUserProfile,
+  registerDeviceToken,
+  toggleNotifications,
+  toggleFollow,
+  toggleFollowUser,
+  getProgress,
+  getDailyMission,
+  getCategories,
+  getChampions,
+};
+
+export default userService;

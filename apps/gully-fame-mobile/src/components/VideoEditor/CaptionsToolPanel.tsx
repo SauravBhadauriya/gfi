@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -30,6 +30,8 @@ interface CaptionsToolPanelProps {
   onCaptionsGenerated: (captions: Caption[]) => void;
   videoUri: string;
   videoDuration: number;
+  /** Captions already in the project, so reopening the panel shows them. */
+  initialCaptions?: Caption[];
 }
 
 const PRESET_COLORS = [
@@ -62,8 +64,9 @@ export default function CaptionsToolPanel({
   onCaptionsGenerated,
   videoUri,
   videoDuration,
+  initialCaptions,
 }: CaptionsToolPanelProps) {
-  const [captions, setCaptions] = useState<Caption[]>([]);
+  const [captions, setCaptions] = useState<Caption[]>(initialCaptions ?? []);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedCaptionId, setSelectedCaptionId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -126,7 +129,6 @@ export default function CaptionsToolPanel({
         Alert.alert("Info", result.message || "No speech detected in video");
       }
     } catch (error: any) {
-      console.error("[CaptionsToolPanel] Failed to generate captions:", error);
 
       // For demo purposes, create sample captions if API fails
       if (__DEV__) {
@@ -169,7 +171,7 @@ export default function CaptionsToolPanel({
           },
         ];
         setCaptions(sampleCaptions);
-        Alert.alert("Demo Mode", "Using sample captions (API not available)");
+        Alert.alert("Captions unavailable", "Showing sample captions because the captions service is not available.");
       } else {
         Alert.alert(
           "Error",

@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Circle, Path, G, Defs, LinearGradient, Stop } from "react-native-svg";
 
 export const InstagramIcon = ({ size = 40 }) => (
   <Svg width={size} height={size} viewBox="0 0 551.034 551.034" fill="none">

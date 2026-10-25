@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -14,8 +14,11 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { router, useLocalSearchParams } from "expo-router";
+import { joinCompetition } from "@/api/services/competitionService";
+import { ApiError, getErrorMessage } from "@/api/client";
+import { openCompetition } from "@/utils/openCompetition";
+import { toastError, toastSuccess } from "@/components/ui/Toast";
 import Svg, { Path, Circle } from "react-native-svg";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 
 
 import { getUserSession } from "@utils/userSession";
@@ -49,145 +52,34 @@ export default function CompetitionPaymentScreen() {
       try {
         const session = await getUserSession();
         setUserSession(session);
-      } catch (error) {
-        console.error("Error loading user session:", error);
+      } catch (error) { /* intentionally ignored */
       }
     };
     loadUserData();
   }, []);
 
+  // The backend joins competitions for free (POST /competitions/:id/join) and has
+  // no entry-fee payment endpoint, so "pay" registers the user directly.
   const handlePay = async () => {
-    
-    if (selectedMethod === "wallet") {
-      try {
-        
-        const joinedCompetitions = await AsyncStorage.getItem("joinedCompetitions");
-        const joined = joinedCompetitions ? JSON.parse(joinedCompetitions) : {};
-        joined[competitionId] = {
-          id: competitionId,
-          name: competitionName,
-          status: "pending",
-          joinedAt: new Date().toISOString(),
-        };
-        await AsyncStorage.setItem("joinedCompetitions", JSON.stringify(joined));
-
-        setShowApprovalModal(true);
-        setTimeout(() => {
-          setShowApprovalModal(false);
-          const encodedCompetitionName = encodeURIComponent(competitionName);
-          router.replace(
-            `/(main)/competition/upcoming/${competitionId}?competitionName=${encodedCompetitionName}&fromPayment=true` as any
-          );
-        }, 2500);
-      } catch (error) {
-        console.error("Error processing wallet payment:", error);
-        Alert.alert("Error", "Failed to process payment. Please try again.");
+    if (isProcessing || !competitionId) return;
+    setIsProcessing(true);
+    try {
+      await joinCompetition(competitionId);
+      toastSuccess("You're registered for this competition!");
+    } catch (error) {
+      if ((error as ApiError)?.key !== "already_joined") {
+        toastError(getErrorMessage(error));
+        return;
       }
-      return;
+    } finally {
+      setIsProcessing(false);
     }
-
-    
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    openCompetition(competitionId);
   };
 
   const handleCloseModal = () => {
     setShowApprovalModal(false);
-    const encodedCompetitionName = encodeURIComponent(competitionName);
-    router.replace(
-      `/(main)/competition/upcoming/${competitionId}?competitionName=${encodedCompetitionName}&fromPayment=true` as any
-    );
+    openCompetition(competitionId);
   };
 
   return (
@@ -211,7 +103,7 @@ export default function CompetitionPaymentScreen() {
           <Text style={styles.summaryLabel}>Entry Fee</Text>
           <Text style={[styles.summaryValue, { color: "#FFD700" }]}>{entryFee}</Text>
           <Text style={styles.summaryHint}>
-            Entry fees are refundable if the competition doesn't go live. {/* Payments are processed securely via Razorpay. */}
+            Entry-fee payments aren&apos;t available yet, so joining is free for now.
           </Text>
         </View>
 

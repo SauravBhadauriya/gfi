@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Path, G } from "react-native-svg";
 
 export const AppleIcon = ({ size = 40 }) => (
   <Svg width={size} height={size} viewBox="-1.5 0 20 20" fill="none">

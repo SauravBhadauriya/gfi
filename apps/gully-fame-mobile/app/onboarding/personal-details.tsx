@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import Svg, { Path } from "react-native-svg";
-import { authService } from "@api/services/authService";
+import { updateProfile, toBackendGender } from "@api/services/userService";
+import { getErrorMessage } from "@api/client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width } = Dimensions.get("window");
@@ -31,6 +32,7 @@ export default function OnboardingPersonalDetails() {
 
   const [dob, setDob] = useState("");
   const [selectedGender, setSelectedGender] = useState(genders[0]);
+  const [saving, setSaving] = useState(false);
   
   
   useEffect(() => {
@@ -66,38 +68,26 @@ export default function OnboardingPersonalDetails() {
   };
 
   const handleContinue = async () => {
-    if (!dob.trim()) {
-      Alert.alert("Missing information", "Please enter your date of birth to continue.");
+    if (saving) return;
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dob.trim())) {
+      Alert.alert("Missing information", "Please enter your date of birth as DD/MM/YYYY.");
       return;
     }
 
-    if (__DEV__) {
-      console.log('\n💾 ========== SAVING DOB AND GENDER ==========');
-      console.log('Saving to AsyncStorage (will sync to backend after login)');
-      console.log('DOB:', dob);
-      console.log('Gender:', selectedGender);
-      console.log('Note: User is not logged in yet, so saving locally first');
-      console.log('Will sync to backend via PUT /user/profile after successful login');
-      console.log('==========================================\n');
-    }
-
-    await AsyncStorage.multiSet([
-      ["userDateOfBirth", dob],
-      ["userGender", selectedGender],
-    ]);
-
-    
+    setSaving(true);
     try {
-      const { authService } = await import("@api/services/authService");
-      await authService.updateProfile({
-        dob: dob,
-        gender: selectedGender,
-      });
+      await updateProfile({ dob: dob.trim(), gender: toBackendGender(selectedGender) });
+      await AsyncStorage.multiSet([
+        ["userDateOfBirth", dob],
+        ["userGender", selectedGender],
+      ]);
     } catch (error) {
-      console.log("Could not sync DOB/Gender to backend:", error);
+      Alert.alert("Could not save", getErrorMessage(error));
+      return;
+    } finally {
+      setSaving(false);
     }
 
-    
     if (fromKycFlow) {
       const query = [
         `role=${encodeURIComponent(role)}`,

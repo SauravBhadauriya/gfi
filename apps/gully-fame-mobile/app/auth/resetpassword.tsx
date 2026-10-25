@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -12,14 +12,14 @@ import {
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import Svg, { Path } from "react-native-svg";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
 import { EyeIcon, EyeOffIcon } from "@/icons";
 
 const { width, height } = Dimensions.get("window");
 
 export default function ResetPassword() {
   const params = useLocalSearchParams();
-  const email = params.email ? decodeURIComponent(String(params.email)) : "";
+  const resetToken = params.resetToken ? String(params.resetToken) : "";
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -31,22 +31,14 @@ export default function ResetPassword() {
   const [passwordErrors, setPasswordErrors] = useState<string[]>([]);
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
 
+  // Mirrors the backend rule (forgot-password/reset rejects < 6 characters).
   const validatePassword = (pwd: string): string[] => {
     const errors: string[] = [];
-    if (pwd.length < 8) {
-      errors.push("At least 8 characters");
+    if (pwd.length < AUTH_RULES.passwordMinLength) {
+      errors.push(`At least ${AUTH_RULES.passwordMinLength} characters`);
     }
-    if (!/[A-Z]/.test(pwd)) {
-      errors.push("At least 1 uppercase letter (A-Z)");
-    }
-    if (!/[a-z]/.test(pwd)) {
-      errors.push("At least 1 lowercase letter (a-z)");
-    }
-    if (!/[0-9]/.test(pwd)) {
-      errors.push("At least 1 number (0-9)");
-    }
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
-      errors.push("At least 1 special character (!@#$% etc.)");
+    if (pwd.length > AUTH_RULES.stringMaxLength) {
+      errors.push(`At most ${AUTH_RULES.stringMaxLength} characters`);
     }
     return errors;
   };
@@ -101,44 +93,21 @@ export default function ResetPassword() {
       return;
     }
 
+    if (!resetToken) {
+      setErrorMessage("This reset session has expired. Please request a new code.");
+      return;
+    }
+    if (isLoading) return;
     setIsLoading(true);
-
     try {
-      if (__DEV__) {
-        console.log("\n🔐 ========== RESET PASSWORD REQUEST ==========");
-        console.log("Resetting password...");
-        console.log("==========================================\n");
+      // Step 3: set the new password with the one-time resetToken.
+      const result = await authService.resetPasswordWithToken(resetToken, password);
+      if (!result.success) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      const result = await authService.resetPassword(password);
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log("✅ Password reset successful");
-        }
-
-        setSuccessMessage(
-          result.message ||
-            "Password updated successfully. You can now sign in with your new password.",
-        );
-        router.replace("/auth/signin?passwordUpdated=true" as any);
-      } else {
-        const errorMsg =
-          result.error || "Failed to reset password. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("❌ Password reset failed:", errorMsg);
-        }
-      }
-    } catch (error: any) {
-      const errorMsg =
-        error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("❌ Password reset exception:", error);
-      }
+      setSuccessMessage(result.message);
+      router.replace("/auth/signin?passwordUpdated=true" as any);
     } finally {
       setIsLoading(false);
     }

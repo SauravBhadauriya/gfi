@@ -11,7 +11,8 @@ import {
   BarChart3, 
   FileText, 
   LogOut,
-  X
+  X,
+  Building2
 } from 'lucide-react';
 import { UserRole } from '@/lib/types';
 import { logoutAdmin, getStoredAdmin } from '@/lib/authApi';
@@ -23,22 +24,28 @@ interface NavItem {
   href: string;
   icon: React.ComponentType<{ className?: string }>;
   roles: UserRole[];
+  /** true when the backend has no admin endpoint for this section yet */
+  pending?: boolean;
 }
 
 const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard, roles: ['admin', 'sponsor'] },
   { name: 'App Content', href: '/app-content', icon: FileText, roles: ['admin'] },
-  { name: 'Home Sections', href: '/app-content/home-sections', icon: LayoutDashboard, roles: ['admin'] },
-  { name: 'Competitions', href: '/competitions', icon: Trophy, roles: ['admin', 'sponsor'] },
-  { name: 'Users', href: '/users', icon: Users, roles: ['admin'] },
-  { name: 'Tips & Earnings', href: '/tips', icon: Coins, roles: ['admin'] },
-  { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['admin', 'sponsor'] },
-  { name: 'Sponsors', href: '/sponsors', icon: Users, roles: ['admin'] },
+  { name: 'Competitions', href: '/competitions', icon: Trophy, roles: ['admin', 'sponsor'], pending: true },
+  { name: 'Users', href: '/users', icon: Users, roles: ['admin'], pending: true },
+  { name: 'Tips & Earnings', href: '/tips', icon: Coins, roles: ['admin'], pending: true },
+  { name: 'Reports', href: '/reports', icon: BarChart3, roles: ['admin', 'sponsor'], pending: true },
+  { name: 'Sponsors', href: '/sponsors', icon: Building2, roles: ['admin'], pending: true },
 ];
 
 export default function Sidebar({ userRole }: { userRole: UserRole }) {
   const pathname = usePathname();
   const filteredNav = navigation.filter(item => hasAccess(item.roles, userRole));
+  // Highlight the most specific nav item, so nested pages (e.g. /competitions/create) keep their parent active.
+  const activeHref = filteredNav
+    .map(item => item.href)
+    .filter(href => pathname === href || (href !== '/' && pathname.startsWith(href + '/')))
+    .sort((a, b) => b.length - a.length)[0];
   const { mobileMenuOpen, setMobileMenuOpen } = useMobileMenu();
   const [userEmail, setUserEmail] = useState<string>('User');
 
@@ -56,8 +63,12 @@ export default function Sidebar({ userRole }: { userRole: UserRole }) {
 
   const SidebarContent = () => (
     <>
-      <div className="flex h-14 items-center justify-between px-4 border-b border-gray-800">
-        <h1 className="text-lg font-bold tracking-tight">Gully Fame</h1>
+      <div className="flex h-14 items-center justify-between px-4 border-b border-app-border">
+        <div className="flex items-center space-x-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Gully Fame" className="h-8 w-8 rounded-lg" />
+          <h1 className="text-lg font-bold tracking-tight">Gully<span className="text-primary-500">Fame</span></h1>
+        </div>
         <button
           onClick={() => setMobileMenuOpen(false)}
           className="md:hidden text-gray-400 hover:text-white"
@@ -68,7 +79,7 @@ export default function Sidebar({ userRole }: { userRole: UserRole }) {
       <nav className="flex-1 space-y-0.5 px-2 py-3 overflow-y-auto">
         {filteredNav.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = item.href === activeHref;
           return (
             <Link
               key={item.name}
@@ -77,16 +88,21 @@ export default function Sidebar({ userRole }: { userRole: UserRole }) {
               className={`flex items-center space-x-2.5 rounded-md px-2.5 py-2 text-xs font-medium transition-colors ${
                 isActive
                   ? 'bg-primary-600 text-white shadow-sm'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                  : 'text-gray-600 hover:bg-app-raised hover:text-white'
               }`}
             >
               <Icon className="h-4 w-4 flex-shrink-0" />
-              <span className="truncate">{item.name}</span>
+              <span className="truncate flex-1">{item.name}</span>
+              {item.pending && (
+                <span title="Backend API not available yet" className="rounded bg-app-brown px-1.5 py-0.5 text-[9px] font-semibold uppercase text-primary-400">
+                  Soon
+                </span>
+              )}
             </Link>
           );
         })}
       </nav>
-      <div className="border-t border-gray-800 p-3 space-y-2">
+      <div className="border-t border-app-border p-3 space-y-2">
         <div className="flex items-center space-x-2.5">
           <div className="h-7 w-7 rounded-full bg-primary-600 flex items-center justify-center flex-shrink-0">
             <span className="text-xs font-semibold">
@@ -102,7 +118,7 @@ export default function Sidebar({ userRole }: { userRole: UserRole }) {
         </div>
         <button
           onClick={logoutAdmin}
-          className="w-full flex items-center space-x-2 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+          className="w-full flex items-center space-x-2 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-app-raised hover:text-white transition-colors"
         >
           <LogOut className="h-3.5 w-3.5" />
           <span>Logout</span>
@@ -120,7 +136,7 @@ export default function Sidebar({ userRole }: { userRole: UserRole }) {
           onClick={() => setMobileMenuOpen(false)}
         />
       )}
-      <div className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static h-screen w-56 flex-shrink-0 flex-col bg-gray-900 text-white z-50 md:z-auto transition-transform duration-300 ease-in-out flex`}>
+      <div className={`${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:static h-screen w-56 flex-shrink-0 flex-col bg-app-sidebar border-r border-app-border text-white z-50 md:z-auto transition-transform duration-300 ease-in-out flex`}>
         <SidebarContent />
       </div>
     </>

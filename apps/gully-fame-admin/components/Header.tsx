@@ -8,17 +8,12 @@ const getPageTitle = (pathname: string): string => {
   const routeMap: { [key: string]: string } = {
     '/': 'Dashboard',
     '/app-content': 'App Content',
-    '/app-content/home-sections': 'Home Sections',
     '/competitions': 'Competitions',
     '/competitions/create': 'Create Competition',
     '/users': 'Users',
     '/tips': 'Tips & Earnings',
     '/reports': 'Reports',
     '/sponsors': 'Sponsors',
-    '/moderation': 'Moderation',
-    '/monetization': 'Monetization',
-    '/settings': 'Settings',
-    '/analytics': 'Analytics',
   };
 
   
@@ -43,7 +38,7 @@ export default function Header() {
   const pageTitle = getPageTitle(pathname);
 
   return (
-    <header className="sticky top-0 z-10 flex h-14 items-center justify-center border-b border-gray-200 bg-white px-3 sm:px-4 md:px-5 shadow-sm relative">
+    <header className="sticky top-0 z-10 flex h-14 items-center justify-center border-b border-app-border bg-app-surface px-3 sm:px-4 md:px-5 shadow-sm relative">
       {}
       <button
         onClick={() => setMobileMenuOpen(true)}

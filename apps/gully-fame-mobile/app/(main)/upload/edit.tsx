@@ -1,20 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  Platform,
-  Dimensions,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
-import { router, useLocalSearchParams } from "expo-router";
-import { VideoView, useVideoPlayer } from "expo-video";
-import { Ionicons, MaterialIcons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, StatusBar, Alert, ActivityIndicator, useWindowDimensions } from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import { router, useIsFocused, useLocalSearchParams } from "expo-router";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
 import { useAppDispatch, useAppSelector } from "@/store/hooks";
 import {
   addClip,
@@ -22,43 +10,37 @@ import {
   addOverlay,
   removeOverlay,
   addAudioTrack,
+  setMusic,
   removeAudioTrack,
-  addText,
   removeText,
+  addSticker,
+  removeSticker,
+  removeDoodle,
+  setDoodles,
+  setCaptions,
+  setAdjust,
+  setFilter,
   setCurrentTime,
   setIsPlaying,
   setSelectedItemId,
   undo,
   redo,
-  resetEditor,
 } from "@/store/slices/editorSlice";
-import { exportAndCombineClips } from "@modules/video-editor/camera-module/utils/videoExporter";
 import type { CameraClipArray } from "@modules/video-editor/camera-module/types/camera.types";
 import TimelineContainer from "@/components/VideoEditor/TimelineContainer";
 import BottomToolbar, {
   ToolId,
 } from "@/components/VideoEditor/BottomToolbar";
-import AudioToolPanel from "@/components/VideoEditor/AudioToolPanel";
-import TextToolPanel, {
-  TextOverlay,
-} from "@/components/VideoEditor/TextToolPanel";
+import MusicLibraryModal from "@/components/MusicLibraryModal";
 import VoiceToolPanel from "@/components/VideoEditor/VoiceToolPanel";
 import CaptionsToolPanel, {
   Caption,
 } from "@/components/VideoEditor/CaptionsToolPanel";
-import CaptionOverlay from "@/components/VideoEditor/CaptionOverlay";
-import AdjustToolPanel, {
-  VideoAdjustments,
-} from "@/components/VideoEditor/AdjustToolPanel";
-import FiltersToolPanel, {
-  VideoFilter,
-} from "@/components/VideoEditor/FiltersToolPanel";
-import DoodlesToolPanel, {
-  DoodlePath,
-} from "@/components/VideoEditor/DoodlesToolPanel";
+import AdjustToolPanel from "@/components/VideoEditor/AdjustToolPanel";
+import DoodlesToolPanel from "@/components/VideoEditor/DoodlesToolPanel";
 import SoundFXToolPanel from "@/components/VideoEditor/SoundFXToolPanel";
 import StickersToolPanel, {
-  StickerItem,
+  StickerItem as PanelSticker,
 } from "@/components/VideoEditor/StickersToolPanel";
 import OverlayToolPanel, {
   OverlayItem,
@@ -67,14 +49,16 @@ import CutoutToolPanel, {
   CutoutSettings,
 } from "@/components/VideoEditor/CutoutToolPanel";
 import VideoPreviewWithOverlays from "@/components/VideoEditor/VideoPreviewWithOverlays";
-import {
-  exportVideo,
-  uploadVideoToBackend,
-  ExportProgress,
-} from "@/services/videoExportService";
+import { useClipSequence } from "@/components/VideoEditor/useClipSequence";
+import { PREVIEW_RADIUS } from "@/components/VideoEditor/editorTheme";
+import TrashZone from "@modules/video-editor/camera-module/components/preview/TrashZone";
+import TextEditorOverlay from "@modules/video-editor/camera-module/components/preview/TextEditorOverlay";
+import FilterSheet from "@modules/video-editor/camera-module/components/preview/FilterSheet";
+import { useTextEditing } from "@modules/video-editor/camera-module/components/preview/useTextEditing";
+import type { LayerKind } from "@/components/VideoEditor/TimelineContainer";
 import * as ImagePicker from "expo-image-picker";
+import { importGalleryAsset } from "@modules/video-editor/camera-module/utils/clipImport";
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
 export default function EditScreen() {
   const params = useLocalSearchParams();
@@ -85,8 +69,12 @@ export default function EditScreen() {
   const overlays = useAppSelector((state: any) => state.editor.overlays);
   const audioTracks = useAppSelector((state: any) => state.editor.audioTracks);
   const texts = useAppSelector((state: any) => state.editor.texts);
-  const currentTime = useAppSelector((state: any) => state.editor.currentTime);
-  const isPlaying = useAppSelector((state: any) => state.editor.isPlaying);
+  const stickers = useAppSelector((state: any) => state.editor.stickers);
+  const doodles = useAppSelector((state: any) => state.editor.doodles);
+  const captions = useAppSelector((state: any) => state.editor.captions);
+  const adjust = useAppSelector((state: any) => state.editor.adjust);
+  const filter = useAppSelector((state: any) => state.editor.filter);
+  const frameAspect = useAppSelector((state: any) => state.editor.frameAspect) ?? 9 / 16;
   const selectedItemId = useAppSelector((state: any) => state.editor.selectedItemId);
   const undoStack = useAppSelector((state: any) => state.editor.undoStack);
   const redoStack = useAppSelector((state: any) => state.editor.redoStack);
@@ -94,29 +82,8 @@ export default function EditScreen() {
   // Local state
   const [selectedTool, setSelectedTool] = useState<ToolId | null>(null);
   const [hdEnabled, setHdEnabled] = useState(true);
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null);
 
-  // Local states for tool panels (not in Redux as they're UI-only)
-  const [textOverlays, setTextOverlays] = useState<TextOverlay[]>([]);
-  const [captions, setCaptions] = useState<Caption[]>([]);
-  const [adjustments, setAdjustments] = useState<VideoAdjustments>({
-    brightness: 0,
-    contrast: 0,
-    saturation: 0,
-    exposure: 0,
-    temperature: 0,
-    vignette: 0,
-    sharpen: 0,
-  });
-  const [filter, setFilter] = useState<VideoFilter>({
-    id: "none",
-    name: "Original",
-    type: "none",
-    intensity: 100,
-  });
-  const [doodles, setDoodles] = useState<DoodlePath[]>([]);
-  const [stickers, setStickers] = useState<StickerItem[]>([]);
+  // Cutout is not built yet (no segmentation model); its settings stay local.
   const [cutoutSettings, setCutoutSettings] = useState<CutoutSettings>({
     enabled: false,
     feathering: 50,
@@ -126,18 +93,39 @@ export default function EditScreen() {
   const [isDrawingMode, setIsDrawingMode] = useState(false);
   const [doodleBrushColor, setDoodleBrushColor] = useState("#EC9A15");
   const [doodleBrushSize, setDoodleBrushSize] = useState(5);
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
+  const trashTop = windowHeight - insets.bottom - 130;
+  const [drag, setDrag] = useState({ dragging: false, overTrash: false });
 
-  // Video player
-  const currentVideoUri = clips[0]?.uri || "";
-  const player = useVideoPlayer(currentVideoUri, (player) => {
-    if (currentVideoUri) {
-      player.loop = false;
-    }
-  });
+  // All clips play back to back on one player; photo clips are drawn over it.
+  const sequence = useClipSequence(clips);
+  const currentTime = sequence.time;
+  const isPlaying = sequence.isPlaying;
+  const currentVideoUri = clips.find((c: any) => c.type !== "photo")?.uri ?? "";
+  const { editor: textEditor, openNew: openNewText, openEdit: editText, finish: finishText, cancel: cancelText } = useTextEditing(currentTime);
+
+  // Keep the shared store in step (tool panels read currentTime/isPlaying from it).
+  useEffect(() => {
+    dispatch(setCurrentTime(currentTime));
+  }, [currentTime, dispatch]);
+  useEffect(() => {
+    dispatch(setIsPlaying(isPlaying));
+  }, [isPlaying, dispatch]);
+
+  // Stop playback when another screen covers the editor.
+  const isFocused = useIsFocused();
+  const { pause: pauseSequence } = sequence;
+  useEffect(() => {
+    if (!isFocused) pauseSequence();
+  }, [isFocused, pauseSequence]);
 
   // Initialize editor state from params
+  // Opened from the preview, the session's clips are already in the store.
+  // Legacy entry points still pass clips as a param.
+  const hasSessionClips = useRef(clips.length > 0).current;
   useEffect(() => {
-    if (params.clips) {
+    if (params.clips && !hasSessionClips) {
       try {
         const parsedClips = JSON.parse(params.clips as string);
         parsedClips.forEach((clip: any) => {
@@ -151,22 +139,16 @@ export default function EditScreen() {
             })
           );
         });
-      } catch (e) {
-        console.error("[EditScreen] Failed to parse clips:", e);
+      } catch (e) { /* intentionally ignored */
       }
     }
 
     return () => {
       // Cleanup on unmount
     };
-  }, [params.clips, dispatch]);
+  }, [params.clips, dispatch, hasSessionClips]);
 
-  // Handle cleanup on unmount
-  useEffect(() => {
-    return () => {
-      dispatch(resetEditor());
-    };
-  }, [dispatch]);
+  // The editorSlice is not reset on close: the preview owns the session and keeps the edits.
 
   // Format time display (mm:ss)
   const formatTime = (seconds: number) => {
@@ -175,51 +157,49 @@ export default function EditScreen() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  // Handle play/pause
-  const togglePlayPause = useCallback(() => {
-    if (player) {
-      if (isPlaying) {
-        player.pause();
-        dispatch(setIsPlaying(false));
-      } else {
-        player.play();
-        dispatch(setIsPlaying(true));
-      }
-    }
-  }, [player, isPlaying, dispatch]);
+  const togglePlayPause = sequence.toggle;
 
   // Handle tool selection
   const handleToolSelect = useCallback(
     (tool: ToolId) => {
+      // Text uses the same full-screen editor as the preview screen.
+      if (tool === "text") {
+        setSelectedTool(null);
+        openNewText();
+        return;
+      }
       setSelectedTool(tool === selectedTool ? null : tool);
     },
-    [selectedTool]
+    [selectedTool, openNewText]
   );
 
-  // Handle adding clip from gallery
+  // Add a video or photo from the gallery (true duration in seconds, rotation normalised).
+  const [importingClip, setImportingClip] = useState(false);
   const handleAddClip = useCallback(async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ["videos", "images"],
         allowsEditing: false,
         quality: 1,
       });
+      const asset = result.canceled ? undefined : result.assets?.[0];
+      if (!asset) return;
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const asset = result.assets[0];
-        dispatch(
-          addClip({
-            id: `clip-${Date.now()}`,
-            uri: asset.uri,
-            duration: asset.duration || 1,
-            type: "video",
-            source: "gallery",
-          })
-        );
-      }
-    } catch (error) {
-      console.error("[EditScreen] Add clip error:", error);
-      Alert.alert("Error", "Failed to add clip from gallery");
+      setImportingClip(true);
+      const media = await importGalleryAsset(asset);
+      dispatch(
+        addClip({
+          id: `clip-${Date.now()}`,
+          uri: media.uri,
+          duration: media.duration,
+          type: media.type,
+          source: "gallery",
+        })
+      );
+    } catch (error: any) {
+      Alert.alert("Couldn't add this clip", error?.message ?? "Please try another one.");
+    } finally {
+      setImportingClip(false);
     }
   }, [dispatch]);
 
@@ -227,12 +207,12 @@ export default function EditScreen() {
   const handleAddAudio = useCallback(
     (audioTrack: any) => {
       dispatch(
-        addAudioTrack({
+        setMusic({
           id: `audio-${Date.now()}`,
           trackId: audioTrack._id,
           title: audioTrack.title,
           artist: audioTrack.artist,
-          url: audioTrack.url,
+          url: audioTrack.url ?? audioTrack.audioUrl,
           startTime: currentTime,
           duration: audioTrack.duration,
           volume: 0.8,
@@ -243,18 +223,6 @@ export default function EditScreen() {
       );
     },
     [currentTime, dispatch]
-  );
-
-  // Handle adding text
-  const handleAddText = useCallback(
-    (textOverlay: Omit<TextOverlay, "id">) => {
-      const newTextOverlay: TextOverlay = {
-        ...textOverlay,
-        id: `text-${Date.now()}`,
-      };
-      setTextOverlays([...textOverlays, newTextOverlay]);
-    },
-    [textOverlays]
   );
 
   // Handle adding voice recording
@@ -278,25 +246,18 @@ export default function EditScreen() {
     [currentTime, dispatch]
   );
 
-  // Handle captions generated
-  const handleCaptionsGenerated = useCallback((generatedCaptions: Caption[]) => {
-    setCaptions(generatedCaptions);
-  }, []);
+  const handleCaptionsGenerated = useCallback(
+    (generated: Caption[]) => dispatch(setCaptions(generated.map((c) => ({ ...c, type: "caption" as const })))),
+    [dispatch]
+  );
 
-  // Handle adjustments change
-  const handleAdjustmentsChange = useCallback((newAdjustments: VideoAdjustments) => {
-    setAdjustments(newAdjustments);
-  }, []);
-
-  // Handle filter change
-  const handleFilterChange = useCallback((newFilter: VideoFilter) => {
-    setFilter(newFilter);
-  }, []);
-
-  // Handle doodles change
-  const handleDoodlesChange = useCallback((newDoodles: DoodlePath[]) => {
-    setDoodles(newDoodles);
-  }, []);
+  // Doodle drawing is rebuilt in a later step; for now only "clear all" reaches the store.
+  const handleDoodlesChange = useCallback(
+    (paths: unknown[]) => {
+      if (paths.length === 0) dispatch(setDoodles([]));
+    },
+    [dispatch]
+  );
 
   // Handle adding sound FX
   const handleAddSoundFX = useCallback(
@@ -322,14 +283,46 @@ export default function EditScreen() {
 
   // Handle adding sticker
   const handleAddSticker = useCallback(
-    (sticker: Omit<StickerItem, "id">) => {
-      const newSticker: StickerItem = {
-        ...sticker,
-        id: `sticker-${Date.now()}`,
-      };
-      setStickers([...stickers, newSticker]);
+    (sticker: Omit<PanelSticker, "id">) => {
+      dispatch(
+        addSticker({
+          id: `sticker-${Date.now()}`,
+          type: "sticker",
+          name: sticker.name,
+          imageUrl: sticker.imageUrl,
+          category: sticker.category,
+          x: 0.5,
+          y: 0.45,
+          scale: 1,
+          rotation: 0,
+          size: 0.3,
+          startTime: currentTime,
+          endTime: null,
+        })
+      );
     },
-    [stickers]
+    [currentTime, dispatch]
+  );
+
+  /** Layers shown as blocks on the timeline's overlay row. */
+  const totalLength = clips.reduce(
+    (sum: number, clip: any) => sum + ((clip.trimEnd ?? clip.duration) - (clip.trimStart ?? 0)),
+    0
+  );
+  const layers = [
+    ...texts.map((t: any) => ({ id: t.id, kind: "text" as LayerKind, label: t.text, startTime: t.startTime, endTime: t.endTime ?? totalLength })),
+    ...stickers.map((t: any) => ({ id: t.id, kind: "sticker" as LayerKind, label: t.name, startTime: t.startTime, endTime: t.endTime ?? totalLength })),
+    ...doodles.map((t: any) => ({ id: t.id, kind: "doodle" as LayerKind, label: "Doodle", startTime: t.startTime, endTime: t.endTime ?? totalLength })),
+    ...captions.map((t: any) => ({ id: t.id, kind: "caption" as LayerKind, label: t.text, startTime: t.startTime, endTime: t.endTime })),
+  ];
+  const deleteLayer = useCallback(
+    (id: string, kind: LayerKind) => {
+      if (kind === "text") dispatch(removeText(id));
+      else if (kind === "sticker") dispatch(removeSticker(id));
+      else if (kind === "doodle") dispatch(removeDoodle(id));
+      else dispatch(setCaptions(captions.filter((c: any) => c.id !== id)));
+    },
+    [dispatch, captions]
   );
 
   // Handle adding overlay
@@ -341,15 +334,16 @@ export default function EditScreen() {
           type: overlay.type as "sticker" | "image" | "shape",
           uri: overlay.uri,
           startTime: overlay.startTime,
-          duration: overlay.duration,
+          // The panel sends start/end times; the store keeps a duration.
+          duration: Math.max(0, overlay.endTime - overlay.startTime),
           x: overlay.x || 0,
           y: overlay.y || 0,
           width: overlay.width || 100,
           height: overlay.height || 100,
           rotation: overlay.rotation || 0,
           opacity: overlay.opacity || 1,
-          scaleX: overlay.scaleX || 1,
-          scaleY: overlay.scaleY || 1,
+          scaleX: 1,
+          scaleY: 1,
         })
       );
     },
@@ -371,77 +365,10 @@ export default function EditScreen() {
     dispatch(redo());
   }, [dispatch]);
 
-  // Handle export/next
-  const handleNext = async () => {
-    if (clips.length === 0) {
-      Alert.alert("No clips", "Please add at least one clip before exporting.");
-      return;
-    }
-
-    setIsExporting(true);
-    setExportProgress({
-      stage: "compositing",
-      progress: 0,
-      message: "Starting export...",
-    });
-
-    try {
-      // Calculate total duration
-      const totalDuration = clips.reduce(
-        (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
-        0
-      );
-
-      // Export video with all layers and effects
-      const exportedUri = await exportVideo(
-        {
-          clips,
-          audioClips: audioTracks,
-          textOverlays,
-          captions,
-          adjustments,
-          filter,
-          doodles,
-          stickers,
-          overlays,
-          cutoutSettings,
-          quality: hdEnabled ? "1080p" : "720p",
-        },
-        (progress) => {
-          setExportProgress(progress as any);
-        }
-      );
-
-      const competitionId = params.competitionId
-        ? String(params.competitionId)
-        : null;
-      const competitionName = params.competitionName
-        ? String(params.competitionName)
-        : null;
-      const entryFee = params.entryFee ? String(params.entryFee) : null;
-
-      // Navigate to post screen with edited video
-      router.push({
-        pathname: "/(main)/upload/post",
-        params: {
-          clips: JSON.stringify([{ ...clips[0], uri: exportedUri }]),
-          ...(competitionId && { competitionId }),
-          ...(competitionName && { competitionName }),
-          ...(entryFee && { entryFee }),
-        },
-      });
-    } catch (error) {
-      console.error("[EditScreen] Export error:", error);
-      Alert.alert(
-        "Export failed",
-        error instanceof Error
-          ? error.message
-          : "Could not process this video. Please try again."
-      );
-    } finally {
-      setIsExporting(false);
-      setExportProgress(null);
-    }
+  // Done: the edits already live in the shared editorSlice, so just return to the preview.
+  // Export happens on the preview's Next, never here.
+  const handleDone = () => {
+    router.back();
   };
 
   return (
@@ -480,49 +407,29 @@ export default function EditScreen() {
 
           <TouchableOpacity
             style={styles.nextButton}
-            onPress={handleNext}
-            disabled={isExporting || clips.length === 0}
+            onPress={handleDone}
+            disabled={clips.length === 0}
           >
-            {isExporting ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <>
-                <Text style={styles.nextButtonText}>Next</Text>
-                <Ionicons name="chevron-forward" size={16} color="#000" />
-              </>
-            )}
+            <Text style={styles.nextButtonText}>Done</Text>
+            <Ionicons name="chevron-forward" size={16} color="#000" />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
 
       {/* Video Preview */}
       <View style={styles.videoContainer}>
-        <View style={styles.videoWrapper}>
-          {currentVideoUri ? (
+        <View style={[styles.videoWrapper, { aspectRatio: frameAspect }]}>
+          {sequence.clip ? (
             <VideoPreviewWithOverlays
-              player={player}
+              player={sequence.player}
+              photoUri={sequence.clip.type === "photo" ? sequence.clip.uri : undefined}
               currentTime={currentTime}
-              captions={captions}
-              filter={filter}
-              adjustments={adjustments}
-              doodles={doodles}
-              stickers={stickers}
               overlays={overlays}
               cutoutSettings={cutoutSettings}
-              selectedTool={selectedTool}
-              isDrawingMode={isDrawingMode && selectedTool === "doodles"}
-              doodleBrushColor={doodleBrushColor}
-              doodleBrushSize={doodleBrushSize}
-              onDoodleComplete={(doodle: any) => {
-                setDoodles([...doodles, doodle]);
-              }}
-              onStickerUpdate={(updatedSticker: any) => {
-                setStickers(
-                  stickers.map((s) =>
-                    s.id === updatedSticker.id ? updatedSticker : s
-                  )
-                );
-              }}
+              trashTop={trashTop}
+              hiddenTextId={textEditor?.id}
+              onEditText={editText}
+              onDragChange={(dragging, overTrash) => setDrag({ dragging, overTrash })}
             />
           ) : (
             <View style={styles.videoPlaceholder}>
@@ -533,52 +440,46 @@ export default function EditScreen() {
         </View>
       </View>
 
-      {/* Timeline */}
-      <TimelineContainer
-        clips={clips}
-        overlays={overlays}
-        audioTracks={audioTracks}
-        texts={texts}
-        currentTime={currentTime}
-        isPlaying={isPlaying}
-        selectedItemId={selectedItemId}
-        canUndo={undoStack.length > 0}
-        canRedo={redoStack.length > 0}
-        onAddClip={handleAddClip}
-        onSelectClip={(clipId: string) => dispatch(setSelectedItemId(clipId))}
-        onDeleteClip={(clipId: string) => dispatch(removeClip(clipId))}
-        onSelectOverlay={(overlayId: string) => dispatch(setSelectedItemId(overlayId))}
-        onDeleteOverlay={(overlayId: string) => dispatch(removeOverlay(overlayId))}
-        onSelectAudio={(trackId: string) => dispatch(setSelectedItemId(trackId))}
-        onDeleteAudio={(trackId: string) => dispatch(removeAudioTrack(trackId))}
-        onSelectText={(textId: string) => dispatch(setSelectedItemId(textId))}
-        onDeleteText={(textId: string) => dispatch(removeText(textId))}
-        onPlayPress={togglePlayPause}
-        onUndoPress={performUndo}
-        onRedoPress={performRedo}
-        onTimeChange={(time: number) => dispatch(setCurrentTime(time))}
-      />
+      {/* Fixed-height timeline, then the toolbar pinned to the bottom (photos too). */}
+      <>
+          <TimelineContainer
+            clips={clips}
+            overlays={overlays}
+            audioTracks={audioTracks}
+            layers={layers}
+            currentTime={currentTime}
+            isPlaying={isPlaying}
+            selectedItemId={selectedItemId}
+            canUndo={undoStack.length > 0}
+            canRedo={redoStack.length > 0}
+            onAddClip={handleAddClip}
+            onSelectClip={(clipId: string) => dispatch(setSelectedItemId(clipId))}
+            onDeleteClip={(clipId: string) => dispatch(removeClip(clipId))}
+            onSelectOverlay={(overlayId: string) => dispatch(setSelectedItemId(overlayId))}
+            onDeleteOverlay={(overlayId: string) => dispatch(removeOverlay(overlayId))}
+            onSelectAudio={(trackId: string) => dispatch(setSelectedItemId(trackId))}
+            onDeleteAudio={(trackId: string) => dispatch(removeAudioTrack(trackId))}
+            onSelectLayer={(id: string) => dispatch(setSelectedItemId(id))}
+            onDeleteLayer={deleteLayer}
+            onPlayPress={togglePlayPause}
+            onUndoPress={performUndo}
+            onRedoPress={performRedo}
+            onTimeChange={sequence.seek}
+            onScrubStart={sequence.pause}
+          />
 
-      {/* Bottom Toolbar */}
-      <BottomToolbar selectedTool={selectedTool} onSelectTool={handleToolSelect} />
+          <BottomToolbar selectedTool={selectedTool} onSelectTool={handleToolSelect} />
+      </>
 
       {/* Tool-specific panels */}
       {selectedTool === "audio" && (
-        <AudioToolPanel
-          onClose={() => setSelectedTool(null)}
-          onAddAudio={handleAddAudio}
-        />
-      )}
-
-      {selectedTool === "text" && (
-        <TextToolPanel
-          onClose={() => setSelectedTool(null)}
-          onAddText={handleAddText}
-          videoDuration={clips.reduce(
-            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
-            0
-          )}
-          currentTime={currentTime}
+        <MusicLibraryModal
+          visible
+          onCancel={() => setSelectedTool(null)}
+          onSelect={(track) => {
+            handleAddAudio(track);
+            setSelectedTool(null);
+          }}
         />
       )}
 
@@ -595,27 +496,27 @@ export default function EditScreen() {
           onClose={() => setSelectedTool(null)}
           onCaptionsGenerated={handleCaptionsGenerated}
           videoUri={currentVideoUri}
-          videoDuration={clips.reduce(
-            (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
-            0
-          )}
+          videoDuration={totalLength}
+          initialCaptions={captions}
         />
       )}
 
       {selectedTool === "adjust" && (
         <AdjustToolPanel
           onClose={() => setSelectedTool(null)}
-          onAdjustmentsChange={handleAdjustmentsChange}
-          initialAdjustments={adjustments}
+          onAdjustmentsChange={(next) => dispatch(setAdjust(next))}
+          initialAdjustments={adjust}
         />
       )}
 
-      {selectedTool === "filters" && (
-        <FiltersToolPanel
-          onClose={() => setSelectedTool(null)}
-          onFilterChange={handleFilterChange}
-          currentFilter={filter}
-          videoThumbnail={clips[0]?.thumbnail}
+      {selectedTool === "filters" && clips[0] && (
+        <FilterSheet
+          mediaType={clips[0].type === "photo" ? "photo" : "video"}
+          sourceUri={clips[0].uri}
+          filter={filter}
+          bottomInset={insets.bottom}
+          onChange={(next) => dispatch(setFilter(next))}
+          onDone={() => setSelectedTool(null)}
         />
       )}
 
@@ -631,7 +532,7 @@ export default function EditScreen() {
             (sum: number, clip: any) => sum + ((clip.trimEnd || clip.duration) - (clip.trimStart || 0)),
             0
           )}
-          initialDoodles={doodles}
+          initialDoodles={[]}
           isDrawingMode={isDrawingMode}
           onDrawingModeChange={setIsDrawingMode}
           brushColor={doodleBrushColor}
@@ -682,36 +583,24 @@ export default function EditScreen() {
         />
       )}
 
-      {/* Export Progress Modal */}
-      {exportProgress && (
+      {drag.dragging && <TrashZone bottomInset={insets.bottom} active={drag.overTrash} />}
+
+      {textEditor && (
+        <TextEditorOverlay
+          initial={textEditor.draft}
+          topInset={insets.top}
+          onDone={finishText}
+          onCancel={cancelText}
+        />
+      )}
+
+      {importingClip && (
         <View style={styles.exportModal}>
-          <View style={styles.exportModalContent}>
-            <Text style={styles.exportModalTitle}>
-              {exportProgress.stage === "compositing"
-                ? "Compositing Layers"
-                : exportProgress.stage === "rendering"
-                ? "Rendering Video"
-                : exportProgress.stage === "uploading"
-                ? "Uploading"
-                : "Complete!"}
-            </Text>
-            <Text style={styles.exportModalMessage}>
-              {exportProgress.message}
-            </Text>
-            <View style={styles.progressBarContainer}>
-              <View
-                style={[
-                  styles.progressBar,
-                  { width: `${exportProgress.progress}%` },
-                ]}
-              />
-            </View>
-            <Text style={styles.progressText}>
-              {exportProgress.progress.toFixed(0)}%
-            </Text>
-          </View>
+          <ActivityIndicator color="#fff" size="large" />
+          <Text style={styles.exportModalMessage}>Preparing clip...</Text>
         </View>
       )}
+
     </View>
   );
 }
@@ -790,14 +679,17 @@ const styles = StyleSheet.create({
   },
 
   // Video Preview
+  // Takes the space left between the top bar and the timeline; the 9:16 preview fits inside.
   videoContainer: {
+    flex: 1,
     alignItems: "center",
-    paddingVertical: 16,
+    justifyContent: "center",
+    paddingVertical: 12,
   },
   videoWrapper: {
-    width: SCREEN_WIDTH * 0.5,
+    height: "100%",
     aspectRatio: 9 / 16,
-    borderRadius: 16,
+    borderRadius: PREVIEW_RADIUS,
     overflow: "hidden",
     backgroundColor: "#1a1a1a",
   },

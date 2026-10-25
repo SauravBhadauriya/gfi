@@ -1,35 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router'; 
+import { useState } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { useRouter } from 'expo-router';
 import Svg, { Path } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getTermsAndConditions } from '@/api/services/cmsService';
+import { LegalDocument } from "@/components/legal/LegalDocument";
+import { TERMS_OF_SERVICE, TERMS_OF_SERVICE_TITLE } from "@/content/legal/termsOfService";
 
 export default function TermsAndConditions() {
   const router = useRouter(); 
   const [isPressed, setIsPressed] = useState(false);
-  const [content, setContent] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(true);
-
-  useEffect(() => {
-    const fetchTerms = async () => {
-      try {
-        setLoading(true);
-        const result = await getTermsAndConditions();
-        if (result.success && result.data) {
-          const termsContent = result.data.termsAndConditions || result.data.content || '';
-          setContent(termsContent);
-        }
-      } catch (error) {
-        console.error('Error fetching terms and conditions:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTerms();
-  }, []);
-
   const handleAgree = async () => {
     try {
       
@@ -37,7 +16,6 @@ export default function TermsAndConditions() {
       
       router.back();
     } catch (error) {
-      console.error("Error saving terms acceptance:", error);
       
       router.back();
     }
@@ -63,15 +41,7 @@ export default function TermsAndConditions() {
 
       {}
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#3C2610" />
-          </View>
-        ) : (
-          <Text style={styles.termsText}>
-            {content || 'No terms and conditions available.'}
-          </Text>
-        )}
+        <LegalDocument title={TERMS_OF_SERVICE_TITLE} sections={TERMS_OF_SERVICE} />
       </ScrollView>
 
       {}

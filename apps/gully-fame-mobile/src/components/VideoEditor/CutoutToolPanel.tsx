@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 export interface CutoutSettings {
   enabled: boolean;
@@ -69,7 +70,11 @@ export default function CutoutToolPanel({
 
   const pickBackgroundImage = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Photo library access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission Required",
@@ -90,7 +95,6 @@ export default function CutoutToolPanel({
         setBackgroundColor("image");
       }
     } catch (error) {
-      console.error("[CutoutToolPanel] Failed to pick image:", error);
       Alert.alert("Error", "Failed to select background image");
     } finally {
       setIsPickingImage(false);

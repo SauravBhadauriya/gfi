@@ -11,18 +11,20 @@ import { useRouter } from "expo-router";
 
 interface InsufficientBalanceModalProps {
   visible: boolean;
+  balance?: number;
   onDismiss: () => void;
 }
 
 export default function InsufficientBalanceModal({
   visible,
+  balance = 0,
   onDismiss,
 }: InsufficientBalanceModalProps) {
   const router = useRouter();
 
-  const handleAddFunds = () => {
+  const handleGoToWallet = () => {
     onDismiss();
-    router.push("/(main)/history" as any);
+    router.push("/(main)/coins" as any);
   };
 
   return (
@@ -56,7 +58,7 @@ export default function InsufficientBalanceModal({
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Current Balance</Text>
-              <Text style={styles.infoValue}>0</Text>
+              <Text style={styles.infoValue}>{balance.toLocaleString()}</Text>
             </View>
             <Text style={styles.infoSubtext}>GFI Coins</Text>
           </View>
@@ -65,10 +67,10 @@ export default function InsufficientBalanceModal({
           <View style={styles.buttonContainer}>
             <TouchableOpacity
               style={styles.addFundsButton}
-              onPress={handleAddFunds}
+              onPress={handleGoToWallet}
             >
-              <Ionicons name="add-circle" size={20} color="#fff" />
-              <Text style={styles.addFundsButtonText}>Add Funds</Text>
+              <Ionicons name="wallet-outline" size={20} color="#fff" />
+              <Text style={styles.addFundsButtonText}>Go to Wallet</Text>
             </TouchableOpacity>
 
             <TouchableOpacity

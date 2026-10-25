@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -14,73 +14,46 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
-import { BackIcon } from "@/icons"; 
+import { BackIcon } from "@/icons";
+import { LegalDocument } from "@/components/legal/LegalDocument";
+import { useFaqSections, useSupportContact } from "@/hooks/useCmsContent";
 
 
-interface FAQItem {
-  id: number;
-  question: string;
-  answer: string;
-}
-
-const faqsData: FAQItem[] = [
-  {
-    id: 1,
-    question: "How do I earn money/coins in Gully Fame?",
-    answer: "Aap live competitions me bhaag lekar, accha content upload karke aur doston ko apne Referral Code se join karwa kar genuine cash aur coins earn kar sakte hain.",
-  },
-  {
-    id: 2,
-    question: "Why is my KYC verification taking time?",
-    answer: "Aamtaur par KYC review me 24 se 48 ghante lagte hain. Agar aapke documents dundhle (blur) hain, toh usme thoda zyada samay lag sakta hai.",
-  },
-  {
-    id: 3,
-    question: "Money deducted but not credited in wallet?",
-    answer: "Ghabraiye nahi! Kabhi-kabhi payment gateway ki wajah se delay hota hai. 2-3 ghante me amount auto-credit ho jayega. Nahi toh aap niche diye gaye WhatsApp support par transaction screenshot bhej sakte hain.",
-  },
-  {
-    id: 4,
-    question: "What are the rules for video submission?",
-    answer: "Aapka content original hona chahiye. Kisi bhi tarah ka copyright music ya abusive content upload karne par account ban kiya ja sakta hai.",
-  },
-];
+// Support contacts. The email is the official support address. The WhatsApp number is
+// not known yet: leave it empty and the WhatsApp button shows "not available yet".
+const DEFAULT_SUPPORT_EMAIL = "admin@gullyfame.com";
+const DEFAULT_SUPPORT_WHATSAPP: string = "+91 98212 34605";
 
 export default function HelpSupportScreen() {
-  const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
-
-  const toggleFaq = (id: number) => {
-    setExpandedFaq(expandedFaq === id ? null : id);
-  };
-
+  // Contact details and FAQs are managed in the admin panel; the constants above are the fallback.
+  const contact = useSupportContact();
+  const faqs = useFaqSections();
+  const SUPPORT_EMAIL = contact.email?.trim() || DEFAULT_SUPPORT_EMAIL;
+  const SUPPORT_WHATSAPP_NUMBER = contact.whatsapp?.trim() || DEFAULT_SUPPORT_WHATSAPP;
   const handleEmailSupport = async () => {
-    const emailUrl = "mailto:support@gullyfame.com?subject=Gully Fame Support Request";
+    const emailUrl = `mailto:${SUPPORT_EMAIL}?subject=Gully%20Fame%20Support%20Request`;
     try {
-      const canOpen = await Linking.canOpenURL(emailUrl);
-      if (canOpen) {
+      if (await Linking.canOpenURL(emailUrl)) {
         await Linking.openURL(emailUrl);
       } else {
-        Alert.alert("Error", "No email app installed on this device.");
+        Alert.alert("Email not available", `No email app is set up on this device. Write to ${SUPPORT_EMAIL}.`);
       }
-    } catch (err) {
-      Alert.alert("Error", "Could not launch Email application.");
+    } catch {
+      Alert.alert("Email not available", `Could not open your email app. Write to ${SUPPORT_EMAIL}.`);
     }
   };
 
   const handleWhatsAppSupport = async () => {
+    if (!SUPPORT_WHATSAPP_NUMBER) {
+      Alert.alert("WhatsApp not available yet", "WhatsApp support isn't set up yet. Please use email instead.");
+      return;
+    }
     const message = "Hello Gully Fame Support, I need assistance with my account.";
-    const whatsappUrl = `whatsapp://send?phone=+919999999999&text=${encodeURIComponent(message)}`;
-    
+    const digits = SUPPORT_WHATSAPP_NUMBER.replace(/\D/g, "");
     try {
-      const canOpen = await Linking.canOpenURL(whatsappUrl);
-      if (canOpen) {
-        await Linking.openURL(whatsappUrl);
-      } else {
-        
-        await Linking.openURL(`https://wa.me/919999999999?text=${encodeURIComponent(message)}`);
-      }
-    } catch (err) {
-      Alert.alert("Error", "Could not open WhatsApp.");
+      await Linking.openURL(`https://wa.me/${digits}?text=${encodeURIComponent(message)}`);
+    } catch {
+      Alert.alert("WhatsApp not available", "Could not open WhatsApp on this device.");
     }
   };
 
@@ -116,7 +89,7 @@ export default function HelpSupportScreen() {
               <FontAwesome5 name="whatsapp" size={24} color="#25D366" />
             </View>
             <Text style={styles.contactText}>WhatsApp Chat</Text>
-            <Text style={styles.contactTiming}>24x7 Support</Text>
+            <Text style={styles.contactTiming}>{SUPPORT_WHATSAPP_NUMBER ? "Chat with us" : "Not available yet"}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.contactCard} onPress={handleEmailSupport} activeOpacity={0.8}>
@@ -124,38 +97,13 @@ export default function HelpSupportScreen() {
               <Ionicons name="mail-outline" size={24} color="#EC9A15" />
             </View>
             <Text style={styles.contactText}>Email Us</Text>
-            <Text style={styles.contactTiming}>Reply in 12 hours</Text>
+            <Text style={styles.contactTiming}>{SUPPORT_EMAIL}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* FAQs Accordion */}
+        {/* Same FAQ document as the FAQ screen, word for word */}
         <Text style={styles.sectionTitle}>FAQs</Text>
-        <View style={styles.faqList}>
-          {faqsData.map((item) => {
-            const isSelected = expandedFaq === item.id;
-            return (
-              <View key={item.id} style={styles.faqItem}>
-                <TouchableOpacity 
-                  style={styles.faqHeader} 
-                  onPress={() => toggleFaq(item.id)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.faqQuestion}>{item.question}</Text>
-                  <Ionicons 
-                    name={isSelected ? "chevron-up-circle" : "chevron-down-circle"} 
-                    size={20} 
-                    color="#EC9A15" 
-                  />
-                </TouchableOpacity>
-                {isSelected && (
-                  <View style={styles.faqAnswerBox}>
-                    <Text style={styles.faqAnswerText}>{item.answer}</Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
+        <LegalDocument title={[]} sections={faqs} accordion />
 
       </ScrollView>
     </View>

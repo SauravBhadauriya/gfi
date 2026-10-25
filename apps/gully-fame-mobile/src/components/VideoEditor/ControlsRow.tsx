@@ -1,11 +1,5 @@
 import React, { useMemo } from "react";
-import {
-  View,
-  StyleSheet,
-  TouchableOpacity,
-  Text,
-  Dimensions,
-} from "react-native";
+import { View, StyleSheet, TouchableOpacity, Text } from "react-native";
 import { MaterialIcons, Ionicons } from "@expo/vector-icons";
 
 interface ControlsRowProps {
@@ -61,8 +55,9 @@ const ControlsRow: React.FC<ControlsRowProps> = ({
 
       {/* Center: Time display */}
       <View style={styles.centerSection}>
-        <Text style={styles.currentTimeText}>{currentTimeStr}</Text>
-        <Text style={styles.durationText}>{durationStr}</Text>
+        {/* Fixed-width digits: Android clipped the last digit when the text width was re-measured. */}
+        <Text style={[styles.currentTimeText, styles.timeText]} numberOfLines={1}>{currentTimeStr}</Text>
+        <Text style={[styles.durationText, styles.timeText]} numberOfLines={1}>{durationStr}</Text>
       </View>
 
       {/* Right side: Undo/Redo */}
@@ -142,6 +137,11 @@ const styles = StyleSheet.create({
     color: "#888",
     fontSize: 12,
     marginTop: 2,
+  },
+  timeText: {
+    minWidth: 72,
+    textAlign: "center",
+    fontVariant: ["tabular-nums"],
   },
   rightSection: {
     flexDirection: "row",

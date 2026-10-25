@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -9,14 +9,15 @@ import {
   StatusBar,
   Platform,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import Svg, { Path } from "react-native-svg";
+import { getCategories, updateProfile, Category } from "@api/services/userService";
+import { getErrorMessage } from "@api/client";
 
 const { width } = Dimensions.get("window");
 
-const homeCategories = ["Dance", "Music", "Acting", "Comedy", "Fitness"];
-const fanInterests = ["Live Battles", "Workshops", "Creator Vlogs", "Behind the Scenes", "Music Drops"];
 
 export default function OnboardingSelectCategory() {
   const params = useLocalSearchParams();
@@ -28,16 +29,36 @@ export default function OnboardingSelectCategory() {
   const gender = params.gender ? decodeURIComponent(String(params.gender)) : "";
   const fromKycFlow = params.fromKycFlow === "true";
 
-  const options = useMemo(() => (role === "participant" ? homeCategories : fanInterests), [role]);
-
+  const [options, setOptions] = useState<Category[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
+
+  const loadCategories = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const data = await getCategories(1, 50);
+      setOptions(data.categories);
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
 
   const toggleOption = (item: string) => {
     setSelected((prev) => (prev.includes(item) ? prev.filter((value) => value !== item) : [...prev, item]));
   };
 
-  const handleContinue = async () => {
-    if (selected.length === 0) {
+  const handleContinue = async (picked: string[] = selected) => {
+    if (saving) return;
+    if (picked.length === 0) {
       Alert.alert(
         "Choose at least one",
         role === "participant"
@@ -47,6 +68,17 @@ export default function OnboardingSelectCategory() {
       return;
     }
 
+    // The user profile stores a single category id.
+    setSaving(true);
+    try {
+      await updateProfile({ categories: picked[0] });
+    } catch (error) {
+      Alert.alert("Could not save", getErrorMessage(error));
+      return;
+    } finally {
+      setSaving(false);
+    }
+
     const query = [
       `role=${encodeURIComponent(role)}`,
       `firstName=${encodeURIComponent(firstName)}`,
@@ -54,7 +86,7 @@ export default function OnboardingSelectCategory() {
       `email=${encodeURIComponent(email)}`,
       `dob=${encodeURIComponent(dob)}`,
       `gender=${encodeURIComponent(gender)}`,
-      `categories=${encodeURIComponent(JSON.stringify(selected))}`,
+      `categories=${encodeURIComponent(JSON.stringify(picked))}`,
       fromKycFlow ? `fromKycFlow=true` : '',
     ].filter(Boolean).join("&");
 
@@ -93,17 +125,30 @@ export default function OnboardingSelectCategory() {
           </Text>
         </View>
 
+        {loading ? (
+          <ActivityIndicator color="#EC9A15" style={{ marginVertical: 32 }} />
+        ) : loadError ? (
+          <TouchableOpacity onPress={loadCategories} style={{ marginVertical: 24 }}>
+            <Text style={[styles.cardText, { textAlign: "center" }]}>{loadError}</Text>
+            <Text style={[styles.cardHelper, { textAlign: "center", marginTop: 8 }]}>Tap to retry</Text>
+          </TouchableOpacity>
+        ) : options.length === 0 ? (
+          <Text style={[styles.cardText, { textAlign: "center", marginVertical: 24 }]}>
+            No categories are available yet.
+          </Text>
+        ) : null}
+
         <View style={styles.grid}>
           {options.map((item) => {
-            const isActive = selected.includes(item);
+            const isActive = selected.includes(item.id);
             return (
               <TouchableOpacity
-                key={item}
+                key={item.id}
                 style={[styles.card, isActive && styles.cardActive]}
-                onPress={() => toggleOption(item)}
+                onPress={() => toggleOption(item.id)}
                 activeOpacity={0.85}
               >
-                <Text style={[styles.cardText, isActive && styles.cardTextActive]}>{item}</Text>
+                <Text style={[styles.cardText, isActive && styles.cardTextActive]}>{item.label}</Text>
                 <Text style={[styles.cardHelper, isActive && styles.cardHelperActive]}>
                   {role === "participant" ? "Category" : "Interest"}
                 </Text>
@@ -112,8 +157,13 @@ export default function OnboardingSelectCategory() {
           })}
         </View>
 
-        <TouchableOpacity style={styles.primaryButton} activeOpacity={0.9} onPress={handleContinue}>
-          <Text style={styles.primaryButtonText}>Continue</Text>
+        <TouchableOpacity
+          style={styles.primaryButton}
+          activeOpacity={0.9}
+          onPress={() => handleContinue()}
+          disabled={saving}
+        >
+          {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Continue</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -121,8 +171,8 @@ export default function OnboardingSelectCategory() {
           activeOpacity={0.75}
           onPress={() => {
             if (selected.length === 0 && options.length > 0) {
-              setSelected([options[0]]);
-              setTimeout(handleContinue, 0);
+              setSelected([options[0].id]);
+              handleContinue([options[0].id]);
             } else {
               handleContinue();
             }

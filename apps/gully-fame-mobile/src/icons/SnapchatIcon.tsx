@@ -1,4 +1,4 @@
-import Svg, { G, Path, Rect } from "react-native-svg";
+import Svg, { Path, Rect } from "react-native-svg";
 export const SnapchatIcon = ({ size = 60 }) => {
   return (
     <Svg width={size} height={size} viewBox="0 0 32 32">

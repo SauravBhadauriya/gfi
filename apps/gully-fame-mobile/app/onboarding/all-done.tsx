@@ -1,15 +1,5 @@
-import React, { useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  ScrollView,
-  StatusBar,
-  Platform,
-  Image,
-} from "react-native";
+import { useEffect } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, StatusBar, Image } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import Svg, { Path } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";

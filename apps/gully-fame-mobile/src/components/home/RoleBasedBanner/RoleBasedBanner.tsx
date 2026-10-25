@@ -32,7 +32,7 @@ const RoleBasedBanner = ({ onLayout }: { onLayout?: (event: any) => void }) => {
           style={styles.bannerButton}
           onPress={() => {
             if (isParticipant) {
-              router.push("/(main)/competitions" as any);
+              router.push("/(main)/competitions/live" as any);
             } else {
               router.push("/(main)/account-center" as any);
             }

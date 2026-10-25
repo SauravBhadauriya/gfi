@@ -1,30 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Dimensions,
-  StatusBar,
-  Platform,
-  Image,
-  Animated,
-  Alert,
-  ActivityIndicator,
-} from "react-native";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, StatusBar, Platform, Animated, ActivityIndicator } from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path } from "react-native-svg";
 import { BackIcon } from "@/icons";
 import {
-  getNotifications,
+  fetchNotifications as fetchNotificationsPage,
   markNotificationAsRead,
   markAllNotificationsAsRead,
-  deleteNotification,
-  getUnreadNotificationCount,
   type Notification,
 } from "@/api/services/notificationIntegrationService";
+import { getErrorMessage } from "@/api/client";
+import { showToast, toastError, toastSuccess } from "@/components/ui/Toast";
 
 
 const getDimensions = () => Dimensions.get("window");
@@ -60,7 +47,7 @@ export default function NotificationsScreen() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [marking, setMarking] = useState<string | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const deleting: string | null = null;
   const [markingAll, setMarkingAll] = useState(false);
 
   
@@ -79,148 +66,57 @@ export default function NotificationsScreen() {
     }, [])
   );
 
-  const fetchNotifications = async () => {
-    try {
-      setLoading(true);
-      const response = await getNotifications(100, 0, false);
-      if (response.success && response.data) {
-        setNotifications(response.data);
-      } else {
-        Alert.alert("Error", response.message || "Failed to load notifications");
-      }
+  const [loadError, setLoadError] = useState("");
 
-      
-      const countResponse = await getUnreadNotificationCount();
-      if (countResponse.success) {
-        setUnreadCount(countResponse.data?.count || 0);
-      }
-    } catch (error: any) {
-      console.error("Error fetching notifications:", error);
-      Alert.alert("Error", "Failed to load notifications");
+  // time=0 returns every notification plus the total unread count;
+  // the Today / Past tabs split the list by date on the device.
+  const fetchNotifications = async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const page = await fetchNotificationsPage(0, 1, 100);
+      setNotifications(page.notifications);
+      setUnreadCount(page.unreadCount);
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
   };
 
   const handleMarkAsRead = async (notificationId: string) => {
-    try {
-      setMarking(notificationId);
-      const response = await markNotificationAsRead(notificationId);
-      if (response.success) {
-        
-        setNotifications((prev) =>
-          prev.map((n) =>
-            n.id === notificationId ? { ...n, read: true } : n
-          )
-        );
-        
-        
-        const countResponse = await getUnreadNotificationCount();
-        if (countResponse.success) {
-          setUnreadCount(countResponse.data?.count || 0);
-        }
-
-        
-        navigateFromNotification(
-          notifications.find((n) => n.id === notificationId)
-        );
-      }
-    } catch (error: any) {
-      console.error("Error marking notification as read:", error);
-      Alert.alert("Error", "Failed to process notification");
-    } finally {
-      setMarking(null);
+    const target = notifications.find((n) => n.id === notificationId);
+    if (!target || target.read || marking) return;
+    setMarking(notificationId);
+    const response = await markNotificationAsRead(notificationId);
+    if (response.success) {
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)));
+      setUnreadCount((count) => Math.max(0, count - 1));
+    } else {
+      toastError(response.message);
     }
+    setMarking(null);
   };
 
   const handleMarkAllAsRead = async () => {
-    try {
-      setMarkingAll(true);
-      const response = await markAllNotificationsAsRead();
-      if (response.success) {
-        
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-        
-        
-        const countResponse = await getUnreadNotificationCount();
-        if (countResponse.success) {
-          setUnreadCount(countResponse.data?.count || 0);
-        }
-      } else {
-        Alert.alert("Error", response.message || "Failed to mark all as read");
-      }
-    } catch (error: any) {
-      console.error("Error marking all notifications as read:", error);
-      Alert.alert("Error", "Failed to mark all as read");
-    } finally {
-      setMarkingAll(false);
+    if (markingAll) return;
+    setMarkingAll(true);
+    const response = await markAllNotificationsAsRead();
+    if (response.success) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      setUnreadCount(0);
+      toastSuccess(response.message);
+    } else {
+      toastError(response.message);
     }
+    setMarkingAll(false);
   };
 
-  const handleDeleteNotification = async (notificationId: string) => {
-    try {
-      setDeleting(notificationId);
-      const response = await deleteNotification(notificationId);
-      if (response.success) {
-        
-        setNotifications((prev) => prev.filter((n) => n.id !== notificationId));
-        
-        
-        const countResponse = await getUnreadNotificationCount();
-        if (countResponse.success) {
-          setUnreadCount(countResponse.data?.count || 0);
-        }
-      } else {
-        Alert.alert("Error", response.message || "Failed to delete notification");
-      }
-    } catch (error: any) {
-      console.error("Error deleting notification:", error);
-      Alert.alert("Error", "Failed to delete notification");
-    } finally {
-      setDeleting(null);
-    }
+  // The backend has no endpoint to delete a notification.
+  const handleDeleteNotification = (_notificationId: string) => {
+    showToast("Deleting notifications isn't available yet.", "info");
   };
 
-  const navigateFromNotification = (notification: Notification | undefined) => {
-    if (!notification) return;
-
-    const { type, data } = notification;
-
-    switch (type) {
-      case "comment":
-        if (data?.reelId) {
-          router.push(`/(main)/reel/${data.reelId}`);
-        }
-        break;
-      case "like":
-        if (data?.reelId) {
-          router.push(`/(main)/reel/${data.reelId}`);
-        }
-        break;
-      case "follow":
-        if (data?.userId) {
-          router.push(`/(main)/profile/${data.userId}`);
-        }
-        break;
-      case "competition":
-        if (data?.competitionId) {
-          router.push(`/(main)/competition/${data.competitionId}`);
-        }
-        break;
-      case "tip":
-        if (data?.reelId) {
-          router.push(`/(main)/reel/${data.reelId}`);
-        }
-        break;
-      case "system":
-        
-        break;
-      default:
-        break;
-    }
-  };
-
-  
   useEffect(() => {
     Animated.spring(slideAnim, {
       toValue: activeTab === "Today" ? 0 : 1,
@@ -465,6 +361,13 @@ export default function NotificationsScreen() {
         {loading ? (
           <View style={{ flex: 1, justifyContent: "center", alignItems: "center", paddingTop: 40 }}>
             <ActivityIndicator size="large" color="#EC9A15" />
+          </View>
+        ) : loadError ? (
+          <View style={{ paddingTop: 40, alignItems: "center" }}>
+            <Text style={{ color: "#999", fontSize: 15, textAlign: "center" }}>{loadError}</Text>
+            <TouchableOpacity onPress={fetchNotifications} style={{ marginTop: 12 }}>
+              <Text style={{ color: "#EC9A15", fontSize: 15 }}>Retry</Text>
+            </TouchableOpacity>
           </View>
         ) : currentNotifications.length === 0 ? (
           <View style={{ paddingTop: 40, alignItems: "center" }}>

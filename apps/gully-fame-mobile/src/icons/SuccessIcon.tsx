@@ -1,5 +1,5 @@
 import React from "react";
-import { Svg, Circle, Path, Rect, G, Defs, LinearGradient, Stop, Pattern, Image } from "react-native-svg";
+import { Svg, Rect, Defs, Pattern, Image } from "react-native-svg";
 
 export const SuccessIcon = ({ width = 75, height = 100 }) => (
   <Svg width={width} height={height} viewBox="0 0 75 100" fill="none">

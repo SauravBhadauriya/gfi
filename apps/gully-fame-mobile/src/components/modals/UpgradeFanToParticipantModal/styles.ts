@@ -36,10 +36,11 @@ export const styles = StyleSheet.create({
   },
   upgradeModalContainer: {
     width: "100%",
-    backgroundColor: "#1C1C1E",
+    backgroundColor: "#3C2610",
     borderRadius: 20,
     overflow: "hidden",
-
+    borderWidth: 1,
+    borderColor: "rgba(236, 154, 21, 0.3)",
     shadowColor: "#EC9A15",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -65,7 +66,7 @@ export const styles = StyleSheet.create({
     padding: 24,
   },
   upgradeBenefitsCard: {
-    backgroundColor: "#2A2A2D",
+    backgroundColor: "#2A1A0B",
     borderRadius: 16,
     padding: 20,
     marginBottom: 24,
@@ -90,7 +91,7 @@ export const styles = StyleSheet.create({
   upgradeBenefitText: {
     flexShrink: 1,
     fontSize: 16,
-    color: "#EBEBEB",
+    color: "#E5DCD0",
     lineHeight: 22,
     fontWeight: "500",
   },

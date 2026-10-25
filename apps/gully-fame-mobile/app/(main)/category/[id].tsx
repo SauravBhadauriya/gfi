@@ -1,35 +1,26 @@
 import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Dimensions,
-  ScrollView,
-  Image,
-  ImageBackground,
-  StatusBar,
-  Modal,
-  Animated,
-  Alert,
-} from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Image, ImageBackground, StatusBar, Modal, Animated } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path, G, Circle, Rect, Polygon } from "react-native-svg";
+import Svg, { Path, G, Circle, Rect } from "react-native-svg";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { getCategories } from "@/api/services/categoryService";
+import { getCategories } from "@/api/services/userService";
+import { getFollowedCategories, setCategoryFollowed } from "@/utils/followedCategories";
+import { TALENT_CATEGORIES } from "@/constants/talentCategories";
 
 const { width, height } = Dimensions.get("window");
 
+
+const matchTalent = (name?: string) => {
+  const n = String(name || "").trim().toLowerCase();
+  return TALENT_CATEGORIES.find((c) => c.key === n || c.name.toLowerCase() === n);
+};
 
 const defaultCategoryData = {
   name: "Category",
   tagline: "Explore amazing content",
   description: "Discover exciting content in this category",
   banner: require("@assets/images/carousel1.png"),
-  following: "0",
-  activeContests: 0,
-  topDancers: 0,
 };
 const CATEGORY_NAME_FIXES: Record<string, string> = {
   categor: "Category",
@@ -37,9 +28,11 @@ const CATEGORY_NAME_FIXES: Record<string, string> = {
   dancin: "Dance",
   dancing: "Dance",
   musi: "Music",
-  coo: "Cook",
-  cook: "Cook",
+  coo: "Talent",
+  cook: "Talent",
+  cooking: "Talent",
   comedy: "Comedy",
+  fitness: "Fitness",
 };
 
 const normalizeCategoryName = (name?: string) => {
@@ -57,114 +50,15 @@ const getStatusLabel = (status: "live" | "upcoming" | "past" | "all") => {
   return labels[status];
 };
 
-const sampleReels = [
-  { id: 1, thumbnail: require("@assets/images/trending1.png") },
-  { id: 2, thumbnail: require("@assets/images/trending2.png") },
-  { id: 3, thumbnail: require("@assets/images/trending3.png") },
-  { id: 4, thumbnail: require("@assets/images/trending1.png")},
-  { id: 5, thumbnail: require("@assets/images/trending2.png") },
-  { id: 6, thumbnail: require("@assets/images/trending3.png") },
-  { id: 7, thumbnail: require("@assets/images/trending1.png") },
-  { id: 8, thumbnail: require("@assets/images/trending2.png") },
-];
+const sampleReels: { id: number; thumbnail: any }[] = [];
 
-const liveCompetitions = [
-  { 
-    id: 1, 
-    title: "Street Style Showdown", 
-    prize: "₹23,000", 
-    participants: 142,
-    endDate: "2 days left",
-    image: require("@assets/images/trending1.png") 
-  },
-  { 
-    id: 2, 
-    title: "Bollywood Beat Battle", 
-    prize: "₹15,000", 
-    participants: 98,
-    endDate: "5 days left",
-    image: require("@assets/images/trending2.png") 
-  },
-];
+const liveCompetitions: any[] = [];
 
-const upcomingCompetitions = [
-  { 
-    id: 1, 
-    title: "Delhi Dance Clash", 
-    prize: "₹30,000",
-    startDate: "Dec 12",
-    entryFee: "Free Entry",
-    participants: 0,
-    image: require("@assets/images/trending3.png") 
-  },
-  { 
-    id: 2, 
-    title: "Music Mania 2024", 
-    prize: "₹20,000",
-    startDate: "Dec 18",
-    entryFee: "₹149 Entry Fee",
-    participants: 0,
-    image: require("@assets/images/trending1.png") 
-  },
-];
+const upcomingCompetitions: any[] = [];
 
-const pastCompetitions = [
-  { 
-    id: 1, 
-    title: "Summer Showdown 2024", 
-    winner: "Aman K.",
-    prize: "₹25,000",
-    participants: 256,
-    image: require("@assets/images/trending2.png") 
-  },
-  { 
-    id: 2, 
-    title: "Monsoon Madness", 
-    winner: "Priya S.",
-    prize: "₹18,000",
-    participants: 189,
-    image: require("@assets/images/trending3.png") 
-  },
-];
+const pastCompetitions: any[] = [];
 
-const topPerformers = [
-  { 
-    rank: 1, 
-    name: "Aman K.", 
-    points: 1245, 
-    image: require("@assets/images/user1.png"), 
-    wins: 12,
-    userId: "aman1",
-    firstName: "Aman",
-    lastName: "Kumar",
-    role: "participants",
-    bio: "Top performer",
-  },
-  { 
-    rank: 2, 
-    name: "Priya S.", 
-    points: 1180, 
-    image: require("@assets/images/user2.png"), 
-    wins: 10,
-    userId: "priya2",
-    firstName: "Priya",
-    lastName: "Sharma",
-    role: "participants",
-    bio: "Rising star",
-  },
-  { 
-    rank: 3, 
-    name: "Rohan V.", 
-    points: 1050, 
-    image: require("@assets/images/user1.png"), 
-    wins: 8,
-    userId: "rohan1",
-    firstName: "Rohan",
-    lastName: "Verma",
-    role: "participants",
-    bio: "Fan favorite",
-  },
-];
+const topPerformers: any[] = [];
 
 
 
@@ -280,36 +174,43 @@ CompetitionCard.displayName = 'CompetitionCard';
 export default function CategoryDetailScreen() {
   const params = useLocalSearchParams();
   const { id, tab } = params;
-  const categoryId = typeof id === 'string' ? parseInt(id, 10) : (Array.isArray(id) ? parseInt(id[0], 10) : (id as number));
+  // Category ids are backend ObjectId strings.
+  const categoryId = Array.isArray(id) ? String(id[0]) : String(id || "");
   const [category, setCategory] = useState(defaultCategoryData);
   const [allCategories, setAllCategories] = useState<any[]>([]);
   
   const [activeTab, setActiveTab] = useState(tab === "reels" ? "reels" : "competitions");
 
   
+  // Header comes from the fixed talent list; the backend only supplies a banner when ids match.
   useEffect(() => {
+    const applyLocal = (banner?: string) => {
+      const local = matchTalent(categoryId);
+      if (!local) return;
+      setCategory({
+        name: local.name,
+        tagline: local.tagline,
+        description: local.description,
+        banner: banner ? { uri: banner } : require("@assets/images/carousel1.png"),
+      });
+    };
+    applyLocal();
     const fetchCategoryData = async () => {
       try {
-        const result = await getCategories({ page: 1, limit: 50 });
-        if (result.success && result.data && result.data.items.length > 0) {
-          setAllCategories(result.data.items);
-          const foundCategory = result.data.items.find(
-            (cat: any) => parseInt(cat.id) === categoryId
-          );
-          if (foundCategory) {
-            setCategory({
-              name: foundCategory.name,
-              tagline: foundCategory.tagline || `${foundCategory.name} content`,
-              description: foundCategory.description || `Explore ${foundCategory.name}`,
-              banner: require("@assets/images/carousel1.png"), 
-              following: "0",
-              activeContests: 0,
-              topDancers: 0,
-            });
-          }
+        const data = await getCategories(1, 50);
+        setAllCategories(data.categories);
+        const found = data.categories.find((cat) => cat.id === categoryId);
+        if (found) {
+          const local = matchTalent(found.label);
+          setCategory({
+            name: local?.name || found.label,
+            tagline: local?.tagline || found.tagline || `${found.label} on Gully Fame`,
+            description: local?.description || found.description || `Explore ${found.label}`,
+            banner: found.banner ? { uri: found.banner } : require("@assets/images/carousel1.png"),
+          });
         }
-      } catch (error) {
-        console.error('Error fetching category:', error);
+      } catch {
+        // Keep the local header; the rest of the screen still works.
       }
     };
 
@@ -322,9 +223,14 @@ export default function CategoryDetailScreen() {
     }
   }, [tab]);
   const [isFollowing, setIsFollowing] = useState(false);
+  const talentKey = matchTalent(category.name)?.key;
+  useEffect(() => {
+    if (!talentKey) return;
+    getFollowedCategories().then((list) => setIsFollowing(list.includes(talentKey)));
+  }, [talentKey]);
   const [filterVisible, setFilterVisible] = useState(false);
-  const [selectedCategoryId, setSelectedCategoryId] = useState(id);
-  const [statusFilter, setStatusFilter] = useState<"live" | "past" | "upcoming" | "all">("live");
+  const [selectedCategoryId, setSelectedCategoryId] = useState(categoryId);
+  const [statusFilter, setStatusFilter] = useState<"live" | "past" | "upcoming" | "all">("all");
   
   
   const handleFilterChange = React.useCallback((status: "live" | "past" | "upcoming" | "all") => {
@@ -375,13 +281,13 @@ export default function CategoryDetailScreen() {
             style={styles.categoryDropdown}
             onPress={() => setFilterVisible(true)}
           >
-            <Text style={styles.categoryDropdownText}>{category.name}</Text>
+            <Text style={styles.categoryDropdownText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} ellipsizeMode="clip">{category.name}</Text>
             <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
               <Path d="M6 9l6 6 6-6" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
             </Svg>
           </TouchableOpacity>
           
-          <View style={{ width: 24 }} />
+          <View style={{ width: 40 }} />
         </View>
 
         {}
@@ -399,50 +305,19 @@ export default function CategoryDetailScreen() {
               <Text style={styles.heroTagline}>{category.tagline}</Text>
               <TouchableOpacity 
                 style={[styles.followBtn, isFollowing && styles.followingBtn]}
-                onPress={() => setIsFollowing(!isFollowing)}
+                onPress={() => {
+                  const next = !isFollowing;
+                  setIsFollowing(next);
+                  if (talentKey) setCategoryFollowed(talentKey, next);
+                }}
               >
-                <Text style={styles.followBtnText}>
+                <Text style={styles.followBtnText} numberOfLines={1} ellipsizeMode="clip">
                   {isFollowing ? "Following" : "Follow Category"}
                 </Text>
               </TouchableOpacity>
             </View>
           </LinearGradient>
         </ImageBackground>
-
-        {}
-        <View style={styles.statsSection}>
-          <View style={styles.statItem}>
-            <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
-              <Path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-              <Circle cx="9" cy="7" r="4" stroke="#EC9A15" strokeWidth={2}/>
-              <Path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-            </Svg>
-            <Text style={styles.statNumber}>{category.following}</Text>
-            <Text style={styles.statLabel}>Followers</Text>
-          </View>
-
-          <View style={[styles.statItem, styles.statItemCenter]}>
-            <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
-              <Path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-              <Path d="M4 22h16M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-              <Path d="M18 2H6v7a6 6 0 0 0 12 0V2z" stroke="#EC9A15" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"/>
-            </Svg>
-            <Text style={styles.statNumber}>{category.activeContests}</Text>
-            <Text style={styles.statLabel}>Competitions</Text>
-          </View>
-
-          <View style={styles.statItem}>
-            <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
-              <G>
-                <Path d="M17.33,5.67c-0.08-0.55-0.19-1.23-0.71-1.76c-0.53-0.52-1.21-0.63-1.76-0.71c-0.23-0.03-0.46-0.07-0.6-0.13 c-0.12-0.05-0.3-0.19-0.48-0.32C13.35,2.44,12.77,2,12,2s-1.35,0.44-1.78,0.76c-0.18,0.13-0.36,0.27-0.48,0.32 C9.6,3.13,9.37,3.17,9.14,3.2C8.59,3.28,7.91,3.39,7.39,3.91C6.86,4.44,6.76,5.12,6.67,5.67C6.64,5.9,6.6,6.13,6.55,6.27 C6.5,6.39,6.36,6.57,6.23,6.74C5.91,7.17,5.47,7.76,5.47,8.53s0.44,1.35,0.76,1.78c0.13,0.18,0.27,0.36,0.32,0.48 c0.06,0.14,0.09,0.37,0.13,0.6c0.08,0.55,0.19,1.23,0.71,1.76c0.53,0.52,1.21,0.63,1.76,0.71c0.23,0.03,0.46,0.07,0.6,0.13 c0.12,0.05,0.3,0.19,0.48,0.32c0.43,0.32,1.01,0.76,1.78,0.76c0.77,0,1.35-0.44,1.78-0.76c0.17-0.13,0.36-0.27,0.48-0.32 c0.14-0.06,0.37-0.09,0.6-0.13c0.55-0.08,1.23-0.19,1.76-0.71c0.53-0.52,0.63-1.21,0.71-1.76c0.03-0.23,0.07-0.46,0.13-0.6 c0.05-0.12,0.19-0.3,0.32-0.48c0.32-0.43,0.76-1.01,0.76-1.78s-0.44-1.35-0.76-1.78c-0.13-0.18-0.27-0.36-0.32-0.48 C17.4,6.13,17.36,5.9,17.33,5.67z M16.17,9.11c-0.2,0.26-0.42,0.56-0.56,0.91c-0.15,0.36-0.21,0.74-0.26,1.07 c-0.03,0.21-0.08,0.56-0.15,0.64c-0.08,0.07-0.43,0.12-0.64,0.15c-0.33,0.05-0.7,0.11-1.07,0.26c-0.35,0.15-0.65,0.37-0.91,0.56 c-0.17,0.13-0.48,0.36-0.58,0.36s-0.42-0.23-0.58-0.36c-0.26-0.2-0.56-0.42-0.91-0.56c-0.36-0.15-0.74-0.21-1.07-0.26 c-0.21-0.03-0.56-0.08-0.64-0.14c-0.07-0.08-0.12-0.44-0.15-0.65c-0.05-0.33-0.11-0.7-0.26-1.07C8.25,9.67,8.03,9.37,7.83,9.11 C7.71,8.94,7.47,8.63,7.47,8.53s0.23-0.42,0.36-0.58c0.2-0.26,0.42-0.56,0.56-0.91C8.54,6.67,8.6,6.3,8.65,5.97 C8.68,5.76,8.74,5.41,8.8,5.33c0.08-0.07,0.43-0.12,0.64-0.15c0.33-0.05,0.7-0.11,1.06-0.26c0.35-0.15,0.65-0.37,0.91-0.56 C11.58,4.23,11.9,4,12,4s0.42,0.23,0.58,0.36c0.26,0.2,0.56,0.42,0.91,0.56c0.36,0.15,0.74,0.21,1.07,0.26 c0.21,0.03,0.56,0.08,0.64,0.14c0.07,0.08,0.12,0.44,0.15,0.65c0.05,0.33,0.11,0.7,0.26,1.07c0.15,0.35,0.37,0.65,0.56,0.91 c0.13,0.17,0.36,0.48,0.36,0.58S16.29,8.94,16.17,9.11z" fill="#EC9A15"/>
-                <Path d="M2.76,17.97l3.51,0.88l1.04,2.53c0.13,0.31,0.41,0.54,0.74,0.6c0.33,0.06,0.68-0.05,0.91-0.3L12,18.46l3.04,3.23 c0.19,0.2,0.46,0.31,0.73,0.31c0.06,0,0.12-0.01,0.18-0.02c0.33-0.06,0.61-0.29,0.74-0.6l1.04-2.53l3.51-0.88 c0.37-0.09,0.65-0.38,0.73-0.75s-0.05-0.75-0.35-0.99l-2.95-2.38c-0.43-0.35-1.06-0.28-1.41,0.15c-0.35,0.43-0.28,1.06,0.15,1.41 l1.39,1.12l-2.05,0.51c-0.31,0.08-0.56,0.3-0.68,0.59l-0.65,1.57l-2.7-2.87c-0.38-0.4-1.08-0.4-1.46,0l-2.7,2.87l-0.65-1.57 c-0.12-0.29-0.37-0.51-0.68-0.59l-2.05-0.51l1.39-1.12c0.43-0.35,0.5-0.98,0.15-1.41c-0.35-0.43-0.97-0.5-1.41-0.15l-2.95,2.38 c-0.29,0.24-0.43,0.62-0.35,0.99S2.39,17.88,2.76,17.97z" fill="#EC9A15"/>
-                <Polygon points="12,5.62 11.19,7.27 9,7.62 10.69,8.81 10,10.62 12,9.77 14,10.62 13.31,8.81 15,7.62 12.81,7.27" fill="#EC9A15"/>
-              </G>
-            </Svg>
-            <Text style={styles.statNumber}>10</Text>
-            <Text style={styles.statLabel}>Top 10</Text>
-          </View>
-        </View>
 
         {}
         <View style={styles.tabButtons}>
@@ -471,15 +346,15 @@ export default function CategoryDetailScreen() {
         {activeTab === "competitions" && (
           <View style={styles.filterContainer}>
             <View style={styles.filterRow}>
-              {(["live", "upcoming", "past", "all"] as const).map((status) => (
+              {(["all", "live", "upcoming", "past"] as const).map((status) => (
                 <TouchableOpacity
                   key={status}
                   style={[styles.filterChip, statusFilter === status && styles.filterChipActive]}
                   onPress={() => handleFilterChange(status)}
                   activeOpacity={0.7}
                 >
-                  {statusFilter === status && status === "live" && <View style={styles.liveIndicator} />}
-                  <Text style={[styles.filterChipText, statusFilter === status && styles.filterChipTextActive]}>
+                  {status === "live" && <Animated.View style={[styles.liveIndicator, { opacity: liveDotBlink }]} />}
+                  <Text style={[styles.filterChipText, statusFilter === status && styles.filterChipTextActive]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8} ellipsizeMode="clip">
                     {status.charAt(0).toUpperCase() + status.slice(1)}
                   </Text>
                 </TouchableOpacity>
@@ -514,8 +389,8 @@ export default function CategoryDetailScreen() {
               if (filteredComps.length === 0) {
                 return (
                   <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateText}>No competitions found</Text>
-                    <Text style={styles.emptyStateSubtext}>Try adjusting your filters</Text>
+                    <Text style={styles.emptyStateText}>Competitions by category aren&apos;t available yet</Text>
+                    <Text style={styles.emptyStateSubtext}>Browse all competitions from the home screen.</Text>
                   </View>
                 );
               }
@@ -699,6 +574,7 @@ export default function CategoryDetailScreen() {
             })()}
 
             {}
+            {topPerformers.length > 0 && (
             <View style={styles.section}>
               <View style={[styles.sectionHeader, { justifyContent: 'center', width: '100%' }]}>
                 <Text style={[styles.sectionTitle, { textAlign: 'center', width: '100%' }]}>Top Three Performers This Week</Text>
@@ -858,9 +734,16 @@ export default function CategoryDetailScreen() {
                   })}
               </View>
             </View>
+            )}
           </View>
         ) : (
           <View style={styles.content}>
+            {sampleReels.length === 0 && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>Reels by category aren&apos;t available yet</Text>
+                <Text style={styles.emptyStateSubtext}>Watch the latest reels in GullyReel.</Text>
+              </View>
+            )}
             <View style={styles.reelsGrid}>
               {sampleReels.map((reel) => (
                 <TouchableOpacity 
@@ -916,7 +799,11 @@ export default function CategoryDetailScreen() {
             <View style={styles.filterHeader}>
               <Text style={styles.filterHeaderText}>Select Category</Text>
             </View>
-            {(allCategories.length > 0 ? allCategories : [{ id: '1', name: 'Dancing' }, { id: '2', name: 'Music' }, { id: '3', name: 'Comedy' }, { id: '4', name: 'Cook' }]).map((cat) => (
+            <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled bounces={false}>
+            {TALENT_CATEGORIES.map((t) => {
+              const backend = allCategories.find((b) => matchTalent(b.label)?.key === t.key);
+              return { id: String(backend?.id ?? t.key), name: t.name };
+            }).map((cat) => (
               <TouchableOpacity
                 key={cat.id}
                 style={[
@@ -929,7 +816,8 @@ export default function CategoryDetailScreen() {
                   router.replace(`/(main)/category/${cat.id}` as any);
                 }}
               >
-                <Text style={[
+                <Text
+                  style={[
                   styles.filterOptionText,
                   selectedCategoryId == cat.id.toString() && styles.filterOptionTextActive
                 ]}>
@@ -942,6 +830,7 @@ export default function CategoryDetailScreen() {
                 )}
               </TouchableOpacity>
             ))}
+            </ScrollView>
           </View>
         </TouchableOpacity>
       </Modal>
@@ -970,13 +859,18 @@ const styles = StyleSheet.create({
   categoryDropdown: {
     flexDirection: "row",
     alignItems: "center",
+    width: width - 40 - 40 - 40 - 8,
+    marginHorizontal: 4,
+    justifyContent: "center",
     backgroundColor: "#2a2a2a",
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
-    gap: 8,
+    gap: 6,
   },
   categoryDropdownText: {
+    flex: 1,
+    textAlign: "center",
     color: "#fff",
     fontSize: 16,
   },
@@ -993,6 +887,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   heroTitle: {
+    alignSelf: "stretch",
     fontSize: width * 0.08,
     color: "#fff",
     marginBottom: 8,
@@ -1006,18 +901,24 @@ const styles = StyleSheet.create({
   },
   followBtn: {
     backgroundColor: "#EC9A15",
-    paddingHorizontal: 24,
-    paddingVertical: 10,
+    width: 190,
+    height: 42,
+    paddingHorizontal: 8,
     borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: "#EC9A15",
+    alignItems: "center",
+    justifyContent: "center",
   },
   followingBtn: {
     backgroundColor: "#2a2a2a",
-    borderWidth: 1.5,
-    borderColor: "#EC9A15",
   },
   followBtnText: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: 14,
+    alignSelf: "stretch",
   },
   statsSection: {
     flexDirection: "row",
@@ -1052,16 +953,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   tabButton: {
+    alignItems: "center",
+    justifyContent: "center",
     flex: 1,
     paddingVertical: 12,
     borderRadius: 12,
-    alignItems: "center",
     backgroundColor: "#1a1a1a",
   },
   tabButtonActive: {
     backgroundColor: "#EC9A15",
   },
   tabButtonText: {
+    textAlign: "center",
+    includeFontPadding: false,
     fontSize: 15,
     color: "#999",
   },
@@ -1118,7 +1022,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     marginBottom: 7,
     marginTop: 7,
-    lineHeight: 18,
+    lineHeight: 26,
     fontWeight: "bold",
   },
   compCardDetails: {
@@ -1156,6 +1060,8 @@ const styles = StyleSheet.create({
     color: "#FFD700",
   },
   voteBtn: {
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#EC9A15",
     paddingHorizontal: 14,
     paddingVertical: 6,
@@ -1167,10 +1073,14 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   voteBtnText: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: 13,
   },
   joinBtn: {
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(236, 154, 21, 0.15)",
     borderWidth: 1.5,
     borderColor: "#EC9A15",
@@ -1179,8 +1089,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   joinBtnText: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#EC9A15",
-    fontSize: 11,
+    fontSize: 13,
   },
   pastCompScroll: {
     gap: 15,
@@ -1352,20 +1264,28 @@ const styles = StyleSheet.create({
     fontWeight: "400",
   },
   followButtonSmall: {
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 10,
   },
   followButtonSmallText: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: width * 0.025,
   },
   followButtonCenter: {
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 16,
     paddingVertical: 6,
     borderRadius: 12,
   },
   followButtonCenterText: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#000",
     fontSize: width * 0.028,
   },
@@ -1422,7 +1342,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#2a2a2a",
     borderRadius: 20,
     width: "80%",
-    maxHeight: "60%",
+    maxHeight: "70%",
     overflow: "hidden",
   },
   filterHeader: {
@@ -1447,6 +1367,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(236, 154, 21, 0.1)",
   },
   filterOptionText: {
+    flex: 1,
     fontSize: 16,
     color: "#fff",
   },
@@ -1467,16 +1388,19 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   filterChip: {
-    flex: 1,
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    height: 40,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 10,
+    paddingHorizontal: 4,
     borderRadius: 18,
     backgroundColor: "#1a1a1a",
     borderWidth: 1.5,
     borderColor: "#3a3a3a",
-    minHeight: 38,
   },
   filterChipActive: {
     backgroundColor: "#EC9A15",
@@ -1488,6 +1412,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   filterChipText: {
+    textAlign: "center",
+    includeFontPadding: false,
     fontSize: 13,
     color: "#999",
   },
@@ -1499,7 +1425,9 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     backgroundColor: "#FF3B30",
-    marginRight: 6,
+    position: "absolute",
+    right: 8,
+    top: 6,
   },
   emptyState: {
     padding: 40,
@@ -1512,6 +1440,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   emptyStateSubtext: {
+    alignSelf: "stretch",
+    textAlign: "center",
     fontSize: 13,
     color: "#999",
   },
@@ -1541,7 +1471,7 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontWeight: "700",
     marginBottom: 8,
-    lineHeight: 20,
+    lineHeight: 28,
   },
   compCardDetailsNew: {
     flexDirection: "row",
@@ -1574,34 +1504,46 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   voteBtnNew: {
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#EC9A15",
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 8,
   },
   voteBtnTextNew: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: 13,
     fontWeight: "600",
   },
   joinBtnNew: {
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "#EC9A15",
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 8,
   },
   joinBtnTextNew: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: 13,
     fontWeight: "600",
   },
   resultsBtnNew: {
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(255, 255, 255, 0.2)",
     paddingHorizontal: 18,
     paddingVertical: 8,
     borderRadius: 8,
   },
   resultsBtnTextNew: {
+    textAlign: "center",
+    includeFontPadding: false,
     color: "#fff",
     fontSize: 13,
     fontWeight: "600",

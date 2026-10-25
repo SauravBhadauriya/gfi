@@ -1,19 +1,11 @@
-import React, { useState, useEffect } from "react";
-import {
-  View,
-  Text,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-  StyleSheet,
-  Platform,
-} from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { View, Text, Modal, TouchableOpacity, ScrollView, TextInput, ActivityIndicator, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { getWallet, tipReel } from "@/api/services/walletService";
+import { ApiError, getErrorMessage } from "@/api/client";
+import { toastError, toastSuccess } from "@/components/ui/Toast";
 
 interface SupportPackage {
   id: string;
@@ -21,6 +13,14 @@ interface SupportPackage {
   label: string;
   price: number;
 }
+
+// Support amounts already used in the app (not from the backend, which has no amount list).
+const SUPPORT_PACKAGES: SupportPackage[] = [
+  { id: "1", coins: 5, label: "5 Coins", price: 5 },
+  { id: "2", coins: 10, label: "10 Coins", price: 10 },
+  { id: "3", coins: 25, label: "25 Coins", price: 25 },
+  { id: "4", coins: 50, label: "50 Coins", price: 50 },
+];
 
 interface SupportModalProps {
   visible: boolean;
@@ -40,120 +40,71 @@ export default function SupportModal({
   onSupportSent,
 }: SupportModalProps) {
   const router = useRouter();
-  const [selectedPackage, setSelectedPackage] = useState<SupportPackage | null>(null);
+  const insets = useSafeAreaInsets();
+  const [selectedPackage, setSelectedPackage] = useState<SupportPackage | null>(SUPPORT_PACKAGES[0]);
   const [customAmount, setCustomAmount] = useState("");
-  const [message, setMessage] = useState("");
+  const [agreed, setAgreed] = useState(false);
   const [walletBalance, setWalletBalance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  // Synchronous lock so a fast double tap cannot send twice.
+  const sendLock = useRef(false);
 
-  // Default support packages
-  const supportPackages: SupportPackage[] = [
-    { id: "1", coins: 5, label: "5 Coins", price: 5 },
-    { id: "2", coins: 10, label: "10 Coins", price: 10 },
-    { id: "3", coins: 25, label: "25 Coins", price: 25 },
-    { id: "4", coins: 50, label: "50 Coins", price: 50 },
-  ];
-
-  // Fetch wallet balance when modal opens
+  // Reset the form and fetch a fresh balance every time the sheet opens.
   useEffect(() => {
-    if (visible) {
-      fetchWalletBalance();
-    }
+    if (!visible) return;
+    setSelectedPackage(SUPPORT_PACKAGES[0]);
+    setCustomAmount("");
+    setAgreed(false);
+    fetchWalletBalance();
   }, [visible]);
 
   const fetchWalletBalance = async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const { userService } = await import("@/api/services/userService");
-
-      const walletResult = await userService.getWalletBalance();
-      if (walletResult.success && walletResult.data) {
-        setWalletBalance(walletResult.data.balance || 0);
-      }
+      const wallet = await getWallet(1, 1);
+      setWalletBalance(wallet.balance);
     } catch (error) {
-      console.error("[SupportModal] Error fetching wallet:", error);
+      toastError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
   };
 
-  // Get support amount
-  const getSupportAmount = (): number => {
-    if (customAmount) {
-      return parseInt(customAmount) || 0;
-    }
-    return selectedPackage?.coins || 0;
+  const supportAmount = customAmount
+    ? parseInt(customAmount, 10) || 0
+    : selectedPackage?.coins || 0;
+
+  const insufficient = !loading && supportAmount > 0 && supportAmount > walletBalance;
+  const canSend = !loading && !sending && agreed && supportAmount > 0 && !insufficient;
+
+  const goToWallet = () => {
+    toastError("Insufficient balance. Please add coins to your wallet.");
+    onClose();
+    router.push("/(main)/coins" as any);
   };
 
-  const supportAmount = getSupportAmount();
-
-  // Handle send support
-  const handleSendSupport = async () => {
-    if (supportAmount <= 0) {
-      Alert.alert("Error", "Please select or enter a valid amount");
-      return;
-    }
-
-    if (supportAmount > walletBalance) {
-      Alert.alert(
-        "Insufficient Balance",
-        `You need ${supportAmount - walletBalance} more coins. Would you like to buy more?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Buy Coins",
-            onPress: () => {
-              onClose();
-              // Navigate to add-money screen
-              router.push("/(main)/add-money" as any);
-            },
-          },
-        ]
-      );
-      return;
-    }
-
+  const handleSend = async () => {
+    if (sendLock.current || !canSend) return;
+    sendLock.current = true;
+    setSending(true);
     try {
-      setSending(true);
-      const { paymentIntegrationService } = await import(
-        "@/api/services/paymentIntegrationService"
-      );
-
-      const supportResult = await paymentIntegrationService.sendSupportPayment({
-        recipientId: creatorId,
-        reelId: reelId,
-        amount: supportAmount,
-        coins: supportAmount,
-        message: message || undefined,
-      });
-
-      if (supportResult.success) {
-        Alert.alert(
-          "Success",
-          `You sent ${supportAmount} coins to ${creatorName}! 🎉`,
-          [
-            {
-              text: "OK",
-              onPress: () => {
-                onClose();
-                if (onSupportSent) {
-                  onSupportSent();
-                }
-              },
-            },
-          ]
-        );
-      } else {
-        Alert.alert("Error", supportResult.message || "Failed to send support");
-      }
-    } catch (error: any) {
-      console.error("[SupportModal] Error sending support:", error);
-      Alert.alert("Error", error.message || "Failed to send support");
+      // POST /reels/:reelId/tip. The API result is the final check on balance.
+      const result = await tipReel(reelId, supportAmount);
+      setWalletBalance(result.remainingBalance);
+      toastSuccess(`You sent ${supportAmount} coins to ${creatorName}! 🎉`);
+      onClose();
+      onSupportSent?.();
+    } catch (error) {
+      const err = error as ApiError;
+      toastError(err?.message || getErrorMessage(error));
     } finally {
+      sendLock.current = false;
       setSending(false);
     }
   };
+
+  const sendLabel = `Send ${supportAmount} Coins`;
 
   return (
     <Modal
@@ -166,7 +117,7 @@ export default function SupportModal({
         <View style={styles.container}>
           {/* Header */}
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Support {creatorName}</Text>
+            <Text style={styles.headerTitle}>Support @{creatorName}</Text>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#fff" />
             </TouchableOpacity>
@@ -181,7 +132,11 @@ export default function SupportModal({
             <View style={styles.balanceCard}>
               <View style={styles.balanceRow}>
                 <Text style={styles.balanceLabel}>Your Wallet Balance</Text>
-                <Text style={styles.balanceAmount}>{walletBalance.toLocaleString()}</Text>
+                {loading ? (
+                  <ActivityIndicator color="#EC9A15" />
+                ) : (
+                  <Text style={styles.balanceAmount}>{walletBalance.toLocaleString()}</Text>
+                )}
               </View>
               <Text style={styles.coinLabel}>GFI Coins</Text>
             </View>
@@ -190,13 +145,13 @@ export default function SupportModal({
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Quick Support Options</Text>
               <View style={styles.packagesGrid}>
-                {supportPackages.map((pkg) => (
+                {SUPPORT_PACKAGES.map((pkg) => (
                   <TouchableOpacity
                     key={pkg.id}
                     style={[
                       styles.packageButton,
                       selectedPackage?.id === pkg.id && styles.packageButtonActive,
-                      customAmount && styles.packageButtonDisabled,
+                      !!customAmount && styles.packageButtonDisabled,
                     ]}
                     onPress={() => {
                       setSelectedPackage(pkg);
@@ -229,33 +184,12 @@ export default function SupportModal({
                   keyboardType="number-pad"
                   value={customAmount}
                   onChangeText={(text) => {
-                    setCustomAmount(text);
+                    setCustomAmount(text.replace(/\D/g, ""));
                     setSelectedPackage(null);
+                    setAgreed(false);
                   }}
                 />
               </View>
-            </View>
-
-            {/* Message */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Message (Optional)</Text>
-              <TextInput
-                style={styles.messageInput}
-                placeholder="Write a message..."
-                placeholderTextColor="#666"
-                multiline
-                numberOfLines={4}
-                value={message}
-                onChangeText={setMessage}
-              />
-            </View>
-
-            {/* Support Info */}
-            <View style={styles.infoCard}>
-              <Ionicons name="information-circle" size={20} color="#EC9A15" />
-              <Text style={styles.infoText}>
-                Your support helps creators earn and grow! The creator will receive credits in their wallet.
-              </Text>
             </View>
 
             {/* Summary */}
@@ -270,10 +204,7 @@ export default function SupportModal({
                   <Text
                     style={[
                       styles.summaryValue,
-                      {
-                        color:
-                          walletBalance - supportAmount >= 0 ? "#22C55E" : "#FF4444",
-                      },
+                      { color: walletBalance - supportAmount >= 0 ? "#22C55E" : "#FF4444" },
                     ]}
                   >
                     {(walletBalance - supportAmount).toLocaleString()}
@@ -281,39 +212,70 @@ export default function SupportModal({
                 </View>
               </View>
             )}
+
+            {/* Warning + confirmation (only when the amount can be sent) */}
+            {supportAmount > 0 && !insufficient && (
+              <>
+                <View style={styles.warningCard}>
+                  <Ionicons name="warning-outline" size={20} color="#EC9A15" />
+                  <Text style={styles.warningText}>
+                    Coins will be deducted from your wallet and sent to @{creatorName}. This action cannot be undone.
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setAgreed((v) => !v)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: agreed }}
+                >
+                  <Ionicons
+                    name={agreed ? "checkbox" : "square-outline"}
+                    size={22}
+                    color="#EC9A15"
+                  />
+                  <Text style={styles.checkboxText}>
+                    I understand and want to send {supportAmount} coins
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {insufficient && (
+              <Text style={styles.insufficientText}>
+                Insufficient balance. You need {supportAmount} coins, you have {walletBalance}.
+              </Text>
+            )}
           </ScrollView>
 
-          {/* Send Button */}
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                (!supportAmount || supportAmount > walletBalance || sending) &&
-                  styles.sendButtonDisabled,
-              ]}
-              onPress={handleSendSupport}
-              disabled={!supportAmount || supportAmount > walletBalance || sending}
-            >
-              {sending ? (
-                <>
-                  <ActivityIndicator size="small" color="#fff" />
-                  <Text style={styles.sendButtonText}>Sending...</Text>
-                </>
-              ) : (
-                <>
-                  <Ionicons name="heart" size={20} color="#fff" />
-                  <Text style={styles.sendButtonText}>
-                    Send {supportAmount} Coins
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+          {/* Footer */}
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+            {insufficient ? (
+              <TouchableOpacity style={styles.sendButton} onPress={goToWallet}>
+                <Ionicons name="wallet-outline" size={20} color="#fff" />
+                <Text style={styles.sendButtonText}>Add Coins</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
+                onPress={handleSend}
+                disabled={!canSend}
+              >
+                {sending ? (
+                  <>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.sendButtonText}>Sending...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="heart" size={20} color="#fff" />
+                    <Text style={styles.sendButtonText}>{sendLabel}</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
-            <TouchableOpacity
-              style={styles.cancelButton}
-              onPress={onClose}
-              disabled={sending}
-            >
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose} disabled={sending}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -354,7 +316,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   content: {
-    flex: 1,
+    flexShrink: 1,
   },
   contentContainer: {
     paddingHorizontal: 20,
@@ -443,38 +405,13 @@ const styles = StyleSheet.create({
     padding: 12,
     fontSize: 14,
   },
-  messageInput: {
-    backgroundColor: "#252525",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#444",
-    color: "#fff",
-    padding: 12,
-    fontSize: 14,
-    minHeight: 80,
-    textAlignVertical: "top",
-  },
-  infoCard: {
-    backgroundColor: "rgba(236, 154, 21, 0.1)",
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 24,
-    gap: 10,
-  },
-  infoText: {
-    color: "#CCCCCC",
-    fontSize: 13,
-    flex: 1,
-  },
   summaryCard: {
     backgroundColor: "#252525",
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
     borderColor: "#444",
-    marginBottom: 24,
+    marginBottom: 16,
   },
   summaryRow: {
     flexDirection: "row",
@@ -490,9 +427,41 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
   },
+  warningCard: {
+    backgroundColor: "rgba(236, 154, 21, 0.1)",
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 12,
+  },
+  warningText: {
+    color: "#E5DCD0",
+    fontSize: 13,
+    lineHeight: 19,
+    flex: 1,
+  },
+  checkboxRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 4,
+  },
+  checkboxText: {
+    color: "#fff",
+    fontSize: 14,
+    flex: 1,
+  },
+  insufficientText: {
+    color: "#FF6B6B",
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
+  },
   footer: {
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: "#444",
     gap: 12,

@@ -1,445 +1,73 @@
-// Created by Kiro - Search Service
-// Handles search functionality for users, reels, competitions, and hashtags
+import { apiGet, toResult } from "../client";
+import type { FeedReel } from "./reelsService";
 
-import apiClient from "../axios";
-import { ApiResponse } from "../types";
+/**
+ * GET /search?q&type&page&limit (type: all | users | competitions | reels).
+ * "all" returns the top 3 of each kind; the typed searches are paginated.
+ * An empty `q` matches everything, which is how full lists are browsed.
+ */
 
 export interface SearchUser {
   _id: string;
-  id?: string;
-  name: string;
-  username?: string;
-  avatar?: string;
-  bio?: string;
-  followerCount?: number;
-  isFollowing?: boolean;
-}
-
-export interface SearchReel {
-  _id: string;
-  id?: string;
-  title: string;
-  description?: string;
-  videoUrl: string;
-  thumbnail?: string;
-  likes?: number;
-  views?: number;
-  creatorName?: string;
-  creatorAvatar?: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  profile_picture_url: string;
+  followers_count: number;
+  is_followed_by_me: boolean;
 }
 
 export interface SearchCompetition {
   _id: string;
-  id?: string;
   title: string;
-  description?: string;
+  /** Raw status as stored: LIVE, live, UPCOMING, CREATED, APPROVED, ENDED, COMPLETED, CANCELLED. */
+  status: string;
+  prize: number;
+  participants: number;
+  /** "image" on typed search, "image_url" on type=all. */
   image?: string;
-  status: "active" | "upcoming" | "ended";
-  participantCount?: number;
-  prizePool?: number;
+  image_url?: string;
 }
 
-export interface SearchHashtag {
-  tag: string;
-  count: number;
-  trending?: boolean;
+export interface SearchAllResult {
+  top_users: SearchUser[];
+  top_competitions: SearchCompetition[];
+  top_reels: FeedReel[];
 }
 
-export interface SearchResults {
-  users?: SearchUser[];
-  reels?: SearchReel[];
-  competitions?: SearchCompetition[];
-  hashtags?: SearchHashtag[];
-  total?: number;
+export interface SearchPage<T> {
+  currentPage: number;
+  hasMore: boolean;
+  results: T[];
 }
 
-// ✅ CREATED BY KIRO - Search users
-export async function searchUsers(
-  query: string,
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<SearchUser[]>> {
-  try {
-    console.log("[searchService] Searching users:", { query, params });
+const DEFAULT_LIMIT = 15;
 
-    // Spec: GET search?q=bryan&type=users&page=1&limit=20
-    const response = await apiClient.get<any>("search", {
-      params: { q: query, type: 'users', ...params },
-    });
-    const responseData = response.data as any;
+export const searchAll = (q: string) => apiGet<SearchAllResult>("search", { params: { q, type: "all" } });
 
-    if (responseData.code === 1 && responseData.data) {
-      let users: SearchUser[] = [];
+export const searchUsersPage = (q: string, page = 1, limit = DEFAULT_LIMIT) =>
+  apiGet<SearchPage<SearchUser>>("search", { params: { q, type: "users", page, limit } });
 
-      if (Array.isArray(responseData.data)) {
-        users = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        users = responseData.data.items;
-      } else if (Array.isArray(responseData.data.users)) {
-        users = responseData.data.users;
-      }
+export const searchCompetitionsPage = (q: string, page = 1, limit = DEFAULT_LIMIT) =>
+  apiGet<SearchPage<SearchCompetition>>("search", { params: { q, type: "competitions", page, limit } });
 
-      console.log("[searchService] Users found:", users.length);
+export const searchReelsPage = (q: string, page = 1, limit = DEFAULT_LIMIT) =>
+  apiGet<SearchPage<FeedReel>>("search", { params: { q, type: "reels", page, limit } });
 
-      return {
-        success: true,
-        data: users,
-        message: responseData.message || "Users found successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "No users found",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Search users error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Search reels
-export async function searchReels(
-  query: string,
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<SearchReel[]>> {
-  try {
-    console.log("[searchService] Searching reels:", { query, params });
-
-    // Spec: GET search?q=dance&type=reels&page=1&limit=20
-    const response = await apiClient.get<any>("search", {
-      params: { q: query, type: 'reels', ...params },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let reels: SearchReel[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        reels = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        reels = responseData.data.items;
-      } else if (Array.isArray(responseData.data.reels)) {
-        reels = responseData.data.reels;
-      }
-
-      console.log("[searchService] Reels found:", reels.length);
-
-      return {
-        success: true,
-        data: reels,
-        message: responseData.message || "Reels found successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "No reels found",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Search reels error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Search competitions
-export async function searchCompetitions(
-  query: string,
-  params?: { page?: number; limit?: number }
-): Promise<ApiResponse<SearchCompetition[]>> {
-  try {
-    console.log("[searchService] Searching competitions:", { query, params });
-
-    // Spec: GET search?q=dance&type=competitions&page=1&limit=20
-    const response = await apiClient.get<any>("search", {
-      params: { q: query, type: 'competitions', ...params },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let competitions: SearchCompetition[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        competitions = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        competitions = responseData.data.items;
-      } else if (Array.isArray(responseData.data.competitions)) {
-        competitions = responseData.data.competitions;
-      }
-
-      console.log("[searchService] Competitions found:", competitions.length);
-
-      return {
-        success: true,
-        data: competitions,
-        message: responseData.message || "Competitions found successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "No competitions found",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Search competitions error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Search hashtags
-export async function searchHashtags(
-  query: string,
-  params?: { limit?: number }
-): Promise<ApiResponse<SearchHashtag[]>> {
-  try {
-    console.log("[searchService] Searching hashtags:", { query, params });
-
-    const response = await apiClient.get<any>("search/hashtags", {
-      params: { q: query, ...params },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let hashtags: SearchHashtag[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        hashtags = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        hashtags = responseData.data.items;
-      } else if (Array.isArray(responseData.data.hashtags)) {
-        hashtags = responseData.data.hashtags;
-      }
-
-      console.log("[searchService] Hashtags found:", hashtags.length);
-
-      return {
-        success: true,
-        data: hashtags,
-        message: responseData.message || "Hashtags found successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "No hashtags found",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Search hashtags error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Global search (all types)
-export async function globalSearch(
-  query: string,
-  params?: { page?: number; limit?: number; type?: string }
-): Promise<ApiResponse<SearchResults>> {
-  try {
-    const searchType = params?.type || 'all';
-    console.log("[searchService] Global search:", { query, searchType });
-
-    // Spec: GET search?q=dance&type=all (or users, reels, competitions)
-    const response = await apiClient.get<any>("search", {
-      params: { q: query, type: searchType, ...params },
-    });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const results: SearchResults = {
-        users: responseData.data.users || [],
-        reels: responseData.data.reels || [],
-        competitions: responseData.data.competitions || [],
-        hashtags: responseData.data.hashtags || [],
-        total: responseData.data.total || 0,
-      };
-
-      console.log("[searchService] Global search results:", results.total);
-
-      return {
-        success: true,
-        data: results,
-        message: responseData.message || "Search results retrieved successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "No results found",
-      error: "API returned unsuccessful response",
-      data: { users: [], reels: [], competitions: [], hashtags: [], total: 0 },
-    };
-  } catch (error: any) {
-    console.error("[searchService] Global search error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: { users: [], reels: [], competitions: [], hashtags: [], total: 0 },
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Get trending hashtags
-export async function getTrendingHashtags(params?: {
-  limit?: number;
-}): Promise<ApiResponse<SearchHashtag[]>> {
-  try {
-    console.log("[searchService] Getting trending hashtags:", params);
-
-    const response = await apiClient.get<any>("search/trending-hashtags", { params });
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let hashtags: SearchHashtag[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        hashtags = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        hashtags = responseData.data.items;
-      } else if (Array.isArray(responseData.data.hashtags)) {
-        hashtags = responseData.data.hashtags;
-      }
-
-      console.log("[searchService] Trending hashtags retrieved:", hashtags.length);
-
-      return {
-        success: true,
-        data: hashtags,
-        message: responseData.message || "Trending hashtags retrieved successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to get trending hashtags",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Get trending hashtags error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Get search history
-export async function getSearchHistory(): Promise<ApiResponse<string[]>> {
-  try {
-    console.log("[searchService] Getting search history");
-
-    const response = await apiClient.get<any>("search/history");
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      let history: string[] = [];
-
-      if (Array.isArray(responseData.data)) {
-        history = responseData.data;
-      } else if (Array.isArray(responseData.data.items)) {
-        history = responseData.data.items;
-      } else if (Array.isArray(responseData.data.history)) {
-        history = responseData.data.history;
-      }
-
-      console.log("[searchService] Search history retrieved:", history.length);
-
-      return {
-        success: true,
-        data: history,
-        message: responseData.message || "Search history retrieved successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to get search history",
-      error: "API returned unsuccessful response",
-      data: [],
-    };
-  } catch (error: any) {
-    console.error("[searchService] Get search history error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: [],
-    };
-  }
-}
-
-// ✅ CREATED BY KIRO - Clear search history
-export async function clearSearchHistory(): Promise<ApiResponse<boolean>> {
-  try {
-    console.log("[searchService] Clearing search history");
-
-    const response = await apiClient.post<any>("search/history/clear", {});
-    const responseData = response.data as any;
-
-    if (responseData.code === 1) {
-      console.log("[searchService] Search history cleared");
-
-      return {
-        success: true,
-        data: true,
-        message: responseData.message || "Search history cleared successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message || "Failed to clear search history",
-      error: "API returned unsuccessful response",
-      data: false,
-    };
-  } catch (error: any) {
-    console.error("[searchService] Clear search history error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message || error.message || "Network error occurred",
-      error: error.message,
-      data: false,
-    };
-  }
+/** Normalizes the competition status values the backend stores. */
+export function normalizeCompetitionStatus(status?: string): "LIVE" | "UPCOMING" | "ENDED" | "CANCELLED" {
+  const s = (status || "").toUpperCase();
+  if (s === "LIVE") return "LIVE";
+  if (s === "ENDED" || s === "COMPLETED") return "ENDED";
+  if (s === "CANCELLED") return "CANCELLED";
+  return "UPCOMING";
 }
 
 export const searchService = {
-  searchUsers,
-  searchReels,
-  searchCompetitions,
-  searchHashtags,
-  globalSearch,
-  getTrendingHashtags,
-  getSearchHistory,
-  clearSearchHistory,
+  globalSearch: (q: string) => toResult(() => searchAll(q)),
+  searchUsers: (q: string, page = 1) => toResult(() => searchUsersPage(q, page)),
+  searchCompetitions: (q: string, page = 1) => toResult(() => searchCompetitionsPage(q, page)),
+  searchReels: (q: string, page = 1) => toResult(() => searchReelsPage(q, page)),
 };
+
+export default searchService;

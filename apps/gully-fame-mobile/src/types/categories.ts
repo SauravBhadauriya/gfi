@@ -1,3 +1,5 @@
+import { ComponentProps } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { ImageSourcePropType } from "react-native";
 
 export interface categoriesDataFromAPI {
@@ -6,6 +8,7 @@ export interface categoriesDataFromAPI {
     imageUrl?: string;
 }
 export type categoriesFullData = categoriesDataFromAPI & {
-    icon: "cook" | "dance" | "comedy" | "music";
+    iconName: ComponentProps<typeof MaterialCommunityIcons>["name"];
+    icon?: "cook" | "talent" | "fitness" | "dance" | "comedy" | "music";
     defaultImage?: ImageSourcePropType;
 };

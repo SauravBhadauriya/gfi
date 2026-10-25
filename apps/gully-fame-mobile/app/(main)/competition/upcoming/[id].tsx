@@ -1,43 +1,20 @@
-import React, { useState, useEffect, useRef } from "react";
-import {
-  View,
-  Text,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  StatusBar,
-  Alert,
-  Animated,
-  Platform,
-  Linking,
-  ActivityIndicator,
-  LayoutAnimation,
-} from "react-native";
+import { useState, useEffect, useCallback } from "react";
+import { View, Text, ScrollView, Image, TouchableOpacity, StatusBar, ActivityIndicator, LayoutAnimation } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BackIcon, ShareIcon } from "@/icons";
-import { apiClient } from "@/api";
-import { getCompetitionById } from "@/api/services/competitionService";
+import { BackIcon } from "@/icons";
+import { getCompetitionDetails, joinCompetition } from "@/api/services/competitionService";
+import { getErrorMessage } from "@/api/client";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
+import { openCompetition } from "@/utils/openCompetition";
+import { validateKycBeforeCompetition } from "@/utils/kycValidation";
+import { toastError, toastSuccess } from "@/components/ui/Toast";
 import { upcomingCompetitionStyles as styles } from "@/styles/upcomingCompetitionStyles";
-import { BASE_URL } from "@/api/axios";
 
 const formatCurrency = (amount: number): string => {
   if (!amount) return "₹0";
   return `₹${amount.toLocaleString("en-IN")}`;
-};
-
-const formatPrizeBreakdown = (prizeAmount: number, winnerSlots: number = 1): Array<{ position: string; amount: string }> => {
-  const slots = winnerSlots || 1;
-  const perSlot = Math.floor(prizeAmount / slots);
-  const breakdown = [];
-
-  for (let i = 0; i < slots && i < 3; i++) {
-    const position = i === 0 ? "1st" : i === 1 ? "2nd" : "3rd";
-    const amount = i === 0 ? perSlot + (prizeAmount % slots) : perSlot;
-    breakdown.push({ position, amount: formatCurrency(amount) });
-  }
-  return breakdown;
 };
 
 const CountdownTimer = ({ targetDate }: { targetDate: string }) => {
@@ -97,44 +74,69 @@ export default function UpcomingCompetitionScreen() {
   const [loading, setLoading] = useState(true);
   const [isRulesExpanded, setIsRulesExpanded] = useState(false);
 
-  useEffect(() => {
-    const fetchComp = async () => {
-      try {
-        setLoading(true);
-        if (!competitionIdFromParams) return;
-        const res = await getCompetitionById(competitionIdFromParams);
-        if (res.success && res.data) {
-          setCompetitionData(res.data);
-        }
-      } catch (err) {
-        console.error("Failed to fetch upcoming competition details", err);
-      } finally {
-        setLoading(false);
+  const [loadError, setLoadError] = useState("");
+  const [joining, setJoining] = useState(false);
+
+  const fetchComp = useCallback(async () => {
+    if (!competitionIdFromParams) return;
+    setLoading(true);
+    setLoadError("");
+    try {
+      const details = await getCompetitionDetails(competitionIdFromParams);
+      if (details.status !== "UPCOMING") {
+        openCompetition(competitionIdFromParams, details.status);
+        return;
       }
-    };
-    fetchComp();
+      setCompetitionData(details);
+    } catch (err) {
+      setLoadError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }, [competitionIdFromParams]);
+
+  useEffect(() => {
+    fetchComp();
+  }, [fetchComp]);
 
   const toggleRules = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setIsRulesExpanded(!isRulesExpanded);
   };
 
-  const handleJoinNow = () => {
-    router.push({
-      pathname: "/(main)/camera",
-      params: {
-        competitionId: competitionData._id,
-        competitionName: competitionData.title,
-        entryFee: competitionData.entryFee ? competitionData.entryFee.toString() : "0",
-      },
-    });
+  // POST /competitions/:id/join registers the user (no payment is taken by the backend).
+  const handleJoinNow = async () => {
+    if (joining) return;
+    if (!(await validateKycBeforeCompetition())) return;
+    setJoining(true);
+    try {
+      const result = await joinCompetition(competitionIdFromParams);
+      setCompetitionData((prev: any) => ({
+        ...prev,
+        is_current_user_joined: true,
+        totalParticipantsJoined: result.participantsCount,
+      }));
+      toastSuccess("You're registered! We'll remind you when it goes live.");
+    } catch (err) {
+      toastError(getErrorMessage(err));
+    } finally {
+      setJoining(false);
+    }
   };
 
   if (loading || !competitionData) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <ActivityIndicator size="large" color="#FFD700" />
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center", padding: 24 }]}>
+        {loading ? (
+          <ActivityIndicator size="large" color="#FFD700" />
+        ) : (
+          <>
+            <Text style={{ color: "#ccc", textAlign: "center" }}>{loadError || "Competition not found."}</Text>
+            <TouchableOpacity onPress={fetchComp} style={{ marginTop: 16 }}>
+              <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     );
   }
@@ -149,9 +151,9 @@ export default function UpcomingCompetitionScreen() {
             <Text style={styles.disabledText}>✅ You are Registered!</Text>
           </View>
         ) : (
-          <TouchableOpacity style={styles.fullWidthButton} onPress={handleJoinNow} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.fullWidthButton} onPress={handleJoinNow} activeOpacity={0.8} disabled={joining}>
             <LinearGradient colors={["#FF0055", "#FF8C00"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientFill}>
-              <Text style={styles.ctaText}>⚔️ Enter the Battle</Text>
+              <Text style={styles.ctaText}>{joining ? "Joining…" : "⚔️ Enter the Battle"}</Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -167,7 +169,7 @@ export default function UpcomingCompetitionScreen() {
         <View style={styles.compCardContainer}>
           <View style={styles.titleCard}>
             <View style={styles.compCardImageWrapper}>
-              <Image source={competitionData.image ? { uri: `${BASE_URL}${competitionData.image}` } : require("@assets/images/trending2.png")} style={styles.titleCardImage} resizeMode="cover" />
+              <Image source={resolveMediaUrl(competitionData.image) ? { uri: resolveMediaUrl(competitionData.image)! } : require("@assets/images/trending2.png")} style={styles.titleCardImage} resizeMode="cover" />
               <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)"]} style={styles.bannerGradient} />
               <View style={styles.upcomingBadge}><Text style={styles.upcomingBadgeText}>Upcoming</Text></View>
             </View>
@@ -175,7 +177,7 @@ export default function UpcomingCompetitionScreen() {
             <View style={styles.titleCardContent}>
               <View style={styles.titleCardHeader}>
                 <Text style={styles.compCardTitleNew}>{competitionData.title}</Text>
-                <Text style={styles.compCardSubtitle}>{competitionData.category || "Competition"}</Text>
+                <Text style={styles.compCardSubtitle}>{competitionData.totalParticipantsJoined || 0} registered</Text>
               </View>
 
               <View style={styles.heroPrizeContainer}>
@@ -200,24 +202,6 @@ export default function UpcomingCompetitionScreen() {
               </View>
 
               <CountdownTimer targetDate={competitionData.startDate} />
-
-              <View style={{ marginHorizontal: 16, marginBottom: 16 }}>
-                <Text style={[styles.missionSectionTitle, { marginTop: 0 }]}>Loot Breakdown</Text>
-                <View style={styles.podiumContainer}>
-                  {formatPrizeBreakdown(competitionData.prizePool || 0, 3).map((prize, index) => {
-                    const medals = ["🥇", "🥈", "🥉"];
-                    return (
-                      <View key={index} style={styles.podiumPill}>
-                        <Text style={styles.podiumMedal}>{medals[index]}</Text>
-                        <View style={styles.podiumTextContainer}>
-                          <Text style={styles.podiumPosition}>{prize.position} Place</Text>
-                          <Text style={styles.podiumAmount}>{prize.amount}</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              </View>
 
               {(competitionData.description || competitionData.rules) && (
                 <TouchableOpacity style={styles.missionBriefingCard} activeOpacity={0.8} onPress={toggleRules}>

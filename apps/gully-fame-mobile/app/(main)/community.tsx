@@ -1,27 +1,9 @@
 import { router } from "expo-router";
-import React, { useState } from "react";
-import {
-  Dimensions,
-  Image,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { showToast } from "@/components/ui/Toast";
+import { useState } from "react";
+import { Dimensions, ScrollView, StatusBar, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import BottomNav from "@components/layout/BottomNav";
-import {
-  BackIcon,
-  CommunityIcon,
-  DownIcon,
-  GlobeIcon,
-  HomeIcon,
-  UserIconSVG as UserIcon,
-  MyFameIcon,
-  HomeIconSVG,
-} from "@/icons";
+import { BackIcon, CommunityIcon, DownIcon, GlobeIcon, UserIconSVG as UserIcon, HomeIconSVG } from "@/icons";
 import { ReelIconSVG as ReelIcon } from "@/icons";
 import Svg, { Path, Rect, G } from "react-native-svg";
 
@@ -33,31 +15,6 @@ const tabs = [
   { name: "Upload", icon: null, label: "UPLOAD" },
   { name: "Community", icon: CommunityIcon, label: "" },
   { name: "MyFame", icon: UserIcon, label: "" },
-];
-
-const communities = [
-  {
-    id: 1,
-    name: "Dance Battles",
-    image: require("@assets/images/communities1.png"),
-  },
-  {
-    id: 2,
-    name: "Music Makers",
-    image: require("@assets/images/communities2.png"),
-    hot: true,
-  },
-  {
-    id: 3,
-    name: "Art & Craft",
-    image: require("@assets/images/communities3.png"),
-  },
-  {
-    id: 4,
-    name: "Street Chefs",
-    image: require("@assets/images/communities4.png"),
-    comingSoon: true,
-  },
 ];
 
 export default function CommunityScreen() {
@@ -102,26 +59,11 @@ export default function CommunityScreen() {
         {}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>All communities</Text>
-          <TouchableOpacity>
-            <Text style={styles.viewAll}>View all</Text>
-          </TouchableOpacity>
+
         </View>
 
-        {}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.horizontalScrollContainer}
-        >
-          {communities.map((item) => (
-            <View key={item.id} style={styles.item}>
-              <View style={styles.imageWrapper}>
-                <Image source={item.image} style={styles.image} />
-              </View>
-              <Text style={styles.name}>{item.name}</Text>
-            </View>
-          ))}
-        </ScrollView>
+        {/* The backend has no communities API yet. */}
+        <Text style={[styles.subtitle, { marginTop: 8 }]}>Communities aren&apos;t available yet.</Text>
 
         {}
         <View style={styles.sectionfeed}>
@@ -196,7 +138,10 @@ export default function CommunityScreen() {
                     <DownIcon color="#6B7280" />
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.publishButton}>
+                  <TouchableOpacity
+                    style={styles.publishButton}
+                    onPress={() => showToast("Community posts aren't available yet.", "info")}
+                  >
                     <Text style={styles.publishButtonText}>Publish Post</Text>
                   </TouchableOpacity>
                 </View>

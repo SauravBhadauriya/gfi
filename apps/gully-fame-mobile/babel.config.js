@@ -27,7 +27,12 @@ module.exports = function (api) {
           },
         },
       ],
-      'react-native-reanimated/plugin', 
+      // Strip console.log/info/debug from production bundles. Errors and warnings stay
+      // so crash diagnostics still work.
+      ...(process.env.NODE_ENV === "production"
+        ? [["transform-remove-console", { exclude: ["error", "warn"] }]]
+        : []),
+      'react-native-reanimated/plugin',
     ],
   };
 };

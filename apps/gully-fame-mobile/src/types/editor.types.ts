@@ -51,11 +51,92 @@ export interface AudioTrack {
   originalDuration: number;
 }
 
+/**
+ * Shared shape of everything the user places over the media. Positions are the
+ * normalized centre in the media frame, sizes are fractions of the frame width, and
+ * times are seconds on the whole-project timeline (endTime null = until the end).
+ */
+export interface LayerBase {
+  id: string;
+  type: "text" | "sticker" | "doodle" | "caption" | "link";
+  startTime: number;
+  endTime: number | null;
+}
+
+export interface LayerTransform {
+  /** Normalized centre, 0..1 of the frame. */
+  x: number;
+  y: number;
+  scale: number;
+  /** Degrees, clockwise. */
+  rotation: number;
+}
+
+export interface StickerItem extends LayerBase, LayerTransform {
+  type: "sticker";
+  name: string;
+  imageUrl: string;
+  category: string;
+  /** Unscaled box side as a fraction of the frame width. */
+  size: number;
+}
+
+export interface DoodleItem extends LayerBase {
+  type: "doodle";
+  /** Stroke points, normalized to the frame (0..1). */
+  points: { x: number; y: number }[];
+  color: string;
+  /** Stroke width as a fraction of the frame width. */
+  width: number;
+}
+
+export interface CaptionItem extends LayerBase {
+  type: "caption";
+  text: string;
+  endTime: number;
+  fontSize: number;
+  fontFamily: string;
+  color: string;
+  backgroundColor: string;
+  position: "top" | "center" | "bottom";
+  animation: "none" | "fade" | "slide" | "typewriter";
+}
+
+/** A tappable link shown by the player; stored as post metadata, never burned into the video. */
+export interface LinkItem extends LayerBase, LayerTransform {
+  type: "link";
+  url: string;
+  label: string;
+}
+
+/** Per-clip colour sliders (-100..100, vignette and sharpen 0..100). */
+export interface EditorAdjust {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  exposure: number;
+  temperature: number;
+  vignette: number;
+  sharpen: number;
+}
+
+export const NO_ADJUST: EditorAdjust = {
+  brightness: 0,
+  contrast: 0,
+  saturation: 0,
+  exposure: 0,
+  temperature: 0,
+  vignette: 0,
+  sharpen: 0,
+};
+
 export interface TextItem {
   id: string;
+  type?: "text";
   text: string;
   startTime: number;
-  duration: number;
+  /** null = until the end of the project. */
+  endTime: number | null;
   x: number;
   y: number;
   fontSize: number;
@@ -65,13 +146,40 @@ export interface TextItem {
   alignment?: "left" | "center" | "right";
   rotation: number;
   opacity: number;
+  /** Preview text: x/y are the normalized centre in the media frame, fontSize a fraction of frame width. */
+  scale?: number;
+  background?: "none" | "solid" | "translucent";
+  /** Unscaled box size as a fraction of the frame width/height (for export alignment). */
+  boxWidth?: number;
+  boxHeight?: number;
+  /** Lines exactly as React Native wrapped them, so the export breaks lines identically. */
+  lines?: string[];
+}
+
+/** Colour filter applied to the whole media (preview screen Filters). */
+export interface EditorFilter {
+  /** FilterId from components/preview/filterPresets. */
+  id: string;
+  /** 0..1, how strongly the preset is applied. */
+  intensity: number;
 }
 
 export interface EditorState {
+  /** Identifies the capture this edit session belongs to (the camera's clips param). */
+  sessionKey: string | null;
+  mediaType: "video" | "photo";
   clips: Clip[];
   overlays: Overlay[];
   audioTracks: AudioTrack[];
   texts: TextItem[];
+  stickers: StickerItem[];
+  doodles: DoodleItem[];
+  captions: CaptionItem[];
+  links: LinkItem[];
+  adjust: EditorAdjust;
+  /** Width / height of the preview frame, so every screen lays items out in the same shape. */
+  frameAspect: number | null;
+  filter: EditorFilter | null;
   currentTime: number;
   isPlaying: boolean;
   selectedItemId: string | null;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Dimensions,
   Image,
@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
+import { showGuestModeUnavailable } from "@utils/guestMode";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   GoogleIcon,
@@ -20,7 +21,9 @@ import {
   EyeIcon,
   EyeOffIcon,
 } from "@/icons";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
+import { getErrorMessage } from "@api/client";
+import { getNativePushToken, getDeviceType, registerPushTokenWithBackend } from "@utils/pushToken";
 import { saveUserSession } from "@utils/userSession";
 
 let GoogleSignin: any = null;
@@ -29,8 +32,7 @@ try {
   const googleSignIn = require("@react-native-google-signin/google-signin");
   GoogleSignin = googleSignIn.GoogleSignin;
   statusCodes = googleSignIn.statusCodes;
-} catch (e) {
-  console.warn("[createaccount] @react-native-google-signin not available (requires dev build):", (e as any)?.message);
+} catch (e) { /* intentionally ignored */
 }
 
 const { width, height } = Dimensions.get("window");
@@ -53,7 +55,6 @@ export default function CreateAccount() {
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [isSocialLoading, setIsSocialLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isInstagramLoading, setIsInstagramLoading] = useState(false);
 
   
   
@@ -63,8 +64,8 @@ export default function CreateAccount() {
   const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || undefined;
 
   useEffect(() => {
-    GoogleSignin.configure({ webClientId });
-  }, []);
+    GoogleSignin?.configure({ webClientId });
+  }, [webClientId]);
   
   
 
@@ -78,8 +79,7 @@ export default function CreateAccount() {
         } else {
           setTermsAccepted(false);
         }
-      } catch (error) {
-        console.error("Error checking terms acceptance:", error);
+      } catch (error) { /* intentionally ignored */
       }
     };
     checkTermsAccepted();
@@ -89,25 +89,15 @@ export default function CreateAccount() {
     return () => clearInterval(interval);
   }, []);
 
+  // Mirrors the backend: any password of 6+ characters is accepted.
   const validatePassword = (pwd: string): string[] => {
     const errors: string[] = [];
-
-    if (pwd.length < 8) {
-      errors.push("Minimum 8 characters");
+    if (pwd.length < AUTH_RULES.passwordMinLength) {
+      errors.push(`Minimum ${AUTH_RULES.passwordMinLength} characters`);
     }
-    if (!/[A-Z]/.test(pwd)) {
-      errors.push("At least 1 uppercase letter (A-Z)");
+    if (pwd.length > AUTH_RULES.stringMaxLength) {
+      errors.push(`Maximum ${AUTH_RULES.stringMaxLength} characters`);
     }
-    if (!/[a-z]/.test(pwd)) {
-      errors.push("At least 1 lowercase letter (a-z)");
-    }
-    if (!/[0-9]/.test(pwd)) {
-      errors.push("At least 1 number (0-9)");
-    }
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
-      errors.push("At least 1 special character (! @ # $ % etc.)");
-    }
-
     return errors;
   };
 
@@ -137,359 +127,140 @@ export default function CreateAccount() {
   };
 
   const handleCreateAccount = async () => {
+    if (isLoading) return;
     setErrorMessage("");
     setPasswordErrors([]);
     setConfirmPasswordError("");
-
-    if (
-      !firstName ||
-      !lastName ||
-      !mobileNo ||
-      !email ||
-      !password ||
-      !confirmPassword
-    ) {
+    const first = firstName.trim();
+    const last = lastName.trim();
+    const mobile = mobileNo.trim();
+    const mail = email.trim().toLowerCase();
+    if (!first || !last || !mobile || !mail || !password || !confirmPassword) {
       setErrorMessage("Please fill all required fields.");
       return;
     }
-
+    if (first.length > AUTH_RULES.stringMaxLength || last.length > AUTH_RULES.stringMaxLength) {
+      setErrorMessage("Names must be 255 characters or fewer.");
+      return;
+    }
+    if (!AUTH_RULES.mobile.test(mobile)) {
+      setErrorMessage("Enter a valid 10-digit mobile number.");
+      return;
+    }
+    if (!AUTH_RULES.email.test(mail) || mail.length > AUTH_RULES.emailMaxLength) {
+      setErrorMessage("Enter a valid email address (max 50 characters).");
+      return;
+    }
     const passwordValidationErrors = validatePassword(password);
     if (passwordValidationErrors.length > 0) {
       setPasswordErrors(passwordValidationErrors);
-      setErrorMessage(
-        "Password does not meet requirements. Please check the requirements below.",
-      );
+      setErrorMessage("Password does not meet requirements.");
       return;
     }
-
     if (password !== confirmPassword) {
       setConfirmPasswordError("Passwords do not match");
       setErrorMessage("Password and Confirm Password do not match.");
       return;
     }
-
+    if (!role) {
+      setErrorMessage("Please select your role (Participant or Fan)");
+      return;
+    }
     if (!termsAccepted) {
       setErrorMessage("Please accept the Terms & Conditions to continue.");
       return;
     }
 
     setIsLoading(true);
-
     try {
-      if (__DEV__) {
-        console.log("\n🚀 ========== STARTING REGISTRATION ==========");
-        console.log("Form Data:", {
-          firstName,
-          lastName,
-          mobile: mobileNo,
-          email,
-          password: "***",
-          role: role === "participant" ? "participants" : "fan",
-        });
-        console.log("=============================================\n");
-      }
-
-      if (!role) {
-        setErrorMessage("Please select your role (Participant or Fan)");
+      const backendRole = role === "participant" ? "participants" : "fan";
+      const result = await authService.registerUser({
+        firstName: first,
+        lastName: last,
+        mobile,
+        email: mail,
+        password,
+        role: backendRole,
+      });
+      if (!result.success) {
+        setErrorMessage(result.message);
         return;
       }
-
-      const registerData = {
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        mobile: mobileNo.trim(),
-        email: email.trim().toLowerCase(),
-        password: password,
-        role:
-          role === "participant"
-            ? "participants"
-            : ("fan" as "participants" | "fan"),
-      };
-
-      const result = await authService.registerUser(registerData);
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log("\n✅ ========== REGISTRATION SUCCESS ==========");
-          console.log("Account created successfully");
-          console.log("Navigating to Login screen");
-          console.log("Email:", email);
-          console.log("Mobile:", mobileNo);
-          console.log("===========================================\n");
-        }
-
-        setErrorMessage("");
-        setSuccessMessage("Account created successfully!");
-
-        const backendRole =
-          role === "participant"
-            ? "participants"
-            : role === "fan"
-              ? "fan"
-              : "participants";
-
-        await AsyncStorage.multiSet([
-          ["accountCreated", "true"],
-          ["accountCreatedVia", "normal"],
-          ["userRole", backendRole],
-          ["userFirstName", firstName],
-          ["userLastName", lastName],
-          ["userEmail", email],
-          ["userMobile", mobileNo],
-          ["profileCompleted", "false"],
-        ]);
-
-        const query = [
-          `role=${encodeURIComponent(role)}`,
-          `firstName=${encodeURIComponent(firstName)}`,
-          `lastName=${encodeURIComponent(lastName)}`,
-          `email=${encodeURIComponent(email)}`,
-        ].join("&");
-        router.replace(`/onboarding/verify-id?${query}` as any);
-      } else {
-        const errorMsg =
-          result.data?.message ||
-          result.error ||
-          "Registration failed. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("\n❌ ========== REGISTRATION FAILED ==========");
-          console.error("Error:", errorMsg);
-          console.error("Status:", result.status);
-          console.error("==========================================\n");
-        }
+      // Register returns no token, so sign in with the new credentials.
+      const login = await authService.login({ userId: mail, password, viaPassword: true });
+      if (!login.success || !login.data?.token) {
+        setSuccessMessage("Account created! Please sign in.");
+        router.replace(`/auth/signin?email=${encodeURIComponent(mail)}` as any);
+        return;
       }
-    } catch (error: any) {
-      const errorMsg =
-        error.message ||
-        "Something went wrong while creating your account. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("\n❌ ========== REGISTRATION EXCEPTION ==========");
-        console.error("Exception:", error);
-        console.error("==============================================\n");
-      }
+      await saveUserSession(login.data.token, login.data.user);
+      await AsyncStorage.setItem("accountCreatedVia", "normal");
+      registerPushTokenWithBackend();
+      setSuccessMessage("Account created successfully!");
+      const query = [
+        `role=${encodeURIComponent(role)}`,
+        `firstName=${encodeURIComponent(first)}`,
+        `lastName=${encodeURIComponent(last)}`,
+        `email=${encodeURIComponent(mail)}`,
+      ].join("&");
+      router.replace(`/onboarding/verify-id?${query}` as any);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     } finally {
       setIsLoading(false);
     }
   };
 
-  const getDeviceToken = async (): Promise<string> => {
-    try {
-      if (Platform.OS === "web") {
-        return "web-device-token";
-      }
-
-      const token = await AsyncStorage.getItem("deviceToken");
-      if (token) {
-        return token;
-      }
-
-      const generatedToken = `device-token-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      await AsyncStorage.setItem("deviceToken", generatedToken);
-      return generatedToken;
-    } catch (error) {
-      console.error("Error getting device token:", error);
-      return `fallback-token-${Date.now()}`;
-    }
-  };
-
-  const getDeviceType = (): "android" | "ios" | "web" | "" => {
-    if (Platform.OS === "android") return "android";
-    if (Platform.OS === "ios") return "ios";
-    if (Platform.OS === "web") return "web";
-    return "";
-  };
-
-  /**
-   * Handle Google authentication response
-   * Extracts tokens and prepares them for backend
-   * Backend will decide: signup if new user, login if existing user
-   */
-
-  // Google Sign-In handler
-  const handleGoogleLogin = async (
-    iconType: "google" | "instagram" = "google",
-  ) => {
+  const handleGoogleLogin = async (iconType: "google" | "instagram" = "google") => {
     if (iconType !== "google") {
-      setIsInstagramLoading(true);
+      setErrorMessage("Instagram sign-in is not available yet.");
+      return;
+    }
+    if (isSocialLoading) return;
+    if (!GoogleSignin) {
+      setErrorMessage("Google sign-in is not available on this build.");
       return;
     }
     setErrorMessage("");
     setSuccessMessage("");
     setIsGoogleLoading(true);
     setIsSocialLoading(true);
-
     try {
-      if (__DEV__) {
-        console.log("\n🚀 ========== NATIVE GOOGLE LOGIN ==========");
-      }
-
-      await GoogleSignin.hasPlayServices({
-        showPlayServicesUpdateDialog: true,
-      });
+      await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
       const response = await GoogleSignin.signIn();
-
-      // Handle the new response types directly
-      if (response.type === "cancelled") {
-        setErrorMessage("Sign-in was cancelled");
-        setIsGoogleLoading(false);
-        setIsSocialLoading(false);
-        return;
-      }
-
       if (response.type !== "success") {
-        setErrorMessage("Sign-in was not successful");
-        setIsGoogleLoading(false);
-        setIsSocialLoading(false);
+        setErrorMessage(response.type === "cancelled" ? "Sign-in was cancelled" : "Sign-in was not successful");
         return;
       }
-      const userInfo = response.data;
-      const deviceToken = await getDeviceToken();
-      const deviceType = getDeviceType();
-      const socialLoginData = {
-        googleId: userInfo.user.id,
-        email: userInfo.user.email,
-        firstName: userInfo.user.givenName || "",
-        lastName: userInfo.user.familyName || "",
-        device_token: deviceToken,
-        device_type: deviceType as "android" | "ios" | "web" | "", // Type assertion to satisfy TS
-      };
-      if (__DEV__) {
-        console.log("✅ Native Auth Success");
-        console.log(
-          "Token Data for Backend:",
-          JSON.stringify(socialLoginData, null, 2),
-        );
+      const googleUser = response.data.user;
+      const result = await authService.socialLogin({
+        googleId: googleUser.id,
+        email: googleUser.email,
+        firstName: googleUser.givenName || "",
+        lastName: googleUser.familyName || "",
+        device_token: await getNativePushToken(),
+        device_type: getDeviceType(),
+      });
+      if (!result.success || !result.data?.token) {
+        setErrorMessage(result.message);
+        return;
       }
-
-      // TODO: Send tokenData to backend
-      const result = await authService.socialLogin(socialLoginData);
-
-      if (result.success) {
-        // Social login response structure is slightly different, check your interface
-        if (!result.data?.token) {
-          setErrorMessage("Login failed: No token received from server.");
-          return;
-        }
-
-        await saveUserSession(result.data.token, result.data.user);
-        await AsyncStorage.setItem("accountCreatedVia", "google");
-
-        setSuccessMessage("Google authentication successful!");
-        router.replace("/auth/location");
-      } else {
-        setErrorMessage(
-          result.error ||
-            result.message ||
-            "Google login failed on the server.",
-        );
-      }
-    } catch (error: any) {
-      if (__DEV__) console.error("❌ Native Auth Error:", error);
-
-      // We only hit this block for actual system/network crashes now
-      setErrorMessage(
-        error.message || "A system error occurred during sign-in.",
-      );
+      await saveUserSession(result.data.token, result.data.user);
+      await AsyncStorage.setItem("accountCreatedVia", "google");
+      setSuccessMessage("Google authentication successful!");
+      router.replace("/auth/location");
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error, "Google sign-in failed. Please try again."));
     } finally {
       setIsGoogleLoading(false);
       setIsSocialLoading(false);
     }
   };
 
-  const handleAppleLogin = async () => {
-    setErrorMessage("");
-    setSuccessMessage("");
-    setIsSocialLoading(true);
-
-    try {
-      if (__DEV__) {
-        console.log("\n🚀 ========== APPLE LOGIN (CREATE ACCOUNT) ==========");
-        console.log("Starting Apple authentication...");
-        console.log("========================================\n");
-      }
-
-      const deviceToken = await getDeviceToken();
-      const deviceType = getDeviceType();
-
-      const appleId = "apple_user_id_here";
-      const email = "user@icloud.com";
-      const firstName = "Apple";
-      const lastName = "User";
-
-      if (__DEV__) {
-        console.log(
-          "⚠️ NOTE: Replace appleId, email, firstName, lastName with actual Apple OAuth data",
-        );
-        console.log(
-          "You need to integrate expo-apple-authentication or @invertase/react-native-apple-authentication",
-        );
-      }
-
-      const result = await authService.socialLogin({
-        appleId: appleId,
-        email: email,
-        firstName: firstName,
-        lastName: lastName,
-        device_token: deviceToken,
-        device_type: deviceType,
-      });
-
-      if (result.success) {
-        if (__DEV__) {
-          console.log("\n✅ ========== APPLE LOGIN SUCCESS ==========");
-          console.log("Response Data:", result.data);
-          console.log(
-            "Token:",
-            result.data?.token ? "Received" : "Not received",
-          );
-          console.log("=====================================\n");
-        }
-
-        setSuccessMessage("Account created successfully!");
-
-        if (!result.data?.token) {
-          setErrorMessage("Apple login failed: No token received from server.");
-          return;
-        }
-
-        await saveUserSession(
-          result.data.token,
-          result.data?.user || undefined,
-          email,
-          undefined,
-        );
-
-        router.replace("/auth/location");
-      } else {
-        const errorMsg =
-          result.data?.message ||
-          result.error ||
-          "Apple login failed. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("\n❌ ========== APPLE LOGIN FAILED ==========");
-          console.error("Error:", errorMsg);
-          console.error("=====================================\n");
-        }
-      }
-    } catch (error: any) {
-      const errorMsg =
-        error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("\n❌ ========== APPLE LOGIN EXCEPTION ==========");
-        console.error("Exception:", error);
-        console.error("========================================\n");
-      }
-    } finally {
-      setIsSocialLoading(false);
-    }
+  const handleAppleLogin = () => {
+    // POST /auth/login/social accepts an appleId, but no Apple Sign-In module
+    // is installed, so there is no real appleId to send.
+    setErrorMessage("Sign in with Apple is not available yet. Please use email or Google.");
   };
 
   return (
@@ -603,58 +374,11 @@ export default function CreateAccount() {
                     <Text
                       style={[
                         styles.requirementText,
-                        password.length >= 8 && styles.requirementMet,
+                        password.length >= AUTH_RULES.passwordMinLength && styles.requirementMet,
                       ]}
                     >
-                      {password.length >= 8 ? "✓" : "○"} Minimum 8 characters
-                    </Text>
-                  </View>
-                  <View style={styles.requirementItem}>
-                    <Text
-                      style={[
-                        styles.requirementText,
-                        /[A-Z]/.test(password) && styles.requirementMet,
-                      ]}
-                    >
-                      {/[A-Z]/.test(password) ? "✓" : "○"} At least 1 uppercase
-                      letter (A-Z)
-                    </Text>
-                  </View>
-                  <View style={styles.requirementItem}>
-                    <Text
-                      style={[
-                        styles.requirementText,
-                        /[a-z]/.test(password) && styles.requirementMet,
-                      ]}
-                    >
-                      {/[a-z]/.test(password) ? "✓" : "○"} At least 1 lowercase
-                      letter (a-z)
-                    </Text>
-                  </View>
-                  <View style={styles.requirementItem}>
-                    <Text
-                      style={[
-                        styles.requirementText,
-                        /[0-9]/.test(password) && styles.requirementMet,
-                      ]}
-                    >
-                      {/[0-9]/.test(password) ? "✓" : "○"} At least 1 number
-                      (0-9)
-                    </Text>
-                  </View>
-                  <View style={styles.requirementItem}>
-                    <Text
-                      style={[
-                        styles.requirementText,
-                        /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(
-                          password,
-                        ) && styles.requirementMet,
-                      ]}
-                    >
-                      {/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)
-                        ? "✓"
-                        : "○"}{" "}
-                      At least 1 special character (! @ # $ % etc.)
+                      {password.length >= AUTH_RULES.passwordMinLength ? "✓" : "○"} Minimum{" "}
+                      {AUTH_RULES.passwordMinLength} characters
                     </Text>
                   </View>
                 </View>
@@ -817,11 +541,7 @@ export default function CreateAccount() {
               onPress={() => handleGoogleLogin("instagram")}
               disabled={isSocialLoading}
             >
-              {isInstagramLoading ? (
-                <ActivityIndicator size="small" color="#EC9A15" />
-              ) : (
-                <InstagramIcon size={40} />
-              )}
+              <InstagramIcon size={40} />
             </TouchableOpacity>
             {Platform.OS === "ios" && (
               <TouchableOpacity
@@ -852,7 +572,7 @@ export default function CreateAccount() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            onPress={() => router.replace("/auth/location?skip=true")}
+            onPress={showGuestModeUnavailable}
             activeOpacity={0.7}
             style={styles.skipButton}
           >

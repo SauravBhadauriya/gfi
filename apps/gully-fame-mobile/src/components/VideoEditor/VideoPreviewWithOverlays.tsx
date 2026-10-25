@@ -1,194 +1,93 @@
-import React, { useState } from "react";
-import { View, StyleSheet, LayoutChangeEvent } from "react-native";
+import { useState } from "react";
+import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { VideoView } from "expo-video";
-import CaptionOverlay from "./CaptionOverlay";
-import FilterAdjustmentOverlay from "./FilterAdjustmentOverlay";
-import DoodleCanvasOverlay from "./DoodleCanvasOverlay";
-import StickerLayer from "./StickerLayer";
-import OverlayLayer from "./OverlayLayer";
+import { Image } from "expo-image";
+
+import { useAppSelector } from "@/store/hooks";
+import EditLayers from "@modules/video-editor/camera-module/components/preview/EditLayers";
+import { FilteredMedia } from "@modules/video-editor/camera-module/components/preview/PreviewMedia";
 import CutoutOverlay from "./CutoutOverlay";
-import type { VideoFilter } from "./FiltersToolPanel";
-import type { VideoAdjustments } from "./AdjustToolPanel";
-import type { DoodlePath } from "./DoodlesToolPanel";
-import type { StickerItem } from "./StickersToolPanel";
+import OverlayLayer from "./OverlayLayer";
 import type { OverlayItem } from "./OverlayToolPanel";
 import type { CutoutSettings } from "./CutoutToolPanel";
-import type { Caption } from "./CaptionsToolPanel";
 
 interface VideoPreviewWithOverlaysProps {
   player: any; // VideoPlayer from expo-video
+  /** Set while a photo clip is on screen: drawn over the (paused) video. */
+  photoUri?: string;
   currentTime: number;
-  captions: Caption[];
-  filter: VideoFilter;
-  adjustments: VideoAdjustments;
-  doodles: DoodlePath[];
-  stickers: StickerItem[];
   overlays: OverlayItem[];
   cutoutSettings: CutoutSettings;
-  selectedTool: string | null;
-  isDrawingMode?: boolean;
-  doodleBrushColor?: string;
-  doodleBrushSize?: number;
-  onDoodleComplete?: (doodle: DoodlePath) => void;
-  onStickerUpdate?: (sticker: StickerItem) => void;
+  /** Screen Y below which a dragged layer is deleted. */
+  trashTop: number;
+  hiddenTextId?: string | null;
+  onEditText: (id: string) => void;
+  onDragChange: (dragging: boolean, overTrash: boolean) => void;
 }
 
+/**
+ * The editor's preview: the media with the shared colour filter and adjust, then the shared
+ * EditLayers (texts, stickers, doodles, captions), so it matches the preview screen.
+ */
 export default function VideoPreviewWithOverlays({
   player,
+  photoUri,
   currentTime,
-  captions,
-  filter,
-  adjustments,
-  doodles,
-  stickers,
   overlays,
   cutoutSettings,
-  selectedTool,
-  isDrawingMode = false,
-  doodleBrushColor = "#FFFFFF",
-  doodleBrushSize = 5,
-  onDoodleComplete,
-  onStickerUpdate,
+  trashTop,
+  hiddenTextId,
+  onEditText,
+  onDragChange,
 }: VideoPreviewWithOverlaysProps) {
-  const [videoWidth, setVideoWidth] = useState(0);
-  const [videoHeight, setVideoHeight] = useState(0);
+  const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const filter = useAppSelector((state) => state.editor.filter);
+  const adjust = useAppSelector((state) => state.editor.adjust);
 
-  const handleVideoLayout = (event: LayoutChangeEvent) => {
+  const handleLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
-    setVideoWidth(width);
-    setVideoHeight(height);
+    setFrame({ width, height });
   };
 
   return (
-    <View style={styles.container} onLayout={handleVideoLayout}>
-      {/* Video Player */}
-      <VideoView
-        player={player}
-        style={styles.video}
-        contentFit="contain"
-        nativeControls={false}
-      />
+    <View style={styles.container} onLayout={handleLayout}>
+      <FilteredMedia filter={filter} adjust={adjust}>
+        {/* cover = the same crop the preview screen and the export use. */}
+        <VideoView
+          player={player}
+          style={StyleSheet.absoluteFill}
+          contentFit="cover"
+          nativeControls={false}
+          // TextureView shows the paused first frame (SurfaceView stayed black until play)
+          // and lets colour filters apply to the video.
+          surfaceType="textureView"
+        />
+        {photoUri && <Image source={{ uri: photoUri }} style={StyleSheet.absoluteFill} contentFit="cover" />}
+      </FilteredMedia>
 
-      {/* Layer Order (back to front):
-          1. Cutout effect (behind video content)
-          2. Filter & Adjustments
-          3. Doodles
-          4. Stickers
-          5. Overlays
-          6. Captions (top)
-      */}
-
-      {/* Cutout overlay (simulates background) */}
       <CutoutOverlay cutoutSettings={cutoutSettings} />
 
-      {/* Filters & Adjustments */}
-      <FilterAdjustmentOverlay filter={filter} adjustments={adjustments} />
+      <EditLayers
+        frameWidth={frame.width}
+        frameHeight={frame.height}
+        trashTop={trashTop}
+        time={currentTime}
+        hiddenTextId={hiddenTextId}
+        onEditText={onEditText}
+        onDragChange={onDragChange}
+      />
 
-      {/* Doodles with drawing canvas */}
-      {selectedTool === "doodles" && (
-        <DoodleCanvasOverlay
-          doodles={doodles}
-          videoWidth={videoWidth}
-          videoHeight={videoHeight}
-          isDrawing={isDrawingMode}
-          brushColor={doodleBrushColor}
-          brushSize={doodleBrushSize}
-          onDoodleComplete={onDoodleComplete || (() => {})}
-        />
-      )}
-
-      {/* Render completed doodles */}
-      {doodles.length > 0 && selectedTool !== "doodles" && (
-        <View style={styles.doodlesContainer}>
-          {doodles.map((doodle) => (
-            <DoodleItem key={doodle.id} doodle={doodle} />
-          ))}
-        </View>
-      )}
-
-      {/* Stickers */}
-      {stickers.length > 0 && (
-        <StickerLayer
-          stickers={stickers}
-          videoWidth={videoWidth}
-          videoHeight={videoHeight}
-          onUpdate={onStickerUpdate}
-        />
-      )}
-
-      {/* Overlays */}
       {overlays.length > 0 && (
-        <OverlayLayer
-          overlays={overlays}
-          videoWidth={videoWidth}
-          videoHeight={videoHeight}
-          currentTime={currentTime}
-        />
-      )}
-
-      {/* Captions */}
-      {captions.length > 0 && (
-        <CaptionOverlay
-          captions={captions}
-          currentTime={currentTime}
-          videoWidth={videoWidth}
-          videoHeight={videoHeight}
-        />
+        <OverlayLayer overlays={overlays} videoWidth={frame.width} videoHeight={frame.height} currentTime={currentTime} />
       )}
     </View>
   );
 }
 
-/**
- * Simple component to render a completed doodle path using react-native-svg
- */
-function DoodleItem({ doodle }: { doodle: DoodlePath }) {
-  const { Svg, Path: SvgPath } = require("react-native-svg");
-
-  const pathString = doodle.points
-    .map((point, index) => {
-      if (index === 0) {
-        return `M ${point.x} ${point.y}`;
-      }
-      return `L ${point.x} ${point.y}`;
-    })
-    .join(" ");
-
-  return (
-    <Svg
-      style={styles.doodleSvg}
-      pointerEvents="none"
-    >
-      <SvgPath
-        d={pathString}
-        stroke={doodle.color}
-        strokeWidth={doodle.width}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        fill="none"
-      />
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
-    position: "relative",
-    width: "100%",
-    aspectRatio: 9 / 16,
+    flex: 1,
     backgroundColor: "#000",
     overflow: "hidden",
-  },
-  video: {
-    width: "100%",
-    height: "100%",
-  },
-  doodlesContainer: {
-    ...StyleSheet.absoluteFill,
-    pointerEvents: "none",
-  },
-  doodleSvg: {
-    ...StyleSheet.absoluteFill,
-    pointerEvents: "none",
   },
 });

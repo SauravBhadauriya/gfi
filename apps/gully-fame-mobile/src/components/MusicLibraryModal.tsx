@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  FlatList,
-  ActivityIndicator,
-  StyleSheet,
-  Image,
-} from 'react-native';
+import { Modal, View, Text, TouchableOpacity, TextInput, FlatList, ActivityIndicator, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { listAudio, type AudioSortOption } from '@/api/services/musicLibraryService';
+import {
+  listAudio,
+  getSavedAudio,
+  toggleSaveAudio,
+  filterTracksBySearch,
+  type AudioSortOption,
+} from '@/api/services/musicLibraryService';
 
 interface MusicLibraryModalProps {
   visible: boolean;
   onCancel: () => void;
   onSelect: (music: any) => void;
+  /** Currently chosen track ({ id, title }); shown as selected, with a Remove button. */
   selectedMusic?: any;
+  onRemove?: () => void;
 }
 
 const TABS = ['For you', 'Trending', 'Saved', 'Popular'];
@@ -27,59 +25,46 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
   onCancel,
   onSelect,
   selectedMusic,
+  onRemove,
 }) => {
   const [activeTab, setActiveTab] = useState('For you');
   const [searchQuery, setSearchQuery] = useState('');
   const [tracks, setTracks] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Smart Audio Fetcher with Category Fallback
   const fetchTracks = useCallback(async () => {
     if (!visible) return;
     setLoading(true);
+    setError(null);
 
     try {
       let response: any = null;
 
-      if (searchQuery.trim().length > 0) {
-        response = await listAudio('trending', 1, 50, searchQuery.trim());
+      // For you = newest, Trending / Popular = most used, Saved = GET /user/audio/saved.
+      if (activeTab === 'Saved') {
+        response = await getSavedAudio();
+        if (response.success && searchQuery.trim()) {
+          response = {
+            ...response,
+            data: { ...response.data, tracks: filterTracksBySearch(response.data.tracks, searchQuery) },
+          };
+        }
       } else {
-        // Map UI Tab to backend query
-        let categoryQuery = activeTab.toLowerCase().replace(' ', '_');
-        const sort: AudioSortOption = categoryQuery === 'popular' || categoryQuery === 'newest' ? categoryQuery : 'trending';
-        response = await listAudio(sort, 1, 50);
+        const sort: AudioSortOption = activeTab === 'For you' ? 'newest' : 'trending';
+        response = await listAudio(sort, 1, 50, searchQuery.trim() || undefined);
       }
 
-      let fetchedTracks: any[] = [];
-
-      // Extract tracks from various possible backend API response structures
-      if (response?.success || response?.code === 1) {
-        const resData = response.data;
-        if (Array.isArray(resData)) {
-          fetchedTracks = resData;
-        } else if (Array.isArray(resData?.tracks)) {
-          fetchedTracks = resData.tracks;
-        } else if (Array.isArray(resData?.audios)) {
-          fetchedTracks = resData.audios;
-        } else if (Array.isArray(resData?.data)) {
-          fetchedTracks = resData.data;
-        }
+      if (!response?.success) {
+        throw new Error(response?.message || 'Unable to load the music library');
       }
-
-      // 🛠️ FALLBACK: If selected tab returns 0 items, fetch ALL tracks so uploaded music is never hidden!
-      if (fetchedTracks.length === 0 && !searchQuery) {
-        const fallbackRes = await listAudio(undefined, 1, 50);
-        if (fallbackRes?.success || fallbackRes?.code === 1) {
-          const fbData = fallbackRes.data;
-          if (Array.isArray(fbData)) fetchedTracks = fbData;
-          else if (Array.isArray(fbData?.tracks)) fetchedTracks = fbData.tracks;
-        }
-      }
+      const fetchedTracks = response.data?.tracks || [];
 
       setTracks(fetchedTracks);
-    } catch (error) {
-      console.warn('Failed to fetch audio tracks from Gully Fame API:', error);
+    } catch (err: any) {
       setTracks([]);
+      setError(err?.message || 'Unable to load the music library');
     } finally {
       setLoading(false);
     }
@@ -89,8 +74,23 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
     fetchTracks();
   }, [fetchTracks]);
 
+  // POST /user/audio/:id/save toggles; the result is shown immediately.
+  const [savedIds, setSavedIds] = useState<Record<string, boolean>>({});
+  const handleToggleSave = async (audioId: string) => {
+    if (!audioId) return;
+    const result = await toggleSaveAudio(audioId);
+    if (result.success && result.data) {
+      setSavedIds((prev) => ({ ...prev, [audioId]: result.data!.isSaved }));
+      if (activeTab === 'Saved' && !result.data.isSaved) {
+        setTracks((prev) => prev.filter((t) => (t._id || t.id) !== audioId));
+      }
+    } else {
+      setError(result.message);
+    }
+  };
+
   const renderTrackItem = ({ item }: { item: any }) => {
-    const isSelected = selectedMusic?.id === item._id || selectedMusic?.id === item.id;
+    const isSelected = !!selectedMusic?.id && (selectedMusic.id === item._id || selectedMusic.id === item.id);
     const title = item.title || item.name || item.originalName || 'Audio Track';
     const artist = item.artist || item.singer || 'Gully Fame Audio';
     const duration = item.duration ? `${Math.floor(item.duration / 60)}:${(item.duration % 60).toString().padStart(2, '0')}` : '0:30';
@@ -102,6 +102,7 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
         id: item._id || item.id,
         title: title,
         artist: artist,
+        url: item.url ?? item.audioUrl,
         startTime: 0, // Start from beginning by default
       };
       onSelect(trackWithMetadata);
@@ -127,6 +128,18 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
         </View>
 
         <TouchableOpacity
+          style={styles.saveBtn}
+          onPress={() => handleToggleSave(item._id || item.id)}
+          accessibilityLabel={savedIds[item._id || item.id] ?? item.isSaved ? 'Remove from saved' : 'Save track'}
+        >
+          <Ionicons
+            name={(savedIds[item._id || item.id] ?? item.isSaved) ? 'bookmark' : 'bookmark-outline'}
+            size={20}
+            color="#EC9A15"
+          />
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={styles.selectBtn}
           onPress={handleSelectTrack}
         >
@@ -148,6 +161,16 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
               <Ionicons name="close" size={24} color="#FFF" />
             </TouchableOpacity>
           </View>
+
+          {selectedMusic?.id && onRemove ? (
+            <TouchableOpacity style={styles.removeRow} onPress={onRemove} accessibilityLabel="Remove music">
+              <Ionicons name="musical-note" size={16} color="#EC9A15" />
+              <Text style={styles.removeText} numberOfLines={1}>
+                {selectedMusic.title ?? 'Selected track'}
+              </Text>
+              <Text style={styles.removeAction}>Remove</Text>
+            </TouchableOpacity>
+          ) : null}
 
           {/* Search Box */}
           <View style={styles.searchContainer}>
@@ -189,6 +212,15 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color="#EC9A15" />
             </View>
+          ) : error ? (
+            <View style={styles.centerContainer}>
+              <Ionicons name="cloud-offline-outline" size={48} color="#444" style={{ marginBottom: 12 }} />
+              <Text style={styles.noTracksTitle}>Couldn't load music</Text>
+              <Text style={styles.noTracksSub}>{error}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={fetchTracks} accessibilityLabel="Retry loading music">
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
           ) : tracks.length > 0 ? (
             <FlatList
               data={tracks}
@@ -212,6 +244,24 @@ export const MusicLibraryModal: React.FC<MusicLibraryModalProps> = ({
 };
 
 const styles = StyleSheet.create({
+  saveBtn: {
+    padding: 8,
+    marginRight: 4,
+  },
+  removeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#262626',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    marginBottom: 12,
+  },
+  removeText: { flex: 1, color: '#FFF', fontSize: 14, fontWeight: '600' },
+  removeAction: { color: '#FF5A4F', fontSize: 13, fontWeight: '700' },
+  retryBtn: { marginTop: 16, paddingHorizontal: 22, paddingVertical: 10, borderRadius: 18, backgroundColor: '#EC9A15' },
+  retryText: { color: '#000', fontWeight: '700' },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',

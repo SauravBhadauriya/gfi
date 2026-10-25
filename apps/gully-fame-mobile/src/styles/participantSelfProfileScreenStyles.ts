@@ -324,6 +324,7 @@ export const participantSelfProfileScreenStyles = StyleSheet.create({
         marginBottom: 20,
     },
     editBioTitle: {
+        flex: 1,
         fontSize: 22,
         color: "#fff",
     },
@@ -391,6 +392,8 @@ export const participantSelfProfileScreenStyles = StyleSheet.create({
         alignItems: "center",
     },
     cancelButtonText: {
+        alignSelf: "stretch",
+        textAlign: "center",
         color: "#fff",
         fontSize: 16,
     },
@@ -402,6 +405,8 @@ export const participantSelfProfileScreenStyles = StyleSheet.create({
         alignItems: "center",
     },
     saveButtonText: {
+        alignSelf: "stretch",
+        textAlign: "center",
         color: "#fff",
         fontSize: 16,
     },

@@ -7,7 +7,7 @@ import { styles } from "./styles";
 import { Dimensions, TouchableOpacity, Text } from "react-native";
 import { useEffect } from "react";
 import { categoriesFullData } from "@/types/categories";
-import { CategoryIcon } from "@/icons";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { scale } from "@/utils/responsive";
 const { width } = Dimensions.get("window");
 const BASE_RADIUS = width * 0.08;
@@ -61,14 +61,15 @@ function CategoryItem({
           },
         ]}
       >
-        <CategoryIcon
-          type={category.icon}
-          styles={{ width: scale(40), height: scale(40) }}
-        ></CategoryIcon>
+        <MaterialCommunityIcons
+          name={category.iconName}
+          size={scale(34)}
+          color="#EC9A15"
+        />
       </Animated.View>
       <Text
-  numberOfLines={1}
-  ellipsizeMode="clip"
+  numberOfLines={2}
+  ellipsizeMode="tail"
   style={[
     styles.circularCategoryName,
     isSelected && styles.circularCategoryNameActive,

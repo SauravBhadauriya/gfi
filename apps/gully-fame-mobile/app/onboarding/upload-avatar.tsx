@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -11,12 +11,16 @@ import {
   Alert,
   TextInput,
   Image,
+  ActivityIndicator,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
+import { updateProfile } from "@api/services/userService";
+import { getErrorMessage } from "@api/client";
 import Svg, { Path } from "react-native-svg";
 import { UserProfileIcon } from "@/icons";
 import * as ImagePicker from "expo-image-picker";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 const { width } = Dimensions.get("window");
 
@@ -48,6 +52,7 @@ export default function OnboardingUploadAvatar() {
   const [bio, setBio] = useState("");
   const [threeWords, setThreeWords] = useState(["", "", ""]);
   const [errorMessage, setErrorMessage] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const handlePickImage = async () => {
     
@@ -55,7 +60,11 @@ export default function OnboardingUploadAvatar() {
       {
         text: "Camera",
         onPress: async () => {
-          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          const { status, canAskAgain } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== "granted" && !canAskAgain) {
+            showPermissionSettingsAlert("Camera access");
+            return;
+          }
           if (status !== "granted") {
             Alert.alert(
               "Permission needed",
@@ -68,7 +77,6 @@ export default function OnboardingUploadAvatar() {
             allowsEditing: true,
             aspect: [1, 1],
             quality: 0.8,
-            base64: true,
           });
           if (!result.canceled && result.assets[0]) {
             await processImage(result.assets[0]);
@@ -78,8 +86,12 @@ export default function OnboardingUploadAvatar() {
       {
         text: "Gallery",
         onPress: async () => {
-          const { status } =
+          const { status, canAskAgain } =
             await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== "granted" && !canAskAgain) {
+            showPermissionSettingsAlert("Photo library access");
+            return;
+          }
           if (status !== "granted") {
             Alert.alert(
               "Permission needed",
@@ -92,7 +104,6 @@ export default function OnboardingUploadAvatar() {
             allowsEditing: true,
             aspect: [1, 1],
             quality: 0.8,
-            base64: true,
             presentationStyle:
               ImagePicker.UIImagePickerPresentationStyle.FULL_SCREEN,
           });
@@ -109,15 +120,7 @@ export default function OnboardingUploadAvatar() {
   };
 
   const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
-    const imageUri = asset.uri;
-    const base64Image = asset.base64;
-
-    if (base64Image) {
-      const imageDataUri = `data:image/jpeg;base64,${base64Image}`;
-      setProfileImage(imageDataUri);
-    } else {
-      setProfileImage(imageUri);
-    }
+    setProfileImage(asset.uri);
     setErrorMessage("");
   };
 
@@ -158,33 +161,24 @@ export default function OnboardingUploadAvatar() {
     
     const threeWordsFormatted = threeWords.filter((w) => w.trim()).join(" | ");
 
-    
-    if (fromKycFlow) {
-      try {
-        const { authService } = await import("@api/services/authService");
-        const updateData: any = {
-          bio: bio.trim(),
-          profileImage: profileImage,
-        };
-
-        if (__DEV__) {
-          console.log(
-            "[upload-avatar] Saving bio and profileImage to backend for KYC completion",
-          );
-        }
-
-        await authService.updateProfile(updateData);
-
-        
-        await AsyncStorage.multiSet([
-          ["userBio", bio.trim()],
-          ["userProfileImage", profileImage],
-          ["userThreeWords", threeWordsFormatted],
-        ]);
-      } catch (error) {
-        console.error("Error saving profile data:", error);
-        
-      }
+    if (saving) return;
+    setSaving(true);
+    let uploadedImage = profileImage;
+    try {
+      // Uploads the photo to S3 and saves its URL on the profile.
+      const profile = await updateProfile({ profileImage });
+      uploadedImage = profile.profileImage || profileImage;
+      // The backend user model has no bio field yet, so bio stays on this device.
+      await AsyncStorage.multiSet([
+        ["userBio", bio.trim()],
+        ["userProfileImage", uploadedImage],
+        ["userThreeWords", threeWordsFormatted],
+      ]);
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
+      return;
+    } finally {
+      setSaving(false);
     }
 
     const query = [
@@ -196,7 +190,7 @@ export default function OnboardingUploadAvatar() {
       `gender=${encodeURIComponent(gender)}`,
       `categories=${encodeURIComponent(JSON.stringify(categories))}`,
       `bio=${encodeURIComponent(bio.trim())}`,
-      `profileImage=${encodeURIComponent(profileImage || "")}`,
+      `profileImage=${encodeURIComponent(uploadedImage || "")}`,
       `threeWords=${encodeURIComponent(threeWordsFormatted)}`,
       fromKycFlow ? `fromKycFlow=true` : "",
     ]
@@ -347,8 +341,13 @@ export default function OnboardingUploadAvatar() {
           style={styles.primaryButton}
           activeOpacity={0.9}
           onPress={() => goToFaceScan(false)}
+          disabled={saving}
         >
-          <Text style={styles.primaryButtonText}>Continue</Text>
+          {saving ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.primaryButtonText}>Continue</Text>
+          )}
         </TouchableOpacity>
 
         <TouchableOpacity

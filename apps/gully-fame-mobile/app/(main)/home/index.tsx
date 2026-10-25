@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import {
   Dimensions,
   ImageBackground,
@@ -11,6 +11,7 @@ import {
   Animated,
   ActivityIndicator,
   Alert,
+  StyleSheet,
 } from "react-native";
 import { homeScreenStyles as styles } from "@/styles/homeScreenStyles";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -19,7 +20,6 @@ import { LinearGradient } from "expo-linear-gradient";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import BottomNav from "@components/layout/BottomNav";
 import DrawerMenu from "@components/layout/DrawerMenu";
-import { ReelViewer } from "@components/reel/ReelViewer";
 import { hp } from "@utils/responsive";
 import RoleBasedBanner from "@/components/home/RoleBasedBanner/RoleBasedBanner";
 import Svg, { Rect, Defs, RadialGradient, Stop } from "react-native-svg";
@@ -43,24 +43,35 @@ import { homePageHeroSlidesAPIData } from "@/types/homePageHeroSlides";
 import SafeImage from "@/components/SafeImage";
 import HeroBannerCarousel from "@/components/home/HeroBannerCarousel/HeroBannerCarousel";
 import CategoriesCarousel from "@/components/home/CategoriesCarousel/CategoriesCarousel";
-import { apiClient } from "@/api";
-import { feedService } from "@/api/services/feedService";
-import { BASE_URL } from "@/api/axios";
+import { getAuthToken, getErrorMessage } from "@/api/client";
+import { getHomeScreen } from "@/api/services/homeService";
+import { listReels, FeedReel } from "@/api/services/reelsService";
+import type { Progress } from "@/api/services/userService";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
+import { categoryIconKey } from "@/utils/categoryDisplay";
 import { convertToFormattedString } from "@/utils/convertToFormattedString";
 import { convertToFormattedPrize } from "@/utils/convertToFormattedPrize";
 import { convertDateToDaysLeft } from "@/utils/convertDateToDaysLeft";
 
 const getDimensions = () => Dimensions.get("window");
 
-// API timeout wrapper - outside component to avoid JSX generic syntax issues
-const withTimeout = <T extends any>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> => {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`API call timed out after ${timeoutMs}ms`)), timeoutMs)
-    ),
-  ]);
-};
+type FeedTab = "trending" | "for-you" | "popular" | "saved";
+
+interface FeedCard {
+  id: string;
+  title: string;
+  image: string;
+  likes: number;
+  votes: number;
+}
+
+const reelToCard = (reel: FeedReel): FeedCard => ({
+  id: reel._id,
+  title: reel.caption || reel.author?.username || "",
+  image: reel.thumbnail_url || "",
+  likes: reel.stats?.likes || 0,
+  votes: reel.stats?.votes || 0,
+});
 
 export default function GullyFameHome() {
   const [activeTab, setActiveTab] = useState("Home");
@@ -69,147 +80,100 @@ export default function GullyFameHome() {
   const [dimensions, setDimensions] = useState(getDimensions());
   const insets = useSafeAreaInsets();
 
-  const [feedTab, setFeedTab] = useState<"trending" | "for-you" | "popular" | "saved">("trending");
+  const [feedTab, setFeedTab] = useState<FeedTab>("trending");
   const [feedLoading, setFeedLoading] = useState(false);
+  // Spinner only before the first feed load; later focuses refresh silently.
+  const feedLoadedRef = useRef(false);
 
   const [banners, setBanners] = useState<homePageHeroSlidesAPIData[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
-  const [trendingData, setTrendingData] = useState<any[]>([]);
-  const [forYouData, setForYouData] = useState<any[]>([]);
-  const [popularData, setPopularData] = useState<any[]>([]);
-  const [savedData, setSavedData] = useState<any[]>([]);
+  const [trendingData, setTrendingData] = useState<FeedCard[]>([]);
+  const [forYouData, setForYouData] = useState<FeedCard[]>([]);
+  const [popularData, setPopularData] = useState<FeedCard[]>([]);
+  const [savedData, setSavedData] = useState<FeedCard[]>([]);
   const [liveCompetitions, setLiveCompetitions] = useState<any[]>([]);
   const [pastCompetitions, setPastCompetitions] = useState<any[]>([]);
   const [upcomingCompetitions, setUpcomingCompeitions] = useState<any[]>([]);
   const [topCompetitors, setTopCompetitors] = useState<any[]>([]);
 
-  const [showReelViewer, setShowReelViewer] = useState(false);
-  const [selectedReelIndex, setSelectedReelIndex] = useState(0);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const liveDotBlink = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [scrollY, setScrollY] = useState(0);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      let isMounted = true;
+  const [homeError, setHomeError] = useState("");
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [dailyMission, setDailyMission] = useState<{ target: number; current: number; completed: boolean } | null>(null);
+  const [feedError, setFeedError] = useState("");
 
-      async function fetchHomePage() {
-        try {
-          const resp = await withTimeout(apiClient.get(`/user/homeScreen`));
-          if (!isMounted) return;
-          
-          if (resp.status !== 200) throw new Error("Error trying to receive home screen api");
+  // GET /user/homeScreen feeds every section of this screen in one call.
+  const loadHome = useCallback(async () => {
+    setHomeError("");
+    try {
+      const data = await getHomeScreen();
+      setBanners(data.banners);
+      setCategories(
+        data.categories.map((c) => ({ id: c.id, name: c.name, imageUrl: c.icon, icon: categoryIconKey(c.name) }))
+      );
+      setTrendingData(data.trending.map((t) => ({ id: t.id, title: t.title, image: t.image, likes: t.likes, votes: t.views })));
+      setLiveCompetitions(data.liveCompetitions);
+      setPastCompetitions(data.pastCompetitions);
+      setUpcomingCompeitions(data.upcomingCompetitions);
+      setTopCompetitors(data.topCompetitors);
+      setProgress(data.progress);
+      setDailyMission(data.dailyMission);
+    } catch (error) {
+      setHomeError(getErrorMessage(error));
+    }
+  }, []);
 
-          const data = resp.data.data;
-          if (data.banners) setBanners(data.banners);
-          if (data.trending) setTrendingData(data.trending);
-          if (data.liveCompetitions) setLiveCompetitions(data.liveCompetitions);
-          if (data.pastCompetitions) setPastCompetitions(data.pastCompetitions);
-          if (data.upcomingCompetitions) setUpcomingCompeitions(data.upcomingCompetitions);
-          if (data.topCompetitors) setTopCompetitors(data.topCompetitors);
-        } catch (err) {
-          if (!isMounted) return;
-          console.error("[HomeScreen] Error fetching home page data:", err);
-        }
-      }
+  // Feed tabs come from GET /reels: For You = newest, Popular = most voted of the
+  // latest reels, Saved = the ones the user saved (is_saved).
+  const loadFeed = useCallback(async () => {
+    if (!feedLoadedRef.current) setFeedLoading(true);
+    setFeedError("");
+    try {
+      const page = await listReels(null, 30);
+      const cards = page.reels.map(reelToCard);
+      setForYouData(cards.slice(0, 10));
+      setPopularData([...cards].sort((a, b) => b.votes - a.votes).slice(0, 10));
+      setSavedData(page.reels.filter((r) => r.user_interactions?.is_saved).map(reelToCard));
+    } catch (error) {
+      setFeedError(getErrorMessage(error));
+    } finally {
+      feedLoadedRef.current = true;
+      setFeedLoading(false);
+    }
+  }, []);
 
-      async function loadFeedData() {
-        setFeedLoading(true);
-        try {
-          const categoriesResult = await withTimeout(feedService.getCategories());
-          if (!isMounted) return;
-          
-          if (categoriesResult.success && categoriesResult.data) {
-            setCategories(categoriesResult.data as any[]);
-          }
-
-          const trendingResult = await withTimeout(feedService.getTrendingReels(1, 10));
-          if (!isMounted) return;
-          
-          if (trendingResult.success && trendingResult.data) {
-            setTrendingData(trendingResult.data.reels as any[]);
-          }
-
-          const forYouResult = await withTimeout(feedService.getForYouReels(1, 10));
-          if (!isMounted) return;
-          
-          if (forYouResult.success && forYouResult.data) {
-            setForYouData(forYouResult.data.reels as any[]);
-          }
-
-          const popularResult = await withTimeout(feedService.getPopularReels(1, 10));
-          if (!isMounted) return;
-          
-          if (popularResult.success && popularResult.data) {
-            setPopularData(popularResult.data.reels as any[]);
-          }
-
-          const savedResult = await withTimeout(feedService.getSavedReels(1, 10));
-          if (!isMounted) return;
-          
-          if (savedResult.success && savedResult.data) {
-            setSavedData(savedResult.data.reels as any[]);
-          }
-        } catch (err) {
-          if (!isMounted) return;
-          console.error("Error loading feed data:", err);
-        } finally {
-          if (isMounted) {
-            setFeedLoading(false);
-          }
-        }
-      }
-
-      fetchHomePage();
-      loadFeedData();
-
-      return () => {
-        isMounted = false;
-      };
-    }, [])
-  );
-
-  useEffect(() => {
-    const fetchUnreadCount = async () => {
-      try {
-        const result = await withTimeout(getUnreadNotificationCount());
-        setUnreadCount(result.success && result.data ? result.data.count || 0 : 0);
-      } catch (err) {
-        console.error("[HomeScreen] Error fetching unread count:", err);
-        setUnreadCount(0); // Fallback to 0 on error
-      }
-    };
-
-    fetchUnreadCount();
-    const pollInterval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(pollInterval);
+  const refreshUnreadCount = useCallback(async () => {
+    const result = await getUnreadNotificationCount();
+    if (result.success && result.data) setUnreadCount(result.data.count);
   }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
-      const refreshUnreadCount = async () => {
-        try {
-          const result = await getUnreadNotificationCount();
-          if (result.success && result.data) {
-            setUnreadCount(result.data.count || 0);
-          }
-        } catch (err) {
-          console.error("[HomeScreen] Error refreshing unread count:", err);
-        }
-      };
-
+    useCallback(() => {
+      loadHome();
+      loadFeed();
       refreshUnreadCount();
-    }, [])
+    }, [loadHome, loadFeed, refreshUnreadCount])
   );
+
+  useEffect(() => {
+    const pollInterval = setInterval(refreshUnreadCount, 30000);
+    return () => clearInterval(pollInterval);
+  }, [refreshUnreadCount]);
+
+  const openReel = (reelId: string) =>
+    router.push({ pathname: "/(main)/reel", params: { startReelId: reelId } } as any);
 
   const liveCompetitionsFull = useMemo(
     () =>
       liveCompetitions.map((comp) => ({
         defaultThumbnailImage: require("@assets/images/trending_reel2.png"),
         people: convertToFormattedString(Number(comp.participants ?? 0)),
-        endDate: comp.endDate ? String(comp.endDate) : new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
+        endDate: comp.endDate ? String(comp.endDate) : "",
         prize: convertToFormattedPrize(comp.prize),
         ...comp,
       })),
@@ -233,24 +197,6 @@ export default function GullyFameHome() {
       })),
     [upcomingCompetitions]
   );
-
-  const convertTrendingReelsToReels = useMemo(() => {
-    return trendingData.map((reel) => ({
-      id: reel.id,
-      username: reel.title || "GullyFame Creator",
-      caption: reel.category || "",
-      musicName: "Original Sound",
-      video: null,
-      likes: Number(reel.likes ?? 0),
-      comments: 0,
-      shares: 0,
-      saves: 0,
-      tips: 0,
-      isLiked: false,
-      isSaved: false,
-      type: "video" as const,
-    }));
-  }, [trendingData]);
 
   useEffect(() => {
     const subscription = Dimensions.addEventListener("change", ({ window }) =>
@@ -311,8 +257,7 @@ export default function GullyFameHome() {
 
   const checkAuthAndNavigate = async (route: string, requiresParticipant: boolean = false) => {
     try {
-      const isLoggedIn = await AsyncStorage.getItem("isLoggedIn");
-      if (isLoggedIn !== "true") {
+      if (!(await getAuthToken())) {
         setDrawerVisible(true);
         return;
       }
@@ -335,6 +280,7 @@ export default function GullyFameHome() {
   // Removed 'user_progress' section since it contained hardcoded gamification dummy data
   const homeSections = [
     { id: "hero" },
+    { id: "progress" },
     { id: "categories" },
     { id: "trending" },
     { id: "live" },
@@ -348,9 +294,9 @@ export default function GullyFameHome() {
     switch (item.id) {
       case "hero":
         return (
-          <View style={[styles.heroSection, { height: hp(40) }]}>
-            <View style={styles.radialGradientContainer}>
-              <Svg width={dimensions.width} height={hp(40)} style={styles.radialGradientSvg}>
+          <View style={[styles.heroSection, { height: hp(45), marginBottom: 16 }]}>
+            <View style={styles.radialGradientContainer} pointerEvents="none">
+              <Svg width={dimensions.width} height={hp(45)} style={styles.radialGradientSvg}>
                 <Defs>
                   <RadialGradient id="radialGradient" cx="50%" cy="0%" r="200%">
                     <Stop offset="0%" stopColor="#EC9A15" stopOpacity="1" />
@@ -360,6 +306,7 @@ export default function GullyFameHome() {
                 <Rect width="100%" height="100%" fill="url(#radialGradient)" />
               </Svg>
             </View>
+            <HeroBannerCarousel slides={banners} />
             <View
               style={[
                 styles.heroHeaderIcons,
@@ -373,9 +320,7 @@ export default function GullyFameHome() {
                 onPress={() => checkAuthAndNavigate("/(main)/settings/notifications")}
               >
                 <NotificationIcon />
-                <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
-                </View>
+                {unreadCount > 0 && <View style={styles.notificationDot} />}
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.heroIconButton}
@@ -384,14 +329,13 @@ export default function GullyFameHome() {
                 <ChatIcon />
               </TouchableOpacity>
             </View>
-            <HeroBannerCarousel slides={banners}></HeroBannerCarousel>
           </View>
         );
 
       case "categories":
         return <CategoriesCarousel categories={categories}></CategoriesCarousel>;
 
-      case "trending":
+      case "trending": {
         const currentFeedData = 
           feedTab === "trending" ? trendingData :
           feedTab === "for-you" ? forYouData :
@@ -448,6 +392,11 @@ export default function GullyFameHome() {
                 <ActivityIndicator size="large" color="#EC9A15" />
                 <Text style={{ color: "#999", marginTop: 12 }}>Loading feed...</Text>
               </View>
+            ) : feedTab !== "trending" && feedError ? (
+              <TouchableOpacity onPress={loadFeed} style={{ paddingVertical: 40, alignItems: "center" }}>
+                <Text style={{ color: "#999", fontSize: 14, textAlign: "center" }}>{feedError}</Text>
+                <Text style={{ color: "#EC9A15", fontSize: 14, marginTop: 8 }}>Tap to retry</Text>
+              </TouchableOpacity>
             ) : currentFeedData && currentFeedData.length > 0 ? (
               <ScrollView
                 horizontal
@@ -459,10 +408,7 @@ export default function GullyFameHome() {
                   <View key={reel.id || index} style={styles.trendingReelCardWrapper}>
                     <TouchableOpacity
                       style={styles.trendingReelCard}
-                      onPress={() => {
-                        setSelectedReelIndex(index);
-                        requestAnimationFrame(() => setShowReelViewer(true));
-                      }}
+                      onPress={() => openReel(reel.id)}
                       activeOpacity={0.9}
                     >
                       <ImageBackground
@@ -478,7 +424,7 @@ export default function GullyFameHome() {
 
                       <SafeImage
                         style={styles.trendingReelImage}
-                        imageUrl={reel.thumbnail || `${BASE_URL}${reel.image}`}
+                        imageUrl={resolveMediaUrl(reel.image) || undefined}
                         defaultImage={require("@assets/images/trending_reel2.png")}
                         resizeMode="contain"
                       />
@@ -496,7 +442,7 @@ export default function GullyFameHome() {
                       <View style={styles.statItem}>
                         <EyeIcon color="#EAB04B" />
                         <Text style={styles.statText}>
-                          {convertToFormattedString(Number(reel.views ?? 0))} views
+                          {convertToFormattedString(Number(reel.votes ?? 0))} votes
                         </Text>
                       </View>
                     </View>
@@ -505,11 +451,14 @@ export default function GullyFameHome() {
               </ScrollView>
             ) : (
               <View style={{ paddingVertical: 40, justifyContent: "center", alignItems: "center" }}>
-                <Text style={{ color: "#999", fontSize: 14 }}>No reels available</Text>
+                <Text style={{ color: "#999", fontSize: 14 }}>
+                  {feedTab === "saved" ? "Reels you save will show up here" : "No reels yet"}
+                </Text>
               </View>
             )}
           </View>
         );
+      }
 
       case "live":
         if (!liveCompetitionsFull.length) return null;
@@ -553,7 +502,7 @@ export default function GullyFameHome() {
                     <View style={styles.upcomingCompImageWrapper}>
                       <SafeImage
                         defaultImage={comp.defaultThumbnailImage}
-                        imageUrl={`${BASE_URL}${comp.image}`}
+                        imageUrl={resolveMediaUrl(comp.image) || undefined}
                         style={styles.upcomingCompImage}
                         resizeMode="contain"
                       />
@@ -683,7 +632,7 @@ export default function GullyFameHome() {
                     <View style={styles.upcomingCompImageWrapper}>
                       <SafeImage
                         defaultImage={comp.defaultThumbnailImage}
-                        imageUrl={`${BASE_URL}${comp.image}`}
+                        imageUrl={resolveMediaUrl(comp.image) || undefined}
                         style={styles.upcomingCompImage}
                         resizeMode="contain"
                       ></SafeImage>
@@ -769,7 +718,7 @@ export default function GullyFameHome() {
                     <SafeImage
                       style={styles.pastCompImage}
                       resizeMode="contain"
-                      imageUrl={`${BASE_URL}${comp.image}`}
+                      imageUrl={resolveMediaUrl(comp.image) || undefined}
                       defaultImage={comp.defaultThumbnailImage}
                     ></SafeImage>
                     <View style={styles.pastCompBadge}>
@@ -818,6 +767,48 @@ export default function GullyFameHome() {
           </View>
         );
 
+      case "progress":
+        if (homeError) {
+          return (
+            <TouchableOpacity onPress={loadHome} style={homeExtraStyles.card}>
+              <Text style={homeExtraStyles.muted}>{homeError}</Text>
+              <Text style={homeExtraStyles.accent}>Tap to retry</Text>
+            </TouchableOpacity>
+          );
+        }
+        if (!progress && !dailyMission) return null;
+        return (
+          <View style={homeExtraStyles.card}>
+            {progress ? (
+              <>
+                <View style={homeExtraStyles.row}>
+                  <Text style={homeExtraStyles.title}>
+                    {progress.levelTitle} · Level {progress.level}
+                  </Text>
+                  <Text style={homeExtraStyles.accent}>🔥 {progress.streakCount} day streak</Text>
+                </View>
+                <View style={homeExtraStyles.track}>
+                  <View
+                    style={[
+                      homeExtraStyles.fill,
+                      { width: `${Math.min(100, Math.round((progress.xpIntoLevel / progress.xpPerLevel) * 100))}%` },
+                    ]}
+                  />
+                </View>
+                <Text style={homeExtraStyles.muted}>
+                  {progress.xpToNextLevel} XP to Level {progress.level + 1}
+                </Text>
+              </>
+            ) : null}
+            {dailyMission ? (
+              <Text style={[homeExtraStyles.muted, { marginTop: 8 }]}>
+                {dailyMission.completed ? "✅ " : "🎯 "}DAILY MISSION — Vote on {dailyMission.target} videos (
+                {Math.min(dailyMission.current, dailyMission.target)}/{dailyMission.target})
+              </Text>
+            ) : null}
+          </View>
+        );
+
       case "top_competitors":
         if (!topCompetitors.length) return null;
         return (
@@ -829,7 +820,7 @@ export default function GullyFameHome() {
               </View>
             </View>
             <Text style={styles.hallOfFameSubtitle}>
-              Overall point leaders across all GullyFame events.
+              Overall point leaders across all Gully Fame events.
             </Text>
 
             <ScrollView
@@ -860,7 +851,7 @@ export default function GullyFameHome() {
                   </Text>
                   <SafeImage
                     style={styles.hallOfFameImage}
-                    imageUrl={`${BASE_URL}${competitor.image}`}
+                    imageUrl={resolveMediaUrl(competitor.image) || undefined}
                     defaultImage={require("@assets/images/trending_reel2.png")}
                   />
                   <Text style={styles.hallOfFameName} numberOfLines={1}>
@@ -907,9 +898,7 @@ export default function GullyFameHome() {
               onPress={() => checkAuthAndNavigate("/(main)/settings/notifications")}
             >
               <NotificationIcon />
-              <View style={styles.notificationBadge}>
-                <Text style={styles.notificationBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
-              </View>
+              {unreadCount > 0 && <View style={styles.notificationDot} />}
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.stickyHeaderIconButton}
@@ -938,14 +927,52 @@ export default function GullyFameHome() {
         onOpenDrawer={() => setDrawerVisible(true)}
       />
       <DrawerMenu visible={drawerVisible} onClose={() => setDrawerVisible(false)} />
-      <ReelViewer
-        visible={showReelViewer}
-        reels={convertTrendingReelsToReels}
-        initialIndex={selectedReelIndex}
-        onClose={() => setShowReelViewer(false)}
-        hasBottomNav={false}
-        insets={insets}
-      />
     </View>
   );
 }
+
+const homeExtraStyles = StyleSheet.create({
+  card: {
+    marginHorizontal: 16,
+    marginTop: 0,
+    marginBottom: 16,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(236,154,21,0.35)",
+  },
+  row: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  title: {
+    color: "#fff",
+    fontSize: 15,
+    fontFamily: "Inter_600SemiBold",
+  },
+  accent: {
+    color: "#EC9A15",
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+  },
+  muted: {
+    color: "#bbb",
+    fontSize: 13,
+    fontFamily: "Inter_400Regular",
+  },
+  track: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(255,255,255,0.12)",
+    overflow: "hidden",
+    marginBottom: 6,
+  },
+  fill: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#EC9A15",
+  },
+});

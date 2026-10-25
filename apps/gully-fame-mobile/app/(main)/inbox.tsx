@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -19,7 +19,11 @@ import { router } from "expo-router";
 import { useFocusEffect } from "expo-router/react-navigation";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Path, Circle } from "react-native-svg";
-import { ChatListItem, chatService } from "@api/services/chatService";
+import { ChatListItem, getChatList, setArchived, clearConversationForMe } from "@api/services/chatService";
+import { socketChatService } from "@api/services/socketChatService";
+import { getErrorMessage } from "@api/client";
+import { getChatContacts, fallbackChatName } from "@utils/chatContacts";
+import { toastError, toastSuccess } from "@components/ui/Toast";
 import { BackIcon } from "@/icons";
 import { convertDateToChatTimePassed } from "@/utils/convertDateToChatTimePassed";
 
@@ -59,58 +63,60 @@ export default function InboxScreen() {
   }, []);
 
   
-  useEffect(() => {
-    const fetchChatList = async () => {
-      try {
-        setLoading(true);
-        console.log("[InboxScreen] Fetching chat list...");
+  const [loadError, setLoadError] = useState("");
 
-        const response = await chatService.getChatList();
-
-        if (response.success && response.data) {
-          
-          const chatList: ChatListItem[] = response.data.chatlist || [];
-          console.log(
-            "[InboxScreen] Raw chat list from API: ",
-            JSON.stringify(chatList, null, 2),
-          );
-
-          const transformedChats: ChatItem[] = chatList.map((chat) => {
-            const chatUserId = chat.chatter_user_id;
-            return {
-              id: chatUserId,
-              chat_user_id: chatUserId,
-              name: `User ${chatUserId.slice(-4)}`,
-              lastMessage: chat.latest_message,
-              timestamp: convertDateToChatTimePassed(chat.last_message_time),
-              unreadCount: 0,
-              isOnline: false,
-              avatar: require("@assets/images/user1.png"),
-            };
-          });
-
-          setAllChatsList(transformedChats);
-          console.log("[InboxScreen] Loaded", transformedChats.length, "chats");
-        } else {
-          console.error(
-            "[InboxScreen] Failed to fetch chat list:",
-            response.message,
-          );
-          
-          setAllChatsList([]);
-        }
-      } catch (error: any) {
-        console.error("[InboxScreen] Error fetching chat list:", error);
-        setAllChatsList([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchChatList();
+  // Both lists come from GET /chat/chatlist (view=archived for the archived tab).
+  const loadChats = useCallback(async () => {
+    setLoadError("");
+    try {
+      const [all, archived, contacts] = await Promise.all([
+        getChatList("all"),
+        getChatList("archived"),
+        getChatContacts(),
+      ]);
+      const toItem = (chat: ChatListItem): ChatItem => {
+        const contact = contacts[chat.chatter_user_id];
+        return {
+          id: chat.chatter_user_id,
+          chat_user_id: chat.chatter_user_id,
+          name: contact?.name || fallbackChatName(chat.chatter_user_id),
+          lastMessage: chat.latest_message,
+          timestamp: convertDateToChatTimePassed(chat.last_message_time),
+          unreadCount: 0,
+          isOnline: false,
+          avatar: contact?.avatar ? { uri: contact.avatar } : require("@assets/images/user1.png"),
+        };
+      };
+      setAllChatsList(all.chatlist.map(toItem));
+      setArchivedChatsList(archived.chatlist.map(toItem));
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  
+  // Deletes every message of these conversations for me (POST /chat/message/delete).
+  const [clearing, setClearing] = useState(false);
+  const clearChats = async (chatterIds: string[]) => {
+    if (clearing || chatterIds.length === 0) return;
+    setClearing(true);
+    try {
+      for (const id of chatterIds) await clearConversationForMe(id);
+      toastSuccess(chatterIds.length > 1 ? "Chats deleted" : "Chat deleted");
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setClearing(false);
+      setSelectedChats([]);
+      setIsSelectionMode(false);
+      loadChats();
+    }
+  };
+
+  // A message arriving over the socket refreshes the list.
+  useEffect(() => socketChatService.onMessage(() => loadChats()), [loadChats]);
+
   useEffect(() => {
     Animated.spring(slideAnim, {
       toValue: activeTab === "All" ? 0 : 1,
@@ -146,38 +152,17 @@ export default function InboxScreen() {
   
   useFocusEffect(
     useCallback(() => {
-      const fetchChatList = async () => {
-        try {
-          const response = await chatService.getChatList();
-          if (response.success && response.data) {
-            const chatList = response.data.chatlist || [];
-            const transformedChats: ChatItem[] = chatList.map((chat) => {
-              const chatUserId = chat.chatter_user_id;
-              return {
-                id: chatUserId,
-                chat_user_id: chatUserId,
-                name: `User ${chatUserId.slice(-4)}`,
-                lastMessage: chat.latest_message,
-                timestamp: convertDateToChatTimePassed(chat.last_message_time),
-                unreadCount: 0,
-                isOnline: false,
-                avatar: require("@assets/images/user1.png"),
-              };
-            });
-            setAllChatsList(transformedChats);
-          }
-        } catch (error) {
-          console.error("[InboxScreen] Error refreshing chat list:", error);
-        }
-      };
-      fetchChatList();
-    }, []),
+      loadChats();
+    }, [loadChats]),
   );
 
-  
   const handleArchive = (chatId: string) => {
     const chat = allChatsList.find((c) => c.id === chatId);
     if (chat) {
+      setArchived(chatId, true).catch((error) => {
+        toastError(getErrorMessage(error));
+        loadChats();
+      });
       
       Animated.timing(
         swipeAnimations.current[chatId] || new Animated.Value(0),
@@ -201,6 +186,10 @@ export default function InboxScreen() {
   const handleUnarchive = (chatId: string) => {
     const chat = archivedChatsList.find((c) => c.id === chatId);
     if (chat) {
+      setArchived(chatId, false).catch((error) => {
+        toastError(getErrorMessage(error));
+        loadChats();
+      });
       
       Animated.timing(
         swipeAnimations.current[chatId] || new Animated.Value(0),
@@ -491,8 +480,13 @@ export default function InboxScreen() {
           {currentChats.length === 0 ? (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyText}>
-                No chats yet. Start a conversation!
+                {loadError || (activeTab === "Archived" ? "No archived chats." : "No chats yet. Start a conversation!")}
               </Text>
+              {loadError ? (
+                <TouchableOpacity onPress={loadChats} style={{ marginTop: 12 }}>
+                  <Text style={[styles.emptyText, { color: "#EC9A15" }]}>Retry</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           ) : (
             currentChats.map((chat) => {
@@ -814,10 +808,7 @@ export default function InboxScreen() {
                     {
                       text: "Delete",
                       style: "destructive",
-                      onPress: () => {
-                        setAllChatsList([]);
-                        setArchivedChatsList([]);
-                      },
+                      onPress: () => clearChats([...allChatsList, ...archivedChatsList].map((c) => c.id)),
                     },
                   ],
                 );
@@ -831,7 +822,7 @@ export default function InboxScreen() {
               style={styles.menuItem}
               onPress={() => {
                 setShowMenu(false);
-                Alert.alert("Report", "Report feature coming soon!");
+                Alert.alert("Not available yet", "Reporting isn't available yet. Contact support@gullyfame.com.");
               }}
             >
               <Text style={styles.menuItemText}>Report</Text>
@@ -851,18 +842,7 @@ export default function InboxScreen() {
                 {
                   text: "Delete",
                   style: "destructive",
-                  onPress: () => {
-                    setAllChatsList(
-                      allChatsList.filter((c) => !selectedChats.includes(c.id)),
-                    );
-                    setArchivedChatsList(
-                      archivedChatsList.filter(
-                        (c) => !selectedChats.includes(c.id),
-                      ),
-                    );
-                    setSelectedChats([]);
-                    setIsSelectionMode(false);
-                  },
+                  onPress: () => clearChats(selectedChats),
                 },
               ]);
             }}
@@ -872,25 +852,7 @@ export default function InboxScreen() {
           <TouchableOpacity
             style={styles.selectionActionButton}
             onPress={() => {
-              Alert.alert("Block", `Block ${selectedChats.length} user(s)?`, [
-                { text: "Cancel", style: "cancel" },
-                {
-                  text: "Block",
-                  style: "destructive",
-                  onPress: () => {
-                    setAllChatsList(
-                      allChatsList.filter((c) => !selectedChats.includes(c.id)),
-                    );
-                    setArchivedChatsList(
-                      archivedChatsList.filter(
-                        (c) => !selectedChats.includes(c.id),
-                      ),
-                    );
-                    setSelectedChats([]);
-                    setIsSelectionMode(false);
-                  },
-                },
-              ]);
+              Alert.alert("Not available yet", "Blocking users isn't available yet.");
             }}
           >
             <Text style={styles.selectionActionText}>Block</Text>
@@ -904,7 +866,7 @@ export default function InboxScreen() {
                   text: "Report",
                   style: "destructive",
                   onPress: () => {
-                    Alert.alert("Report", "Report feature coming soon!");
+                    Alert.alert("Not available yet", "Reporting isn't available yet. Contact support@gullyfame.com.");
                     setSelectedChats([]);
                     setIsSelectionMode(false);
                   },

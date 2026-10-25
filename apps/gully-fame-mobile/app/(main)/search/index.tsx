@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   StyleSheet,
@@ -29,6 +29,17 @@ import {
 } from "@utils/responsive";
 
 import { useRouter } from "expo-router";
+import {
+  searchAll,
+  searchUsersPage,
+  searchCompetitionsPage,
+  searchReelsPage,
+  SearchPage,
+} from "@/api/services/searchService";
+import { getErrorMessage } from "@/api/client";
+import { openUserProfile } from "@/utils/openProfile";
+import { openCompetition } from "@/utils/openCompetition";
+import { toastError } from "@/components/ui/Toast";
 
 
 const getScreenDimensions = () => {
@@ -55,11 +66,25 @@ const COLORS = {
 };
 const THEME_COLOR = COLORS.accent;
 
+const EMPTY_RESULTS = {
+  top_users: [],
+  top_competitions: [],
+  top_reels: [],
+  results: [],
+  hasMore: false,
+  page: 1,
+};
+
+const fetchTypedPage = (type: string, q: string, page: number): Promise<SearchPage<any>> =>
+  type === "users"
+    ? searchUsersPage(q, page)
+    : type === "competitions"
+      ? searchCompetitionsPage(q, page)
+      : searchReelsPage(q, page);
+
 const safeImageSource = (uri: any) => {
   if (!uri || uri.endsWith(".mp4")) {
-    return {
-      uri: "https://picsum.photos/seed/fallback/400/600",
-    };
+    return require("@assets/images/trending1.png");
   }
   return { uri };
 };
@@ -76,13 +101,28 @@ export default function SearchScreen() {
   const router = useRouter();
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [searchHistory, setSearchHistory] = useState<string[]>([]);
-  const [searchResults, setSearchResults] = useState<any>({
-    top_users: [],
-    top_competitions: [],
-    top_reels: [],
-    results: [],
-    hasMore: false,
-  });
+  const [searchResults, setSearchResults] = useState<any>(EMPTY_RESULTS);
+  const [searchError, setSearchError] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  const loadMoreResults = useCallback(async () => {
+    if (loadingMore || !searchResults.hasMore || activeSearchType === "all") return;
+    setLoadingMore(true);
+    try {
+      const next = (searchResults.page || 1) + 1;
+      const page = await fetchTypedPage(activeSearchType, searchQuery.trim(), next);
+      setSearchResults((prev: any) => ({
+        ...prev,
+        results: [...prev.results, ...page.results],
+        hasMore: page.hasMore,
+        page: next,
+      }));
+    } catch (error) {
+      toastError(getErrorMessage(error));
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, searchResults.hasMore, searchResults.page, activeSearchType, searchQuery]);
 
   const searchTabs = [
     { id: "all", label: "All" },
@@ -99,8 +139,7 @@ export default function SearchScreen() {
         if (history) {
           setSearchHistory(JSON.parse(history));
         }
-      } catch (error) {
-        console.error("[search] Error loading search history:", error);
+      } catch (error) { /* intentionally ignored */
       }
     };
     loadSearchHistory();
@@ -115,13 +154,10 @@ export default function SearchScreen() {
         // Remove if already exists, then add to front
         const filtered = prev.filter((item) => item !== query);
         const updated = [query, ...filtered].slice(0, 10); // Keep last 10
-        AsyncStorage.setItem("searchHistory", JSON.stringify(updated)).catch((err) =>
-          console.error("[search] Error saving search history:", err)
-        );
+        AsyncStorage.setItem("searchHistory", JSON.stringify(updated)).catch(() => undefined);
         return updated;
       });
-    } catch (error) {
-      console.error("[search] Error adding to search history:", error);
+    } catch (error) { /* intentionally ignored */
     }
   }, []);
 
@@ -165,13 +201,8 @@ export default function SearchScreen() {
 
     // If query is empty, clear results immediately
     if (!searchQuery.trim()) {
-      setSearchResults({
-        top_users: [],
-        top_competitions: [],
-        top_reels: [],
-        results: [],
-        hasMore: false,
-      });
+      setSearchResults(EMPTY_RESULTS);
+      setSearchError("");
       setIsLoading(false);
       return;
     }
@@ -182,103 +213,21 @@ export default function SearchScreen() {
     // Set loading state immediately
     setIsLoading(true);
 
-    // Debounce API call by 400ms
+    // Debounce API call by 400ms. GET /search?q&type (typed searches are paginated).
     debounceTimerRef.current = setTimeout(async () => {
+      const q = searchQuery.trim();
+      setSearchError("");
       try {
         if (activeSearchType === "all") {
-          const { searchService } = await import("@/api/services/searchService");
-          const result = await searchService.globalSearch(searchQuery.trim());
-          
-          if (result.success && result.data) {
-            setSearchResults({
-              top_users: result.data.users?.slice(0, 3) || [],
-              top_competitions: result.data.competitions?.slice(0, 3) || [],
-              top_reels: result.data.reels || [],
-              results: [],
-              hasMore: false,
-            });
-          } else {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: [],
-              hasMore: false,
-            });
-          }
-        } else if (activeSearchType === "users") {
-          const { searchService } = await import("@/api/services/searchService");
-          const result = await searchService.searchUsers(searchQuery.trim());
-          
-          if (result.success && result.data) {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: result.data,
-              hasMore: false,
-            });
-          } else {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: [],
-              hasMore: false,
-            });
-          }
-        } else if (activeSearchType === "competitions") {
-          const { searchService } = await import("@/api/services/searchService");
-          const result = await searchService.searchCompetitions(searchQuery.trim());
-          
-          if (result.success && result.data) {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: result.data,
-              hasMore: false,
-            });
-          } else {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: [],
-              hasMore: false,
-            });
-          }
-        } else if (activeSearchType === "reels") {
-          const { searchService } = await import("@/api/services/searchService");
-          const result = await searchService.searchReels(searchQuery.trim());
-          
-          if (result.success && result.data) {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: result.data,
-              hasMore: false,
-            });
-          } else {
-            setSearchResults({
-              top_users: [],
-              top_competitions: [],
-              top_reels: [],
-              results: [],
-              hasMore: false,
-            });
-          }
+          const data = await searchAll(q);
+          setSearchResults({ ...EMPTY_RESULTS, ...data });
+        } else {
+          const page = await fetchTypedPage(activeSearchType, q, 1);
+          setSearchResults({ ...EMPTY_RESULTS, results: page.results, hasMore: page.hasMore, page: 1 });
         }
       } catch (error) {
-        console.error("[search] Error performing search:", error);
-        setSearchResults({
-          top_users: [],
-          top_competitions: [],
-          top_reels: [],
-          results: [],
-          hasMore: false,
-        });
+        setSearchResults(EMPTY_RESULTS);
+        setSearchError(getErrorMessage(error));
       } finally {
         setIsLoading(false);
       }
@@ -312,18 +261,12 @@ export default function SearchScreen() {
           </View>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search GullyFame..."
+            placeholder="Search Gully Fame..."
             placeholderTextColor="#999"
             value={searchQuery}
             onChangeText={setSearchQuery}
             returnKeyType="search"
             onSubmitEditing={() => {
-              console.log(
-                "Searching for:",
-                searchQuery,
-                "Type:",
-                activeSearchType,
-              );
             }}
           />
         </View>
@@ -401,7 +344,7 @@ export default function SearchScreen() {
                     const updated = searchHistory.filter((_, i) => i !== index);
                     setSearchHistory(updated);
                     await AsyncStorage.setItem("searchHistory", JSON.stringify(updated)).catch(
-                      (err) => console.error("[search] Error updating history:", err)
+                      (err) => undefined
                     );
                   }}
                   style={{ padding: scale(8) }}
@@ -414,10 +357,27 @@ export default function SearchScreen() {
         </ScrollView>
       ) : (
         <View style={styles.mainContent}>
+          {activeSearchType === "all" &&
+            searchResults.top_users.length === 0 &&
+            searchResults.top_competitions.length === 0 &&
+            searchResults.top_reels.length === 0 && (
+              <Text
+                style={{
+                  color: COLORS.textMuted,
+                  textAlign: "center",
+                  marginTop: scale(40),
+                  fontSize: getFontSize(14),
+                  alignSelf: "stretch",
+                }}
+              >
+                {searchError || (searchQuery.trim() ? "No results found" : "Search for stars, competitions or reels")}
+              </Text>
+            )}
+
           {}
           {activeSearchType === "all" && (
             <View style={{ flex: 1 }}>
-              {}
+              {searchResults.top_users.length > 0 && (
               <View style={styles.stickyStarsContainer}>
                 <Text style={styles.sectionTitle}>Meet your Stars</Text>
                 <ScrollView
@@ -430,7 +390,13 @@ export default function SearchScreen() {
                       key={user._id}
                       style={styles.topUserCard}
                       onPress={() => {
-                        router.push(`/(main)/profile/${user._id}`);
+                        openUserProfile({
+                          id: user._id,
+                          firstName: user.first_name,
+                          lastName: user.last_name,
+                          username: user.username,
+                          avatar: user.profile_picture_url,
+                        });
                       }}
                     >
                       <Image
@@ -444,6 +410,7 @@ export default function SearchScreen() {
                   ))}
                 </ScrollView>
               </View>
+              )}
 
               {}
               <FlatList
@@ -454,6 +421,8 @@ export default function SearchScreen() {
                 showsVerticalScrollIndicator={false}
                 ListHeaderComponent={() => (
                   <View style={styles.competitionsHeaderBox}>
+                    {searchResults.top_competitions.length > 0 && (
+                    <>
                     <Text style={styles.sectionTitle}>
                       Participate in the Gullies
                     </Text>
@@ -466,12 +435,12 @@ export default function SearchScreen() {
                         <TouchableOpacity
                           key={comp._id}
                           onPress={() => {
-                            router.push(`/(main)/competition/${comp._id}`);
+                            openCompetition(comp._id, comp.status);
                           }}
                           style={styles.topCompCard}
                         >
                           <Image
-                            source={safeImageSource(comp.image)}
+                            source={safeImageSource(comp.image_url || comp.image)}
                             style={styles.topCompImage}
                           />
                           <View style={styles.topCompOverlay}>
@@ -482,18 +451,22 @@ export default function SearchScreen() {
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
+                    </>
+                    )}
+                    {searchResults.top_reels.length > 0 && (
                     <Text
                       style={[styles.sectionTitle, { marginTop: scale(24) }]}
                     >
                       Entries
                     </Text>
+                    )}
                   </View>
                 )}
                 renderItem={({ item }) => (
                   <TouchableOpacity
                     style={styles.fullReelCard}
                     onPress={() => {
-                      router.push(`/(main)/reel/${item._id}`);
+                      router.push({ pathname: "/(main)/reel", params: { startReelId: item._id } } as any);
                     }}
                   >
                     <Image
@@ -510,13 +483,22 @@ export default function SearchScreen() {
           {activeSearchType === "users" && (
             <FlatList
               data={searchResults.results}
+              onEndReached={loadMoreResults}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={loadingMore ? <ActivityIndicator color={THEME_COLOR} style={{ margin: 16 }} /> : null}
               keyExtractor={(item) => item._id}
               contentContainerStyle={{ paddingBottom: bottomNavHeight }}
               renderItem={({ item }) => (
                 <TouchableOpacity 
                   style={styles.userListItem}
                   onPress={() => {
-                    router.push(`/(main)/profile/${item._id}`);
+                    openUserProfile({
+                      id: item._id,
+                      firstName: item.first_name,
+                      lastName: item.last_name,
+                      username: item.username,
+                      avatar: item.profile_picture_url,
+                    });
                   }}
                 >
                   <Image
@@ -549,6 +531,9 @@ export default function SearchScreen() {
           {activeSearchType === "competitions" && (
             <FlatList
               data={searchResults.results}
+              onEndReached={loadMoreResults}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={loadingMore ? <ActivityIndicator color={THEME_COLOR} style={{ margin: 16 }} /> : null}
               keyExtractor={(item) => item._id}
               contentContainerStyle={{
                 paddingBottom: bottomNavHeight,
@@ -556,7 +541,7 @@ export default function SearchScreen() {
                 paddingTop: spacing.sm,
               }}
               renderItem={({ item }) => (
-                <View style={styles.compCard}>
+                <TouchableOpacity style={styles.compCard} activeOpacity={0.9} onPress={() => openCompetition(item._id, item.status)}>
                   <Image
                     source={safeImageSource(item.image)}
                     style={styles.compImage}
@@ -570,7 +555,7 @@ export default function SearchScreen() {
                       Prize: ₹{item.prize} | {item.participants} Joined
                     </Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               )}
             />
           )}
@@ -579,6 +564,9 @@ export default function SearchScreen() {
           {activeSearchType === "reels" && (
             <FlatList
               data={searchResults.results}
+              onEndReached={loadMoreResults}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={loadingMore ? <ActivityIndicator color={THEME_COLOR} style={{ margin: 16 }} /> : null}
               numColumns={3}
               keyExtractor={(item) => item._id}
               contentContainerStyle={{ paddingBottom: bottomNavHeight }}
@@ -586,7 +574,7 @@ export default function SearchScreen() {
                 <TouchableOpacity 
                   style={styles.topReelCard}
                   onPress={() => {
-                    router.push(`/(main)/reel/${item._id}`);
+                    router.push({ pathname: "/(main)/reel", params: { startReelId: item._id } } as any);
                   }}
                 >
                   <Image

@@ -1,44 +1,35 @@
-import React, { useEffect, useState } from 'react';
-import { Stack } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
+import { Stack, router } from 'expo-router';
 import { registerDeviceForNotifications, setupNotificationListeners } from '@/api/services/notificationIntegrationService';
+import { socketChatService } from '@/api/services/socketChatService';
+import { getAuthToken } from "@/api/client";
+import { openCompetition } from "@/utils/openCompetition";
+
+// Push payloads from the backend carry ids (competitionId, reelId, fromUserId), not a type.
+const openFromPush = (data: Record<string, any> | undefined) => {
+  if (!data) return;
+  if (data.competitionId) openCompetition(String(data.competitionId));
+  else if (data.reelId) router.push({ pathname: "/(main)/reel", params: { startReelId: String(data.reelId) } } as any);
+  else router.push("/(main)/settings/notifications" as any);
+};
 
 export default function MainLayout() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
-
-    const setupNotifications = async () => {
+    (async () => {
       try {
-        const token = await AsyncStorage.getItem('authToken');
-
-        if (!token) {
-          setIsReady(true);
-          return;
+        if (await getAuthToken()) {
+          registerDeviceForNotifications();
+          socketChatService.connect();
+          unsubscribe = setupNotificationListeners(undefined, (content) => openFromPush(content.data as any));
         }
-
-        try {
-          await registerDeviceForNotifications();
-          unsubscribe = setupNotificationListeners(
-            (notification: any) => { console.log('Notification received:', notification); },
-            (notification: any) => { console.log('Notification tapped:', notification); }
-          );
-        } catch (notifError) {
-          console.warn('Notification setup failed:', notifError);
-        }
-      } catch (error) {
-        console.error('Fatal error checking auth:', error);
       } finally {
         setIsReady(true);
       }
-    };
-
-    setupNotifications();
-
-    return () => {
-      if (unsubscribe) unsubscribe();
-    };
+    })();
+    return () => unsubscribe?.();
   }, []);
 
   if (!isReady) return null;
@@ -50,23 +41,12 @@ export default function MainLayout() {
         contentStyle: { backgroundColor: '#3C2610' },
       }}
     >
-      <Stack.Screen name="home" options={{ headerShown: false }} />
-      <Stack.Screen name="reels" options={{ headerShown: false }} />
-      <Stack.Screen name="competitions" options={{ headerShown: false }} />
+      {/* Bottom-nav destinations: switch with no animation so tabs cut instantly, no fade/slide flash */}
+      <Stack.Screen name="home" options={{ headerShown: false, animation: 'none' }} />
+      <Stack.Screen name="reel" options={{ headerShown: false, animation: 'none' }} />
       <Stack.Screen name="profile" options={{ headerShown: false }} />
-      <Stack.Screen name="settings" options={{ headerShown: false }} />
-      <Stack.Screen name="search" options={{ headerShown: false }} />
+      <Stack.Screen name="search" options={{ headerShown: false, animation: 'none' }} />
       <Stack.Screen name="inbox" options={{ headerShown: false }} />
-
-      {/* Upload screen: transparent background with disabled animation */}
-      <Stack.Screen
-        name="upload"
-        options={{
-          headerShown: false,
-          contentStyle: { backgroundColor: 'transparent' },
-          animation: 'none',
-        }}
-      />
 
       {/* Camera screen: transparent background with disabled animation */}
       <Stack.Screen

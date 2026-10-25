@@ -1,4 +1,4 @@
-import Svg, { G, Path } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 export const TwitterIcon = ({ size = 60 }) => (
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path

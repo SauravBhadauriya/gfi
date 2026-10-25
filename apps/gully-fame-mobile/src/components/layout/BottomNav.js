@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { router } from "expo-router";
+import React, { useState, useCallback } from "react";
+import { router, useFocusEffect } from "expo-router";
+import * as Haptics from "expo-haptics";
 import {
   StyleSheet,
   Text,
@@ -8,10 +9,10 @@ import {
   Dimensions,
   Platform,
   Image,
-  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { UploadIcon } from "@/icons";
+import UpgradeFanToParticipantModal from "@/components/modals/UpgradeFanToParticipantModal/UpgradeFanToParticipantModal";
 
 const { width, height } = Dimensions.get("window");
 
@@ -19,6 +20,7 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
   const insets = { bottom: Platform.OS === "ios" ? 20 : 0 };
   const [profileImage, setProfileImage] = useState(null);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [showUpgrade, setShowUpgrade] = useState(false);
 
   const protectedRoutes = ["Upload", "MyFame"];
 
@@ -39,22 +41,24 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
         setProfileImage(null);
       }
     } catch (error) {
-      console.error("Error loading profile image:", error);
       setProfileImage(null);
       setIsLoggedIn(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadProfileImage();
-  }, [loadProfileImage]);
-
-  useEffect(() => {
-    const interval = setInterval(loadProfileImage, 1500);
-    return () => clearInterval(interval);
-  }, [loadProfileImage]);
+  // Re-read login/avatar state when the screen regains focus, instead of polling every 1.5s.
+  useFocusEffect(
+    useCallback(() => {
+      loadProfileImage();
+    }, [loadProfileImage])
+  );
 
   const handlePress = async (tabName) => {
+    // Tapping the tab you are already on should do nothing (no remount, no flicker).
+    if (tabName === activeTab) return;
+
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+
     if (protectedRoutes.includes(tabName)) {
       try {
         const loginStatus = await AsyncStorage.getItem("isLoggedIn");
@@ -65,7 +69,6 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
           return;
         }
       } catch (e) {
-        console.error("Failed to check login status", e);
         if (onOpenDrawer && typeof onOpenDrawer === "function") {
           onOpenDrawer();
         }
@@ -77,15 +80,10 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
       try {
         const userRole = await AsyncStorage.getItem("userRole");
         if (userRole === "fan") {
-          Alert.alert(
-            "Upload Restricted",
-            "Please upgrade your role to Participant to upload.",
-            [{ text: "OK" }]
-          );
+          setShowUpgrade(true);
           return;
         }
-      } catch (e) {
-        console.error("Failed to check user role", e);
+      } catch (e) { /* intentionally ignored */
       }
     }
 
@@ -185,6 +183,10 @@ export default function BottomNav({ activeTab, setActiveTab, tabs, onOpenDrawer 
           </TouchableOpacity>
         );
       })}
+      <UpgradeFanToParticipantModal
+        isVisible={showUpgrade}
+        onClose={() => setShowUpgrade(false)}
+      />
     </View>
   );
 }

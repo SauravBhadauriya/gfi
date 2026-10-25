@@ -1,131 +1,40 @@
+import { apiClient, ApiEnvelope, toResult, ApiResult } from "../client";
+import { fileNameFromUri, guessMimeType } from "./uploadService";
+
 /**
- * Captions Service
- * Manages auto-caption generation for video reels
- * Real-time backend integration for production
+ * POST /reels/auto-caption transcribes speech into a caption.
+ * Send either a local file as multipart field `media`, or a public `videoUrl`.
+ * Returns { caption }.
  */
-
-import apiClient from "../axios";
-import { ApiResponse } from "../types";
-
-export interface AutoCaptionRequest {
-  reelId: string;
-  videoUri: string;
-  thumbnailUrl?: string;
-}
 
 export interface AutoCaptionResponse {
-  reelId: string;
   caption: string;
-  confidence?: number;
-  language?: string;
-  generatedAt?: string;
 }
 
-/**
- * Generate auto captions for a video reel using AI/speech recognition
- * Calls POST /reels/auto-caption with video URL
- */
-export async function autoCaption(
-  reelId: string,
-  videoUri: string,
-  thumbnailUrl?: string
-): Promise<ApiResponse<AutoCaptionResponse>> {
-  try {
-    console.log("[captionsService] Generating captions:", { reelId, videoUri });
-
-    const payload = {
-      video_url: videoUri,
-      thumbnail_url: thumbnailUrl,
-    };
-
-    const response = await apiClient.post<any>(
-      "reels/auto-caption",
-      payload,
-      { skipAuth: true }
-    );
-    const responseData = response.data as any;
-
-    if (responseData.code === 1 && responseData.data) {
-      const data = responseData.data;
-      const caption: AutoCaptionResponse = {
-        reelId: reelId,
-        caption: data.caption ?? data.text ?? "",
-        confidence: data.confidence ?? data.score,
-        language: data.language ?? data.lang ?? "en",
-        generatedAt: data.generatedAt ?? data.created_at ?? new Date().toISOString(),
-      };
-
-      console.log("[captionsService] Captions generated successfully:", caption.caption);
-
-      return {
-        success: true,
-        data: caption,
-        message: responseData.message ?? "Captions generated successfully",
-      };
-    }
-
-    return {
-      success: false,
-      message: responseData.message ?? "Failed to generate captions",
-      error: "API returned unsuccessful response",
-      data: undefined,
-    };
-  } catch (error: any) {
-    console.error("[captionsService] autoCaption error:", error.message);
-    return {
-      success: false,
-      message: error.response?.data?.message ?? error.message ?? "Network error",
-      error: error.message,
-      data: undefined,
-    };
+export async function generateCaption(videoUri: string): Promise<AutoCaptionResponse> {
+  const isRemote = /^https?:/i.test(videoUri);
+  if (isRemote) {
+    const res = await apiClient.post<ApiEnvelope<AutoCaptionResponse>>("reels/auto-caption", { videoUrl: videoUri }, { timeout: 120000 });
+    return res.data.data;
   }
+  const form = new FormData();
+  form.append("media", {
+    uri: videoUri,
+    name: fileNameFromUri(videoUri, "mp4"),
+    type: guessMimeType(videoUri, "video/mp4"),
+  } as any);
+  const res = await apiClient.post<ApiEnvelope<AutoCaptionResponse>>("reels/auto-caption", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+    // Transcription of a full clip can take a while.
+    timeout: 120000,
+  });
+  return res.data.data;
 }
 
-/**
- * Batch generate captions for multiple reels
- */
-export async function batchAutoCaption(
-  reels: Array<{ reelId: string; videoUri: string }>
-): Promise<ApiResponse<AutoCaptionResponse[]>> {
-  try {
-    console.log("[captionsService] Batch generating captions for", reels.length, "reels");
+/** `_reelId` is kept for existing callers; the endpoint doesn't need it. */
+export const autoCaption = (_reelId: string, videoUri: string): Promise<ApiResult<AutoCaptionResponse>> =>
+  toResult(() => generateCaption(videoUri), "Captions generated");
 
-    const captions: AutoCaptionResponse[] = [];
-
-    for (const reel of reels) {
-      const result = await autoCaption(reel.reelId, reel.videoUri);
-      if (result.success && result.data) {
-        captions.push(result.data);
-      } else {
-        console.warn(
-          `[captionsService] Failed to caption reel ${reel.reelId}:`,
-          result.message
-        );
-      }
-    }
-
-    return {
-      success: captions.length === reels.length,
-      data: captions,
-      message:
-        captions.length === reels.length
-          ? "All captions generated successfully"
-          : `Generated ${captions.length}/${reels.length} captions`,
-    };
-  } catch (error: any) {
-    console.error("[captionsService] batchAutoCaption error:", error.message);
-    return {
-      success: false,
-      message: error.message ?? "Batch caption generation failed",
-      error: error.message,
-      data: undefined,
-    };
-  }
-}
-
-export const captionsService = {
-  autoCaption,
-  batchAutoCaption,
-};
+export const captionsService = { generateCaption, autoCaption };
 
 export default captionsService;

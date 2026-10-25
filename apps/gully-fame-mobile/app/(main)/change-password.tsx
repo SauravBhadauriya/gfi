@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import {
 import { router } from "expo-router";
 import Svg, { Path } from "react-native-svg";
 import { EyeIcon, EyeOffIcon } from "@/icons";
-import { authService } from "@api/services/authService";
+import { authService, AUTH_RULES } from "@api/services/authService";
+import { toastSuccess } from "@/components/ui/Toast";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const { width, height } = Dimensions.get("window");
@@ -43,27 +44,18 @@ export default function ChangePassword() {
       const mobile = await AsyncStorage.getItem("userMobile");
       setUserEmail(email || "");
       setUserMobile(mobile || "");
-    } catch (error) {
-      console.error("Error loading user identifier:", error);
+    } catch (error) { /* intentionally ignored */
     }
   };
 
+  // Mirrors the backend rule: at least 6 characters.
   const validatePassword = (pwd: string): string[] => {
     const errors: string[] = [];
-    if (pwd.length < 8) {
-      errors.push("At least 8 characters");
+    if (pwd.length < AUTH_RULES.passwordMinLength) {
+      errors.push(`At least ${AUTH_RULES.passwordMinLength} characters`);
     }
-    if (!/[A-Z]/.test(pwd)) {
-      errors.push("At least 1 uppercase letter (A-Z)");
-    }
-    if (!/[a-z]/.test(pwd)) {
-      errors.push("At least 1 lowercase letter (a-z)");
-    }
-    if (!/[0-9]/.test(pwd)) {
-      errors.push("At least 1 number (0-9)");
-    }
-    if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pwd)) {
-      errors.push("At least 1 special character (!@#$% etc.)");
+    if (pwd.length > AUTH_RULES.stringMaxLength) {
+      errors.push(`At most ${AUTH_RULES.stringMaxLength} characters`);
     }
     return errors;
   };
@@ -123,75 +115,25 @@ export default function ChangePassword() {
       return;
     }
 
+    const identifier = userEmail || userMobile;
+    if (!identifier) {
+      setErrorMessage("Unable to identify your account. Please sign in again.");
+      return;
+    }
+    if (isLoading) return;
     setIsLoading(true);
-
     try {
-      if (__DEV__) {
-        console.log("\n🔐 ========== CHANGE PASSWORD FLOW ==========");
-        console.log("Step 1: Validating current password...");
-        console.log("==========================================\n");
-      }
-
-      const userId = userEmail || userMobile;
-      if (!userId) {
-        setErrorMessage("Unable to identify user. Please try again.");
-        setIsLoading(false);
+      // Verifies the current password via login, then PUT /auth/reset-password.
+      const result = await authService.changePassword({ identifier, currentPassword, newPassword });
+      if (!result.success) {
+        setErrorMessage(result.message);
         return;
       }
-
-      const loginResult = await authService.login({
-        userId: userId,
-        viaPassword: true,
-        password: currentPassword,
-      });
-
-      if (!loginResult.success) {
-        const errorMsg = loginResult.error || "Current password is incorrect.";
-        setErrorMessage("Current password is incorrect. Please try again.");
-
-        if (__DEV__) {
-          console.error("❌ Current password validation failed:", errorMsg);
-        }
-
-        setIsLoading(false);
-        return;
-      }
-
-      if (__DEV__) {
-        console.log("✅ Current password verified successfully");
-        console.log("Step 2: Now calling reset password API...");
-      }
-
-      const resetResult = await authService.resetPassword(newPassword);
-
-      if (resetResult.success) {
-        if (__DEV__) {
-          console.log("✅ Password changed successfully");
-        }
-
-        setSuccessMessage("Password changed successfully!");
-        setCurrentPassword("");
-        setNewPassword("");
-        setRetypePassword("");
-
-        router.back();
-      } else {
-        const errorMsg =
-          resetResult.error || "Failed to change password. Please try again.";
-        setErrorMessage(errorMsg);
-
-        if (__DEV__) {
-          console.error("❌ Password reset failed:", errorMsg);
-        }
-      }
-    } catch (error: any) {
-      const errorMsg =
-        error.message || "Something went wrong. Please try again.";
-      setErrorMessage(errorMsg);
-
-      if (__DEV__) {
-        console.error("❌ Password change exception:", error);
-      }
+      toastSuccess(result.message);
+      setCurrentPassword("");
+      setNewPassword("");
+      setRetypePassword("");
+      router.back();
     } finally {
       setIsLoading(false);
     }

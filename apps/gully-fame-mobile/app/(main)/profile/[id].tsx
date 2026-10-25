@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { router, useLocalSearchParams } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { View, ActivityIndicator, StatusBar } from "react-native";
@@ -15,6 +15,8 @@ export default function ProfileRouter() {
   const firstName = (params.firstName as string) || "";
   const lastName = (params.lastName as string) || "";
   const bio = (params.bio as string) || "";
+  const avatar = (params.avatar as string) || "";
+  const username = (params.username as string) || "";
   const refresh = (params.refresh as string) || "";
 
   useEffect(() => {
@@ -56,6 +58,8 @@ export default function ProfileRouter() {
               lastName: lastName,
               role: userRole,
               bio: bio,
+              avatar,
+              username,
             },
           } as any);
         } else {
@@ -67,21 +71,19 @@ export default function ProfileRouter() {
           router.replace(route as any);
         }
       } catch (error) {
-        console.error("Error determining profile route:", error);
         try {
           const userRole =
             (await AsyncStorage.getItem("userRole")) || DEFAULT_ROLE;
           const fallbackRoute = getProfileRoute(userRole, true);
           hasRouted.current = true;
           router.replace(fallbackRoute as any);
-        } catch (fallbackError) {
-          console.error("Fallback route error:", fallbackError);
+        } catch (fallbackError) { /* intentionally ignored */
         }
       }
     };
 
     determineRoute();
-  }, [profileId, role, firstName, lastName, bio, refresh]);
+  }, [profileId, role, firstName, lastName, bio, avatar, username, refresh]);
 
   return (
     <View

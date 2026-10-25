@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
 import {
   View,
   Text,
@@ -23,8 +24,10 @@ import TopPerformer from "@/components/home/TopDancers/TopPerformer";
 import TopTenLeaderboard from "@/components/TopTenLeaderboard/TopTenLeaderboard";
 import { liveCompetitionStyles as styles } from "@/styles/liveCompetitionStyles";
 import { useUserRole } from "@/contexts/UserRoleContext";
-import { getCompetitionById, getCompetitionLeaderboard } from "@/api/services/competitionService";
-import { BASE_URL } from "@/api/axios";
+import { getCompetitionDetails, getLeaderboard } from "@/api/services/competitionService";
+import { getErrorMessage } from "@/api/client";
+import { resolveMediaUrl } from "@/utils/mediaUrl";
+import { openCompetition } from "@/utils/openCompetition";
 
 const { height } = Dimensions.get("window");
 
@@ -44,23 +47,6 @@ const formatNumber = (num: number): string => {
 const formatCurrency = (amount: number): string => {
   if (!amount) return "₹0";
   return `₹${amount.toLocaleString("en-IN")}`;
-};
-
-const formatPrizeBreakdown = (
-  prizeAmount: number,
-  winnerSlots: number = 1,
-): Array<{ position: string; amount: string }> => {
-  const slots = winnerSlots || 1;
-  const perSlot = Math.floor(prizeAmount / slots);
-  const breakdown = [];
-
-  for (let i = 0; i < slots && i < 3; i++) {
-    const position = i === 0 ? "1st" : i === 1 ? "2nd" : "3rd";
-    const amount = i === 0 ? perSlot + (prizeAmount % slots) : perSlot;
-    breakdown.push({ position, amount: formatCurrency(amount) });
-  }
-
-  return breakdown;
 };
 
 const getTimeRemaining = (endDate: string): string => {
@@ -100,46 +86,47 @@ export default function LiveCompetitionScreen() {
     ).start();
   }, [liveDotOpacity]);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        if (!competitionIdFromParams) return;
-        
-        const [compRes, leadRes] = await Promise.all([
-          getCompetitionById(competitionIdFromParams),
-          getCompetitionLeaderboard(competitionIdFromParams, { page: 1, limit: 10 })
-        ]);
+  const [loadError, setLoadError] = useState("");
 
-        let compData = compRes.success ? compRes.data : null;
-        let leadData: Array<Record<string, unknown>> = [];
-
-        if (leadRes.success && leadRes.data?.leaderboard) {
-          leadData = leadRes.data.leaderboard.map((entry: any) => ({
-            rank: entry.rank,
-            name: `${entry.user?.firstName || ''} ${entry.user?.lastName || ''}`.trim() || entry.user?.username || 'Unknown User',
-            id: entry.user?._id || `user_${entry.rank}`,
-            userId: entry.user?._id,
-            votes: entry.reel?.stats?.votes || entry.votes || 0,
-            defaultProfilePicture: entry.user?.profileImage ? { uri: `${BASE_URL}${entry.user.profileImage}` } : require("@assets/images/user1.png"),
-            isCurrentUser: false,
-            role: "participants",
-          }));
-        }
-
-        if (compData) {
-          setCompetitionData({ ...compData, leaderboard: leadData });
-        }
-      } catch (err) {
-        console.error("Failed to fetch live competition details", err);
-      } finally {
-        setLoading(false);
+  // GET /competitions/:id (LIVE shape) + the first leaderboard page.
+  const fetchData = useCallback(async () => {
+    if (!competitionIdFromParams) return;
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [details, board] = await Promise.all([
+        getCompetitionDetails(competitionIdFromParams),
+        getLeaderboard(competitionIdFromParams, 1, 10),
+      ]);
+      if (details.status !== "LIVE") {
+        // The competition moved on (ended / not started); show the right screen.
+        openCompetition(competitionIdFromParams, details.status);
+        return;
       }
-    };
-
-    fetchData();
+      const leaderboard = board.leaderboard.map((entry) => ({
+        rank: entry.rank,
+        name: entry.name || "Participant",
+        id: entry.id,
+        userId: entry.id,
+        votes: entry.points ?? entry.votes ?? 0,
+        defaultProfilePicture: entry.profilePictureUrl
+          ? { uri: entry.profilePictureUrl }
+          : require("@assets/images/user1.png"),
+        isCurrentUser: !!entry.isCurrentUser,
+        role: "participants",
+      }));
+      setCompetitionData({ ...details, leaderboard });
+    } catch (err) {
+      setLoadError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
   }, [competitionIdFromParams]);
-  
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
   const [leaderboardModalVisible, setLeaderboardModalVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);
   const [shareModalVisible, setShareModalVisible] = useState(false);
@@ -165,16 +152,18 @@ export default function LiveCompetitionScreen() {
           }
           break;
         case "whatsapp":
-        case "whatsapp-status":
+        case "whatsapp-status": {
           const whatsappUrl = `whatsapp://send?text=${encodeURIComponent(competitionText)}`;
           const canOpenWa = await Linking.canOpenURL(whatsappUrl);
           if (canOpenWa) await Linking.openURL(whatsappUrl);
           else Alert.alert("Not installed", "Please install WhatsApp to share");
           break;
-        case "twitter":
+        }
+        case "twitter": {
           const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(competitionText)}`;
           await Linking.openURL(twitterUrl);
           break;
+        }
       }
       
       Animated.timing(shareSlideAnim, {
@@ -189,15 +178,34 @@ export default function LiveCompetitionScreen() {
 
   if (loading || !competitionData) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
-        <ActivityIndicator size="large" color="#EC9A15" />
+      <View style={[styles.container, { justifyContent: "center", alignItems: "center", padding: 24 }]}>
+        {loading ? (
+          <ActivityIndicator size="large" color="#EC9A15" />
+        ) : (
+          <>
+            <Text style={{ color: "#ccc", textAlign: "center" }}>{loadError || "Competition not found."}</Text>
+            <TouchableOpacity onPress={fetchData} style={{ marginTop: 16 }}>
+              <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     );
   }
 
   const top10LeaderboardData = competitionData.leaderboard?.slice(0, 10) || [];
   const restOfLeaderboardData = top10LeaderboardData.filter((perf: any) => perf.rank > 3);
-  const pushToVoting = () => router.push("/(main)/reel");
+  // Entries of this competition: GET /competitions/:id/reels in the reel player.
+  const pushToVoting = () =>
+    router.push({ pathname: "/(main)/reel", params: { competitionId: competitionIdFromParams } } as any);
+  const startEntry = () =>
+    router.push({ pathname: "/(main)/camera", params: { competitionId: competitionIdFromParams } } as any);
+  const startMs = competitionData.startDate ? new Date(competitionData.startDate).getTime() : 0;
+  const endMs = competitionData.endDate ? new Date(competitionData.endDate).getTime() : 0;
+  const elapsedPercent =
+    startMs && endMs && endMs > startMs
+      ? Math.min(100, Math.max(0, Math.round(((Date.now() - startMs) / (endMs - startMs)) * 100)))
+      : 0;
 
   return (
     <View style={styles.container}>
@@ -217,7 +225,7 @@ export default function LiveCompetitionScreen() {
                   <View style={[styles.halfButton, styles.disabledButton]}>
                     <Text style={styles.disabledText}>🔒 Voting Locked</Text>
                   </View>
-                  <TouchableOpacity style={styles.halfButton} activeOpacity={0.8}>
+                  <TouchableOpacity style={styles.halfButton} onPress={pushToVoting} activeOpacity={0.8}>
                     <LinearGradient colors={["#22C55E", "#16A34A"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientFill}>
                       <Text style={styles.ctaText}>👁️ View Entry</Text>
                     </LinearGradient>
@@ -230,7 +238,7 @@ export default function LiveCompetitionScreen() {
                       <Text style={styles.ctaText}>⭐ Vote</Text>
                     </LinearGradient>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.halfButton} activeOpacity={0.8}>
+                  <TouchableOpacity style={styles.halfButton} onPress={startEntry} activeOpacity={0.8}>
                     <LinearGradient colors={["#FF0055", "#FF8C00"]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.gradientFill}>
                       <Text style={styles.ctaText}>⚔️ Enter</Text>
                     </LinearGradient>
@@ -261,7 +269,7 @@ export default function LiveCompetitionScreen() {
 
       <ScrollView ref={scrollViewRef} style={styles.scrollView} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
         <TouchableOpacity style={styles.bannerContainer} activeOpacity={0.9}>
-          <Image source={competitionData.image ? { uri: `${BASE_URL}${competitionData.image}` } : require("@assets/images/trending1.png")} style={styles.bannerImage} />
+          <Image source={resolveMediaUrl(competitionData.image) ? { uri: resolveMediaUrl(competitionData.image)! } : require("@assets/images/trending1.png")} style={styles.bannerImage} />
           <LinearGradient colors={["transparent", "rgba(0,0,0,0.6)"]} style={styles.bannerGradient} />
           <View style={styles.liveBadge}>
             <Animated.View style={[styles.liveDot, { opacity: liveDotOpacity }]} />
@@ -281,7 +289,7 @@ export default function LiveCompetitionScreen() {
             <Text style={styles.votingText}>Voting closes in {getTimeRemaining(competitionData.endDate)}</Text>
           </View>
           <View style={styles.progressBarContainer}>
-            <View style={[styles.progressBarFill, { width: "85%" }]} />
+            <View style={[styles.progressBarFill, { width: `${elapsedPercent}%` }]} />
           </View>
         </View>
 
@@ -293,20 +301,6 @@ export default function LiveCompetitionScreen() {
               <Text style={styles.heroPrizeAmount}>{formatCurrency(competitionData.prizePool || 0)}</Text>
             </View>
             <View style={styles.divider} />
-            <View style={styles.podiumContainer}>
-              {formatPrizeBreakdown(competitionData.prizePool || 0, 3).map((prize, index) => {
-                const medals = ["🥇", "🥈", "🥉"];
-                return (
-                  <View key={index} style={styles.podiumPill}>
-                    <Text style={styles.podiumMedal}>{medals[index]}</Text>
-                    <View style={styles.podiumTextContainer}>
-                      <Text style={styles.podiumPosition}>{prize.position} Place</Text>
-                      <Text style={styles.podiumAmount}>{prize.amount}</Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
             <View style={styles.divider} />
             <View style={styles.specsRow}>
               <View style={styles.specBox}>
@@ -339,14 +333,18 @@ export default function LiveCompetitionScreen() {
                     ))}
                   </View>
                   <Text style={styles.battlingText}>
-                    <Text style={styles.battlingCount}>+{Math.max((competitionData.participants?.length || 0) - 4, 0)}</Text> others battling!
+                    <Text style={styles.battlingCount}>{competitionData.totalEntries || 0}</Text> entries battling!
                   </Text>
                 </View>
                 <View style={styles.starFlexBox}>
                   <Text style={styles.starFlexIcon}>⭐</Text>
                   <View>
-                    <Text style={styles.starFlexValue}>{formatNumber(competitionData.views || 0)}</Text>
-                    <Text style={styles.starFlexLabel}>Stars Cast</Text>
+                    <Text style={styles.starFlexValue}>
+                      {formatNumber(
+                        (competitionData.leaderboard || []).reduce((sum: number, p: any) => sum + (p.votes || 0), 0)
+                      )}
+                    </Text>
+                    <Text style={styles.starFlexLabel}>Top-10 Votes</Text>
                   </View>
                 </View>
               </View>
@@ -451,7 +449,7 @@ export default function LiveCompetitionScreen() {
                         firstName: firstName,
                         lastName: lastName,
                         role: "participants",
-                        bio: "",
+                        avatar: participant.defaultProfilePicture?.uri || "",
                       },
                     } as any);
                   }}
@@ -552,11 +550,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#fff" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/copy.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="link-variant" size={26} color="#fff" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     Copy Link
@@ -572,11 +566,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#25D36620" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/whatsapp.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="whatsapp" size={26} color="#25D366" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     WhatsApp
@@ -592,11 +582,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#25D36620" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/status.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="progress-clock" size={26} color="#25D366" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     Status
@@ -612,11 +598,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#E4405F20" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/instagram.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="instagram" size={26} color="#E4405F" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     Instagram
@@ -648,11 +630,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#1DA1F220" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/twitter.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="twitter" size={26} color="#1DA1F2" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     Twitter
@@ -668,11 +646,7 @@ export default function LiveCompetitionScreen() {
                       { backgroundColor: "#FFEC0620" },
                     ]}
                   >
-                    <Image
-                      source={require("@assets/ShareIcon/snapchat.png")}
-                      style={styles.shareIconImage}
-                      resizeMode="contain"
-                    />
+                    <MaterialCommunityIcons name="snapchat" size={26} color="#FFFC00" />
                   </View>
                   <Text style={styles.shareOptionName} numberOfLines={1}>
                     Snapchat

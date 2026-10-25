@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -16,6 +16,8 @@ import { router, useFocusEffect } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
 import { Circle } from "react-native-svg";
 import { BackIcon } from "@/icons";
+import { getWalletSummary, toDisplayTransaction } from "@/api/services/walletService";
+import { getErrorMessage } from "@/api/client";
 
 export default function CoinsScreen() {
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -30,78 +32,47 @@ export default function CoinsScreen() {
   });
 
   const [walletBalance, setWalletBalance] = useState(0);
+  const [earnedTotal, setEarnedTotal] = useState(0);
   const [transactionHistory, setTransactionHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
-  // Fetch wallet balance and transaction history from backend
+  // Same data source as Wallet history and the profile menu (getWalletSummary).
   const fetchWalletData = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
     try {
-      setLoading(true);
-      const { userService } = await import("@/api/services/userService");
-      const { paymentIntegrationService } = await import("@/api/services/paymentIntegrationService");
-      
-      // Fetch wallet balance from user service
-      const balanceResult = await userService.getWalletBalance();
-      if (balanceResult.success && balanceResult.data) {
-        setWalletBalance(balanceResult.data.balance || 0);
-      } else {
-        console.warn("[coins] Failed to fetch wallet balance:", balanceResult.message);
-        setWalletBalance(0);
-      }
-
-      // Fetch transaction/payment history
-      const historyResult = await paymentIntegrationService.getPaymentHistory(50, 0);
-      if (historyResult.success && Array.isArray(historyResult.data)) {
-        const mappedTransactions = historyResult.data.map((tx: any, index: number) => {
-          const txDate = new Date(tx.timestamp || new Date());
+      const summary = await getWalletSummary();
+      setWalletBalance(summary.balance);
+      setEarnedTotal(summary.earned);
+      setTransactionHistory(
+        summary.transactions.map((tx) => {
+          const display = toDisplayTransaction(tx);
           return {
-            id: tx.transactionId || tx.id || `tx_${index}`,
-            amount: Math.abs(tx.amount || 0),
-            description: tx.description || tx.remark || "Transaction",
-            date: txDate.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-            type: tx.type === "debit" || tx.amount < 0 ? "spent" : "earned",
-            status: tx.status || "completed",
-            competitionId: tx.competitionId,
-            reelId: tx.reelId,
-            pendingTime: tx.pendingTime,
+            id: display.id,
+            amount: display.amount,
+            description: display.title,
+            date: display.date,
+            type: display.type === "credit" ? "earned" : "spent",
+            status: "completed",
           };
-        });
-        setTransactionHistory(mappedTransactions);
-      } else {
-        console.warn("[coins] Failed to fetch transaction history:", historyResult.message);
-        setTransactionHistory([]);
-      }
+        })
+      );
     } catch (error) {
-      console.error("[coins] Error fetching wallet data:", error);
-      setWalletBalance(0);
-      setTransactionHistory([]);
+      setLoadError(getErrorMessage(error));
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Refetch when screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchWalletData();
     }, [fetchWalletData])
   );
 
-  // Calculate totals from transactions
-  const totalEarned = transactionHistory
-    .filter(t => t.type === "earned")
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-  
-  const totalSpent = transactionHistory
-    .filter(t => t.type === "spent")
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-
   const availableBalance = walletBalance;
-  const pendingBalance = transactionHistory
-    .filter(t => t.status === "pending")
-    .reduce((sum, t) => sum + (t.amount || 0), 0);
-  
-  const currentBalance = walletBalance + pendingBalance;
+  const currentBalance = walletBalance;
 
   // Handle add money (redirect to add money modal or screen)
   const handleAddMoney = async () => {
@@ -131,6 +102,13 @@ export default function CoinsScreen() {
         <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
           <ActivityIndicator size="large" color="#EC9A15" />
         </View>
+      ) : loadError ? (
+        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 24 }}>
+          <Text style={{ color: "#ccc", textAlign: "center" }}>{loadError}</Text>
+          <TouchableOpacity onPress={fetchWalletData} style={{ marginTop: 16 }}>
+            <Text style={{ color: "#EC9A15", fontSize: 16 }}>Retry</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -156,9 +134,9 @@ export default function CoinsScreen() {
                   </Text>
                 </View>
                 <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Pending</Text>
-                  <Text style={[styles.statValue, { color: "#FFA500" }]}>
-                    {Math.floor(pendingBalance).toLocaleString()} GFI coins
+                  <Text style={styles.statLabel}>Earned</Text>
+                  <Text style={styles.statValue}>
+                    {Math.floor(earnedTotal).toLocaleString()} GFI coins
                   </Text>
                 </View>
               </View>
@@ -182,7 +160,12 @@ export default function CoinsScreen() {
               {availableBalance > 0 && (
                 <TouchableOpacity
                   style={styles.withdrawButton}
-                  onPress={() => setShowWithdrawModal(true)}
+                  onPress={() =>
+                    Alert.alert(
+                      "Withdrawals not available yet",
+                      "Cashing out coins isn't supported by the server yet. Your coins stay safe in your wallet."
+                    )
+                  }
                 >
                   <Text style={styles.withdrawButtonText}>
                     Withdraw GFI Coins

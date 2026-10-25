@@ -3,9 +3,11 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 0, 0, 0;
-  --background-start-rgb: 249, 250, 251;
-  --background-end-rgb: 255, 255, 255;
+  color-scheme: dark;
+  --app-bg: #1a1a1a;
+  --app-surface: #252525;
+  --app-border: #3a3a3a;
+  --app-accent: #ec9a15;
 }
 
 * {
@@ -13,12 +15,50 @@
 }
 
 body {
-  color: rgb(var(--foreground-rgb));
-  background: rgb(var(--background-start-rgb));
+  color: #ffffff;
+  background: var(--app-bg);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Cards, tables and inputs written as bg-white become app surfaces. */
+.bg-white,
+.hover\:bg-white:hover {
+  background-color: var(--app-surface);
+}
+
+input,
+select,
+textarea {
+  color: #ffffff;
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']),
+select,
+textarea {
+  background-color: #1f1f1f;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #8a8f98;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--app-accent);
+}
+
+/* Status text readable on dark surfaces */
+.text-red-600, .text-red-700, .text-red-800, .text-red-900 { color: #ff7a70; }
+.text-green-600, .text-green-700, .text-green-800, .text-green-900 { color: #4ade80; }
+.text-blue-600, .text-blue-700, .text-blue-800, .text-blue-900 { color: #60a5fa; }
+.text-yellow-600, .text-yellow-700, .text-yellow-800, .text-yellow-900 { color: #ffd700; }
+.text-purple-600, .text-purple-700, .text-purple-800, .text-purple-900 { color: #c084fc; }
+.text-orange-600, .text-orange-700, .text-orange-800, .text-orange-900 { color: #ff9f3a; }
 
 @layer utilities {
   .text-balance {
@@ -26,21 +66,20 @@ body {
   }
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #1a1a1a;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #3a3a3a;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: #4a4a4a;
 }

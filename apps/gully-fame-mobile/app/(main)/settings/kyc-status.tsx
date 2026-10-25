@@ -1,6 +1,6 @@
 
 
-import React, { useState } from "react";
+import { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -9,15 +9,138 @@ import {
   TouchableOpacity,
   StatusBar,
   Platform,
+  ActivityIndicator,
+  Image,
+  Alert,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { getMyKyc, submitKyc, KYC_DOC_TYPES, KycDocType, KycRecord } from "@/api/services/kycService";
+import { getErrorMessage } from "@/api/client";
+import { toastSuccess } from "@/components/ui/Toast";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
 
 export default function KYCStatusScreen() {
   
-  const [status, setStatus] = useState<"unverified" | "pending" | "verified" | "rejected">("pending");
+  const [kyc, setKyc] = useState<KycRecord | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [docType, setDocType] = useState<KycDocType>("aadhaar");
+  const [frontImage, setFrontImage] = useState<string | null>(null);
+  const [backImage, setBackImage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const status: "unverified" | "pending" | "verified" | "rejected" = !kyc
+    ? "unverified"
+    : kyc.status === "APPROVED"
+      ? "verified"
+      : kyc.status === "REJECTED"
+        ? "rejected"
+        : "pending";
+
+  const loadKyc = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      setKyc(await getMyKyc());
+    } catch (error) {
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadKyc();
+    }, [loadKyc])
+  );
+
+  const pickImage = async (side: "front" | "back") => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      if (!permission.canAskAgain) showPermissionSettingsAlert("Photo library access");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    if (side === "front") setFrontImage(result.assets[0].uri);
+    else setBackImage(result.assets[0].uri);
+  };
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    if (!frontImage) {
+      Alert.alert("Front image required", "Add a clear photo of the front of your document.");
+      return;
+    }
+    setSubmitting(true);
+    setProgress(0);
+    try {
+      const record = await submitKyc({ docType, frontImageUri: frontImage, backImageUri: backImage, onProgress: setProgress });
+      setKyc(record);
+      setShowForm(false);
+      setFrontImage(null);
+      setBackImage(null);
+      toastSuccess("KYC submitted for review");
+    } catch (error) {
+      Alert.alert("Submission failed", getErrorMessage(error));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const renderForm = () => (
+    <View style={styles.formCard}>
+      <Text style={styles.sectionTitle}>Document Type</Text>
+      <View style={styles.docTypeRow}>
+        {KYC_DOC_TYPES.map((item) => (
+          <TouchableOpacity
+            key={item.value}
+            style={[styles.docTypeChip, docType === item.value && styles.docTypeChipActive]}
+            onPress={() => setDocType(item.value)}
+            disabled={submitting}
+          >
+            <Text style={[styles.docTypeText, docType === item.value && styles.docTypeTextActive]}>{item.label}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.imageRow}>
+        {(["front", "back"] as const).map((side) => {
+          const uri = side === "front" ? frontImage : backImage;
+          return (
+            <TouchableOpacity key={side} style={styles.imagePicker} onPress={() => pickImage(side)} disabled={submitting}>
+              {uri ? (
+                <Image source={{ uri }} style={styles.imagePreview} />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={28} color="#EC9A15" />
+                  <Text style={styles.imagePickerText}>
+                    {side === "front" ? "Front side *" : "Back side (optional)"}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <TouchableOpacity style={styles.actionButtonGold} activeOpacity={0.8} onPress={handleSubmit} disabled={submitting}>
+        {submitting ? (
+          <Text style={styles.actionButtonTextGold}>Uploading… {progress}%</Text>
+        ) : (
+          <Text style={styles.actionButtonTextGold}>Submit for Review</Text>
+        )}
+      </TouchableOpacity>
+    </View>
+  );
 
   const renderStatusCard = () => {
     switch (status) {
@@ -32,7 +155,8 @@ export default function KYCStatusScreen() {
             </View>
             <Text style={styles.statusTitle}>Verification Pending</Text>
             <Text style={styles.statusDesc}>
-              Aapke documents humari team review kar rahi hai. Isme aamtaur par 24-48 ghante lagte hain.
+              Your documents are under review.
+              {kyc?.submittedAt ? `\nSubmitted ${new Date(kyc.submittedAt).toLocaleDateString("en-IN")}` : ""}
             </Text>
           </LinearGradient>
         );
@@ -47,7 +171,7 @@ export default function KYCStatusScreen() {
             </View>
             <Text style={styles.statusTitle}>Fully Verified</Text>
             <Text style={styles.statusDesc}>
-              Congratulations! Aapka account verified hai. Ab aap bina kisi limit ke withdrawals kar sakte hain.
+              Your account is verified.
             </Text>
           </LinearGradient>
         );
@@ -62,9 +186,9 @@ export default function KYCStatusScreen() {
             </View>
             <Text style={styles.statusTitle}>Verification Failed</Text>
             <Text style={styles.statusDesc}>
-              Aapke documents clear nahi the ya details mismatch ho rahi thi. Kripya dobara submit karein.
+              {kyc?.reason || "Your document was rejected. Please submit it again."}
             </Text>
-            <TouchableOpacity style={styles.actionButton} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.actionButton} activeOpacity={0.8} onPress={() => setShowForm(true)}>
               <Text style={styles.actionButtonText}>Re-Submit Documents</Text>
             </TouchableOpacity>
           </LinearGradient>
@@ -80,12 +204,12 @@ export default function KYCStatusScreen() {
             </View>
             <Text style={styles.statusTitle}>Account Unverified</Text>
             <Text style={styles.statusDesc}>
-              Apni winnings ko bank me withdraw karne ke liye aapko apni KYC puri karni hogi.
+              Submit a government ID to verify your account.
             </Text>
             <TouchableOpacity 
               style={styles.actionButtonGold} 
               activeOpacity={0.8}
-              onPress={() => setStatus("pending")} 
+              onPress={() => setShowForm(true)}
             >
               <Text style={styles.actionButtonTextGold}>Start Verification</Text>
             </TouchableOpacity>
@@ -112,11 +236,23 @@ export default function KYCStatusScreen() {
         {}
         <View style={styles.securityBanner}>
           <FontAwesome5 name="lock" size={14} color="#25D366" />
-          <Text style={styles.securityText}>Bank-grade 256-bit encryption. Your data is 100% secure.</Text>
+          <Text style={styles.securityText}>Documents are used for account verification, as described in the Privacy Policy.</Text>
         </View>
 
         {}
-        {renderStatusCard()}
+        {loading ? (
+          <ActivityIndicator size="large" color="#EC9A15" style={{ marginVertical: 40 }} />
+        ) : loadError ? (
+          <TouchableOpacity onPress={loadKyc} style={{ alignItems: "center", marginVertical: 40 }}>
+            <Text style={styles.statusDesc}>{loadError}</Text>
+            <Text style={[styles.statusDesc, { color: "#EC9A15", marginTop: 8 }]}>Tap to retry</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            {renderStatusCard()}
+            {showForm && renderForm()}
+          </>
+        )}
 
         {}
         <Text style={styles.sectionTitle}>Verification Steps</Text>
@@ -131,8 +267,8 @@ export default function KYCStatusScreen() {
               <View style={[styles.stepLine, styles.stepLineCompleted]} />
             </View>
             <View style={styles.stepContent}>
-              <Text style={styles.stepTitle}>Mobile Verification</Text>
-              <Text style={styles.stepDesc}>OTP verified successfully</Text>
+              <Text style={styles.stepTitle}>Account Created</Text>
+              <Text style={styles.stepDesc}>Signed in to Gully Fame</Text>
             </View>
           </View>
 
@@ -157,7 +293,13 @@ export default function KYCStatusScreen() {
             <View style={styles.stepContent}>
               <Text style={styles.stepTitle}>Identity Document</Text>
               <Text style={styles.stepDesc}>
-                {status === 'verified' ? 'PAN/Aadhaar verified' : status === 'pending' ? 'Document under review' : 'Upload PAN or Aadhaar card'}
+                {status === 'verified'
+                  ? 'Document verified'
+                  : status === 'pending'
+                    ? 'Document under review'
+                    : status === 'rejected'
+                      ? 'Document rejected, please re-submit'
+                      : 'Upload a government ID'}
               </Text>
             </View>
           </View>
@@ -166,20 +308,16 @@ export default function KYCStatusScreen() {
           <View style={styles.stepRow}>
             <View style={styles.stepIndicator}>
               <View style={[
-                styles.stepDot, 
-                status === 'verified' ? styles.stepDotCompleted : styles.stepDotPending
+                styles.stepDot,
+                styles.stepDotPending
               ]}>
-                {status === 'verified' ? (
-                  <Ionicons name="checkmark" size={16} color="#fff" />
-                ) : (
-                  <Text style={styles.stepNumber}>3</Text>
-                )}
+                <Text style={styles.stepNumber}>3</Text>
               </View>
             </View>
             <View style={[styles.stepContent, { paddingBottom: 0 }]}>
               <Text style={styles.stepTitle}>Selfie Verification</Text>
               <Text style={styles.stepDesc}>
-                {status === 'verified' ? 'Face matched successfully' : 'Take a live selfie to match document'}
+                Not available yet
               </Text>
             </View>
           </View>
@@ -196,6 +334,65 @@ export default function KYCStatusScreen() {
 }
 
 const styles = StyleSheet.create({
+  formCard: {
+    backgroundColor: "rgba(255, 255, 255, 0.05)",
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "rgba(236, 154, 21, 0.3)",
+  },
+  docTypeRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 16,
+  },
+  docTypeChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+  },
+  docTypeChipActive: {
+    backgroundColor: "#EC9A15",
+    borderColor: "#EC9A15",
+  },
+  docTypeText: {
+    color: "#ccc",
+    fontSize: 13,
+  },
+  docTypeTextActive: {
+    color: "#fff",
+    fontWeight: "600",
+  },
+  imageRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginBottom: 20,
+  },
+  imagePicker: {
+    flex: 1,
+    height: 120,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "rgba(236, 154, 21, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+  },
+  imagePreview: {
+    width: "100%",
+    height: "100%",
+  },
+  imagePickerText: {
+    color: "#ccc",
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: "center",
+  },
   container: {
     flex: 1,
     backgroundColor: "#3C2610", 

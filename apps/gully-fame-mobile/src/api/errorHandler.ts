@@ -204,9 +204,6 @@ export async function retryWithExponentialBackoff<T>(
       }
 
       const delay = calculateBackoffDelay(attempt, finalConfig);
-      console.log(
-        `[RetryHandler] Attempt ${attempt + 1}/${finalConfig.maxRetries + 1} failed. Retrying in ${delay}ms...`
-      );
 
       await new Promise((resolve) => setTimeout(resolve, delay));
     }

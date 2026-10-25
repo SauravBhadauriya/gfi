@@ -1,13 +1,9 @@
 export function convertDateToDaysLeft(date: string | any) {
   if (typeof date !== "string") {
-    console.warn("[convertDateToDaysLeft] Type of date passed is not a string");
     return date;
   }
   const targetDate = new Date(date);
   if (isNaN(targetDate.getTime())) {
-    console.warn(
-      "[convertDateToDaysLeft] Type of string passed as date is invalid",
-    );
     return date;
   }
   const today = new Date();

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
+import { showPermissionSettingsAlert } from "@/utils/permissionSettings";
 
 export interface OverlayItem {
   id: string;
@@ -55,7 +56,11 @@ export default function OverlayToolPanel({
 
   const pickImage = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Photo library access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission Required",
@@ -87,14 +92,8 @@ export default function OverlayToolPanel({
         };
 
         onAddOverlay(newOverlay);
-        Alert.alert(
-          "Overlay Added",
-          "Drag, scale, and rotate the overlay on the video preview.",
-          [{ text: "Got it", style: "default" }]
-        );
       }
     } catch (error) {
-      console.error("[OverlayToolPanel] Failed to pick image:", error);
       Alert.alert("Error", "Failed to add overlay");
     } finally {
       setIsPickingMedia(false);
@@ -103,7 +102,11 @@ export default function OverlayToolPanel({
 
   const pickVideo = async () => {
     try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status, canAskAgain } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted" && !canAskAgain) {
+        showPermissionSettingsAlert("Photo library access");
+        return;
+      }
       if (status !== "granted") {
         Alert.alert(
           "Permission Required",
@@ -135,14 +138,8 @@ export default function OverlayToolPanel({
         };
 
         onAddOverlay(newOverlay);
-        Alert.alert(
-          "Video Overlay Added",
-          "Position and adjust the video overlay on the preview.",
-          [{ text: "Got it", style: "default" }]
-        );
       }
     } catch (error) {
-      console.error("[OverlayToolPanel] Failed to pick video:", error);
       Alert.alert("Error", "Failed to add video overlay");
     } finally {
       setIsPickingMedia(false);
